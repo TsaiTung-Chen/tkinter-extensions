@@ -124,9 +124,9 @@ class _GeneralView:
     def view_scroll(self, number:int, what:str):
         """Update the position of the inner widget within the outer frame.
         Note: If `what == 'units'` and `number == 1`, the content will be 
-        scrolled down 1 line. If `what == 'pages'`, the content will be 
-        scrolled down some pixels, which is determined by the values of 
-        scrollbar's `first` and `last`
+        scrolled down 1 line (y orient) or 2 lines (x orient). If `what == 
+        'pages'`, the content will be scrolled down five times the amount of 
+        lines, which is 5 lines (y orient) or 10 lines (x orient)
         """
         if what == 'pages':
             pixel = number * self.step * 5
@@ -428,6 +428,8 @@ def ScrolledWidget(master=None,
         hbar.grid(row=1, column=0, sticky='esw')
         scrolledwidget.configure(xscrollcommand=hbar.set)
         container.grid_rowconfigure(1, minsize=hbar.winfo_reqheight())
+    else:
+        scrolledwidget.place(relx=1.)
     
     if orient in ('vertical', 'both'):
         vbar = AutoHiddenScrollbar(
@@ -440,6 +442,8 @@ def ScrolledWidget(master=None,
         vbar.grid(row=0, column=1, sticky='nes')
         scrolledwidget.configure(yscrollcommand=vbar.set)
         container.grid_columnconfigure(1, minsize=vbar.winfo_reqwidth())
+    else:
+        scrolledwidget.place(rely=1.)
     
     cropper.bind('<Configure>', scrolledwidget._on_configure)
     container.bind('<Map>', scrolledwidget._on_map)
@@ -465,6 +469,7 @@ def ScrolledText(master=None,
                  autohide=True,
                  hbootstyle='round-light',
                  vbootstyle='round-light',
+                 wrap='none',
                  **kwargs):
     return ScrolledWidget(master=master,
                           widget=ttk.Text,
@@ -472,6 +477,7 @@ def ScrolledText(master=None,
                           autohide=autohide,
                           hbootstyle='round-light',
                           vbootstyle='round-light',
+                          wrap=wrap,
                           **kwargs)
 
 
