@@ -287,12 +287,11 @@ class _ContainerFrame(ttk.Frame):
     
     def bind_mousewheel(self, func):
         if self._os == 'x11':  # Linux
-            seqs = ['<ButtonPress-4>', '<ButtonPress-5>',
-                    '<Shift-ButtonPress-4>', '<Shift-ButtonPress-5>']
+            seqs = ['<ButtonPress-4>', '<ButtonPress-5>']
         else:
-            seqs = ['<MouseWheel>', '<Shift-MouseWheel>']
+            seqs = ['<MouseWheel>']
         funcs = [func] * len(seqs)
-        bind_recursively(self, seqs[0], funcs[0], add='+')
+        bind_recursively(self, seqs, funcs, add='+')
     
     def unbind_mousewheel(self):
         unbind_recursively(self)
