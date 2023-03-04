@@ -11,13 +11,18 @@ from typing import Union, Optional, List, Tuple
 
 import ttkbootstrap as ttk
 # =============================================================================
-# ---- Functions
+# ---- Classes
 # =============================================================================
-class OrderedContainer(ttk.Canvas):
+class OrderlyContainer(ttk.Canvas):
     """This container allows a drag-and-drop feature which is very useful when 
     one would like to reorder some widgets in the container. This can be 
-    be achieved intuitively by drag-and-drop with the mouse cursor
+    achieved intuitively by drag-and-drop with the mouse cursor
     """
+    
+    def __init__(self, *args, dnd_group_id:int=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._dnd_group_id = dnd_group_id
+    
     @property
     def dnd_widgets(self):
         return self._dnd_widgets
@@ -109,6 +114,7 @@ class OrderedContainer(ttk.Canvas):
             widget.dnd_widget_enter = self._get_dnd_widget_enter(widget)
             widget.dnd_widget_leave = self._get_dnd_widget_leave(widget)
             widget.dnd_end = self._get_dnd_widget_end(widget)
+            widget._dnd_group_id = self._dnd_group_id
         
         self.bind('<Configure>', self._update_widgets)
         self._dnd_place_info = place_info_list
@@ -239,7 +245,8 @@ class OrderedContainer(ttk.Canvas):
         self.itemconfigure(widget._id, width=w, height=h)
     
     def dnd_accept(self, source, event):
-        return self
+        if source._dnd_group_id == self._dnd_group_id:
+            return self
     
     def dnd_enter(self, source, event):
         pass
@@ -281,10 +288,10 @@ class OrderedContainer(ttk.Canvas):
         self._dnd["target"] = new_target
     
     def dnd_leave(self, source, event):
-        pass
+        if self._dnd_group_id is None:  # leaving this container => commit
+            self.dnd_commit(source, event)
     
     def dnd_commit(self, source, event):
-        self.dnd_leave(source, event)
         self._put(source)
     
     def _get_dnd_widget_start(self, source):
@@ -293,17 +300,42 @@ class OrderedContainer(ttk.Canvas):
             if not self._dnd_handler:
                 return
             
+            mouse_x, mouse_y = event.x_root, event.y_root
+            canvas_x, canvas_y = self.winfo_rootx(), self.winfo_rooty()
+            
             self._dnd = {
                 "event": None,
                 "source": source,
                 "target": None,
-                "mouse_x": event.x_root,
-                "mouse_y": event.y_root,
-                "canvas_x": self.winfo_rootx(),
-                "canvas_y": self.winfo_rooty(),
+                "mouse_x": mouse_x,
+                "mouse_y": mouse_y,
+                "canvas_x": canvas_x,
+                "canvas_y": canvas_y,
                 "width_canvas": self.winfo_width(),
                 "height_canvas": self.winfo_height()
             }
+            
+            source_anchor = self.itemconfigure(source._id, 'anchor')
+            source_anchor = '' if source_anchor == 'center' else source_anchor
+            offset_x = source.winfo_rootx() - mouse_x - canvas_x
+            offset_y = source.winfo_rooty() - mouse_y - canvas_y
+            
+            if 'w' in source_anchor:  # left
+                offset_x += 0
+            elif 'e' in source_anchor:  # right
+                offset_x += source.winfo_width()
+            else:  # middle
+                offset_x += source.winfo_width() // 2
+            
+            if 'n' in source_anchor:  # top
+                offset_y += 0
+            elif 's' in source_anchor:  # bottom
+                offset_y += source.winfo_height()
+            else:  # middle
+                offset_y += source.winfo_height() // 2
+            
+            self._dnd.update({"offset_x": offset_x, "offset_y": offset_y})
+            
             source.lift()
             source.focus_set()
         #
@@ -348,11 +380,10 @@ class OrderedContainer(ttk.Canvas):
             if old_event is event:  # `source` has been moved before
                 return
             
-            # Move the widget according to dragging distance
-            self.move(source._id,
-                      event.x_root - self._dnd.pop("mouse_x"),
-                      event.y_root - self._dnd.pop("mouse_y"))
-            self._dnd.update(mouse_x=event.x_root, mouse_y=event.y_root)
+            # Move the widget to the cursor position
+            self.coords(source._id,
+                        event.x_root + self._dnd["offset_x"],
+                        event.y_root + self._dnd["offset_y"])
         #
         return _move_source
     
@@ -362,7 +393,9 @@ class OrderedContainer(ttk.Canvas):
     
     def _get_dnd_widget_end(self, widget):
         def _unset_focus(target, event):
-            self.winfo_toplevel().focus_set()
+            if target is None:
+                return self.winfo_toplevel().focus_set()
+            target.winfo_toplevel().focus_set()
         #
         return _unset_focus
 
@@ -375,7 +408,7 @@ if __name__ == '__main__':
     
     root = ttk.Window(title='Harmonic Analyzer', themename='cyborg')
     
-    container = OrderedContainer(root)
+    container = OrderlyContainer(root)
     container.pack(fill='both', expand=1)
     buttons = list()
     for r in range(6):
