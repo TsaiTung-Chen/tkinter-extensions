@@ -81,6 +81,8 @@ class OrderlyContainer(ttk.Canvas):
         widths, heights = list(), list()
         for widget in widgets_flat:
             widget._id = self.create_window(0, 0, anchor='nw', window=widget)
+        self.update_idletasks()
+        for widget in widgets_flat:
             widths.append(widget.winfo_reqwidth())
             heights.append(widget.winfo_reqheight())
         width_cell, height_cell = max(widths), max(heights)
@@ -108,12 +110,12 @@ class OrderlyContainer(ttk.Canvas):
         
         # Setup widget's dnd functions
         for widget in widgets_flat:
-            widget.bind('<ButtonPress-1>', self._get_dnd_widget_start(widget))
+            self.bind_dnd_start(widget)
             widget.dnd_widget_accept = self._get_dnd_widget_accept(widget)
             widget.dnd_widget_motion = self._get_dnd_widget_motion(widget)
             widget.dnd_widget_enter = self._get_dnd_widget_enter(widget)
             widget.dnd_widget_leave = self._get_dnd_widget_leave(widget)
-            widget.dnd_end = self._get_dnd_widget_end(widget)
+            widget.dnd_end = self._get_dnd_end(widget)
             widget._dnd_group_id = self._dnd_group_id
         
         self.bind('<Configure>', self._update_widgets)
@@ -123,6 +125,14 @@ class OrderlyContainer(ttk.Canvas):
         self._dnd_grid_size = params["grid_size"]
         self._dnd_handler = None
         self._dnd = dict()
+    
+    def bind_dnd_start(self, moved:tk.Widget):
+        """Overwrite this method to customize the trigger widget
+        """
+        self._bind_dnd_start(trigger=moved, moved=moved)
+    
+    def _bind_dnd_start(self, *, trigger:tk.Widget, moved:tk.Widget):
+        trigger.bind('<ButtonPress-1>', self._get_dnd_start(moved))
     
     def _calculate_place_info(self,
                               r,
@@ -244,57 +254,10 @@ class OrderlyContainer(ttk.Canvas):
         
         self.itemconfigure(widget._id, width=w, height=h)
     
-    def dnd_accept(self, source, event):
-        if source._dnd_group_id == self._dnd_group_id:
-            return self
-    
-    def dnd_enter(self, source, event):
-        pass
-    
-    def dnd_motion(self, source, event):
-        def _find_target(widget):
-            dummy = lambda *args: None
-            target = getattr(widget, 'dnd_widget_accept', dummy)(source, event)
-            if target is not None:
-                return target
-            
-            for w in widget.winfo_children():
-                target = _find_target(w)
-                if target is not None:
-                    return target
-        #
-        # Widget motion
-        self._get_dnd_widget_motion()(source, event)
-        
-        # Find the target under mouse cursor
-        x = event.x_root - self._dnd["canvas_x"]
-        y = event.y_root - self._dnd["canvas_y"]
-        new_target = None
-        for widget_id in self.find_overlapping(x, y, x, y):
-            new_target = _find_target(self._dnd_ids[widget_id])
-            if new_target is not None:
-                break
-        
-        old_target = self._dnd["target"]
-        if new_target is old_target:  # in the same target
-            return
-        
-        # Left `old_target` and entered `new_target`
-        self._dnd["target"] = None
-        if old_target:
-            old_target.dnd_widget_leave(source, event)
-        if new_target:
-            new_target.dnd_widget_enter(source, event)
-        self._dnd["target"] = new_target
-    
-    def dnd_leave(self, source, event):
-        if self._dnd_group_id is None:  # leaving this container => commit
-            self.dnd_commit(source, event)
-    
-    def dnd_commit(self, source, event):
-        self._put(source)
-    
-    def _get_dnd_widget_start(self, source):
+    def _get_dnd_start(self, source):
+        """Get the dnd init function that will be called when drag starts.
+        This init function should be bound to the trigger widgets
+        """
         def _init_dnd(event):
             self._dnd_handler = tk.dnd.dnd_start(source, event)
             if not self._dnd_handler:
@@ -341,7 +304,69 @@ class OrderlyContainer(ttk.Canvas):
         #
         return _init_dnd
     
+    def dnd_accept(self, source, event):
+        """(This will return a cross-window dragging function)
+        """
+        if source._dnd_group_id == self._dnd_group_id:
+            return self
+    
+    def dnd_enter(self, source, event):
+        """(This will return a cross-window dragging function)
+        """
+        pass
+    
+    def dnd_motion(self, source, event):
+        """(This will return a cross-window dragging function)
+        """
+        def _find_target(widget):
+            dummy = lambda *args: None
+            target = getattr(widget, 'dnd_widget_accept', dummy)(source, event)
+            if target is not None:
+                return target
+            
+            for w in widget.winfo_children():
+                target = _find_target(w)
+                if target is not None:
+                    return target
+        #
+        # Widget motion
+        self._get_dnd_widget_motion()(source, event)
+        
+        # Find the target under mouse cursor
+        x = event.x_root - self._dnd["canvas_x"]
+        y = event.y_root - self._dnd["canvas_y"]
+        new_target = None
+        for widget_id in self.find_overlapping(x, y, x, y):
+            new_target = _find_target(self._dnd_ids[widget_id])
+            if new_target is not None:
+                break
+        
+        old_target = self._dnd["target"]
+        if new_target is old_target:  # in the same target
+            return
+        
+        # Left `old_target` and entered `new_target`
+        self._dnd["target"] = None
+        if old_target:
+            old_target.dnd_widget_leave(source, event)
+        if new_target:
+            new_target.dnd_widget_enter(source, event)
+        self._dnd["target"] = new_target
+    
+    def dnd_leave(self, source, event):
+        """(This will return a cross-window dragging function)
+        """
+        if self._dnd_group_id is None:  # leaving this container => commit
+            self.dnd_commit(source, event)
+    
+    def dnd_commit(self, source, event):
+        """(This will return a cross-window dragging function)
+        """
+        self._put(source)
+    
     def _get_dnd_widget_accept(self, target):
+        """(This will return a function for dragging inside a window)
+        """
         def _get_target(source, event):
             if source is not target:
                 return target
@@ -349,6 +374,8 @@ class OrderlyContainer(ttk.Canvas):
         return _get_target
     
     def _get_dnd_widget_enter(self, target):
+        """(This will return a function for dragging inside a window)
+        """
         def _exchange_order_indices(source, event):
             # Exchange the order indices of `source` and `target`
             neworder_src = oldorder_tar = self.dnd_widgets.index(target)
@@ -375,6 +402,8 @@ class OrderlyContainer(ttk.Canvas):
         return _exchange_order_indices
     
     def _get_dnd_widget_motion(self, widget=None):
+        """(This will return a function for dragging inside a window)
+        """
         def _move_source(source, event):
             old_event, self._dnd["event"] = self._dnd.pop("event"), event
             if old_event is event:  # `source` has been moved before
@@ -388,10 +417,14 @@ class OrderlyContainer(ttk.Canvas):
         return _move_source
     
     def _get_dnd_widget_leave(self, target):
+        """(This will return a function for dragging inside a window)
+        """
         def _none(source, event): pass
         return _none
     
-    def _get_dnd_widget_end(self, widget):
+    def _get_dnd_end(self, widget):
+        """(This will return a cross-window dragging function)
+        """
         def _unset_focus(target, event):
             if target is None:
                 return self.winfo_toplevel().focus_set()
@@ -400,13 +433,20 @@ class OrderlyContainer(ttk.Canvas):
         return _unset_focus
 
 
+class ButtonTriggerOrderlyContainer(OrderlyContainer):
+    def bind_dnd_start(self, moved:tk.Widget):
+        for child in moved.winfo_children():
+            if child.winfo_class() == 'TButton':
+                self._bind_dnd_start(moved=moved, trigger=child)
+
+
 # =============================================================================
 # ---- Main
 # =============================================================================
 if __name__ == '__main__':
     import random
     
-    root = ttk.Window(title='Harmonic Analyzer', themename='cyborg')
+    root = ttk.Window(title='Drag and Drop', themename='cyborg')
     
     container = OrderlyContainer(root)
     container.pack(fill='both', expand=1)
@@ -420,13 +460,38 @@ if __name__ == '__main__':
                                 takefocus=True,
                                 bootstyle='outline')
             buttons[-1].append(button)
-    
     container.dnd_put(buttons,
                       sticky='nse',
                       expand=(False, True),
                       padding=10,
                       ipadding=6)
     
+    window = ttk.Toplevel(title='Button Trigger Drag and Drop', topmost=True)
+    window.focus_set()
+    container = ButtonTriggerOrderlyContainer(window)
+    container.pack(fill='both', expand=1)
+    frames = list()
+    for r in range(4):
+        frames.append(list())
+        for c in range(3):
+            dash = '----' * random.randint(1, 5)
+            frame = ttk.Frame(container)
+            ttk.Button(frame,
+                       text='::',
+                       takefocus=True,
+                       cursor='hand2',
+                       bootstyle='success-link').pack(side='left')
+            ttk.Label(frame,
+                      text=f'|<{dash} ({r}, {c}) {dash}>|',
+                      bootstyle='success').pack(side='left')
+            frames[-1].append(frame)
+    container.dnd_put(frames,
+                      sticky='nsw',
+                      expand=(False, True),
+                      padding=10,
+                      ipadding=6)
+    
+    window.place_window_center()
     root.place_window_center()
     root.mainloop()
 
