@@ -151,7 +151,7 @@ class FontDialog(_DialogPositioning, dialogs.FontDialog):
         self._font_preview(master, padding=10)
     
     def _font_options_selectors(self, master, padding: int):
-        # Edit: don't change the values of variables
+        # Edit: don't change the values of the tk variables
         
         container = ttk.Frame(master, padding=padding)
         container.pack(fill='x', padx=2, pady=2, anchor='n')
@@ -232,7 +232,7 @@ class FontDialog(_DialogPositioning, dialogs.FontDialog):
         self._preview_text = ttk.Text(
             master=container,
             height=3,
-            width=1,   #EDIT: prevent resulting a too large width
+            width=1,   #EDIT: prevent the width from becoming too large
             font=self._preview_font,
             highlightbackground=self._style.colors.primary
         )
@@ -241,8 +241,8 @@ class FontDialog(_DialogPositioning, dialogs.FontDialog):
         #EDIT: container.pack_propagate(False)
     
     def _update_font_preview(self, *_):
-        # Edit: add `weight`and update `self._result` when submitted
-        # and configure the weight of text
+        # Edit: configure the weight of text and update `self._result` when 
+        # submitted
         
         self._preview_font.config(
             family=self._family.get(),
