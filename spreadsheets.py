@@ -2363,11 +2363,15 @@ class Sheet(ttk.Frame):
 # =============================================================================
 if __name__ == '__main__':
     root = ttk.Window(themename='cyborg', position=(100, 100), size=(600, 400))
-    root.unbind_class('TEntry', '<Configure>')
     
     ss = Sheet(root, bootstyle_scrollbar='light-round')
     ss.pack(fill='both', expand=1)
     
-    ss.values.iat[5, 3] = '1234567'#???
+    ss.values.iat[5, 3] = 'R5, C3'
+    ss.set_foregroundcolor(5, 3, 5, 3, colors='#FF0000', undo=True)
+    ss.set_backgroundcolor(5, 3, 5, 3, colors='#2A7AD5', undo=True)
+    ss.resize_cells(5, axis=0, size=80, trace=False, undo=True)
     
     root.mainloop()
+    
+    
