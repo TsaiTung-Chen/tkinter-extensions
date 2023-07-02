@@ -11,7 +11,7 @@ import copy
 import tkinter as tk
 import tkinter.font
 from contextlib import contextmanager
-from typing import Union, Optional, List, Tuple, Callable, Literal
+from typing import Union, Optional, List, Tuple, Dict, Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -284,7 +284,7 @@ class History:
     
     def __init__(self):
         self._step = 0
-        self._sequence = None
+        self._sequence:Union[Dict[str, List[Callable]], None] = None
         self._stack = {"forward": list(), "backward": list()}
     
     def add(self, forward:Callable, backward:Callable):
@@ -319,17 +319,17 @@ class History:
             backward=lambda: [ func() for func in sequences["backward"][::-1] ]
         )
     
-    def pop(self) -> Tuple[Callable]:
+    def pop(self) -> Dict[str, List[Callable]]:
         assert self.step > 0, self.step
         
         self._step -= 1
-        funcs = {"forward": self._stack["forward"][self.step:],
-                 "backward": self._stack["backward"][self.step:]}
+        trailing = {"forward": self._stack["forward"][self.step:],
+                    "backward": self._stack["backward"][self.step:]}
         self._stack.update(forward=self._stack["forward"][:self.step],
                             backward=self._stack["backward"][:self.step])
-        return funcs
+        return trailing
     
-    def clear(self):
+    def reset(self):
         self.__init__()
     
     def back(self):
@@ -352,13 +352,13 @@ class Sheet(ttk.Frame):
     
     @property
     def RightClick(self) -> str:
-        if self._windowingsystem == 'aqua':
+        if self._windowingsystem == 'aqua':  # macOS
             return '<ButtonPress-2>'
         return '<ButtonPress-3>'
     
     @property
     def MouseScroll(self) -> List[str]:
-        if self._windowingsystem == 'x11':
+        if self._windowingsystem == 'x11':  # Linux
             return ['<ButtonPress-4>', '<ButtonPress-5>']
         return ['<MouseWheel>']
 
@@ -543,6 +543,7 @@ class Sheet(ttk.Frame):
         
         elif keysym == 'Escape':
             self._focus_out_cell(discard=True)
+            return True
     
     def _on_key_press(self, event):
         keysym, char = event.keysym, event.char
