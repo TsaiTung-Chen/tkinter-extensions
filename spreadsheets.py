@@ -1063,43 +1063,43 @@ class Sheet(ttk.Frame):
         # Change text alignments
         menu_align = tk.Menu(menu, tearoff=0)
         menu_align.add_command(
-            label='Top',
+            label='↑ Top',
             command=lambda: self._selection_set_property(
                 "aligny", 'n', undo=True)
         )
         menu_align.add_command(
-            label='Bottom',
+            label='↓ Bottom',
             command=lambda: self._selection_set_property(
                 "aligny", 's', undo=True)
         )
         menu_align.add_command(
-            label='Center',
+            label='⎯ Center',
             command=lambda: self._selection_set_property(
                 "aligny", 'center', undo=True)
         )
         menu_align.add_command(
-            label='Reset',
+            label='⤬ Reset',
             command=lambda: self._selection_set_property(
                 "aligny", None, undo=True)
         )
         menu_align.add_separator()
         menu_align.add_command(
-            label='Left',
+            label='← Left',
             command=lambda: self._selection_set_property(
                 "alignx", 'w', undo=True)
         )
         menu_align.add_command(
-            label='Right',
+            label='→ Right',
             command=lambda: self._selection_set_property(
                 "alignx", 'e', undo=True)
         )
         menu_align.add_command(
-            label='Center',
+            label='⏐ Center',
             command=lambda: self._selection_set_property(
                 "alignx", 'center', undo=True)
         )
         menu_align.add_command(
-            label='Reset',
+            label='⤬ Reset',
             command=lambda: self._selection_set_property(
                 "alignx", None, undo=True)
         )
@@ -2423,8 +2423,8 @@ class Book(ttk.Frame):
         self._switch_btn_style = 'Book.switch.' + dummy_btn["style"]
         self._switch_style = 'Book.switch.' + dummy_switch["style"]
         self._entry_style = 'Book.entry.' + dummy_entry["style"]
-        ttkstyle.configure(self._tb_btn_style, padding=0)
-        ttkstyle.configure(self._switch_btn_style, padding=0)
+        ttkstyle.configure(self._tb_btn_style, padding=1)
+        ttkstyle.configure(self._switch_btn_style, padding=1)
         ttkstyle.configure(self._switch_style, anchor='w', padding=[5, 2])
         ttkstyle.configure(self._entry_style, padding=[5, 2])
         dummy_btn.destroy()
@@ -2433,32 +2433,36 @@ class Book(ttk.Frame):
         
         # Build toolbar
         self._toolbar = tb = ttk.Frame(self)
-        self._toolbar.pack(fill='x', padx=9)
+        self._toolbar.pack(fill='x', padx=9, pady=3)
         self._sidebar_hidden = True
         self._sidebar_switch = ttk.Button(
             tb,
             style=self._tb_btn_style,
-            text='Sidebar',
+            text='▕ ▌ Sidebar',
             command=self._toggle_sidebar,
             takefocus=0
         )
-        self._sidebar_switch.pack(side='left', padx=[0, 12])
+        self._sidebar_switch.pack(side='left')
+        sep_fm = ttk.Frame(tb, width=3)
+        sep_fm.pack(side='left', fill='y', padx=[20, 9], ipady=9)
+        sep = ttk.Separator(sep_fm, orient='vertical', takefocus=0)
+        sep.place(x=0, y=0, relheight=1.)
         self._sidebar_undo = ttk.Button(
             tb,
             style=self._tb_btn_style,
-            text='Undo',
+            text='↺ Undo',
             command=lambda: self.sheet.undo(),
             takefocus=0
         )
-        self._sidebar_undo.pack(side='left', padx=[0, 3])
+        self._sidebar_undo.pack(side='left')
         self._sidebar_redo = ttk.Button(
             tb,
             style=self._tb_btn_style,
-            text='Redo',
+            text='↻ Redo',
             command=lambda: self.sheet.redo(),
             takefocus=0
         )
-        self._sidebar_redo.pack(side='left', padx=[0, 3])
+        self._sidebar_redo.pack(side='left', padx=[5, 0])
         
         # Build inputbar
         self._inputbar = ib = ttk.Frame(self)
