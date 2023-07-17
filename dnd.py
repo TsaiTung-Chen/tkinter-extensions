@@ -7,7 +7,7 @@ Created on Thu Jan 19 14:26:58 2023
 
 import tkinter as tk
 import tkinter.dnd
-from typing import Union, Optional, List, Tuple
+from typing import Union, Optional, List, Tuple, Callable
 
 import ttkbootstrap as ttk
 # =============================================================================
@@ -22,6 +22,9 @@ class OrderlyContainer(ttk.Canvas):
     def __init__(self, *args, dnd_group_id:int=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._dnd_group_id = dnd_group_id
+        self._dnd_start_callback = None
+        self._dnd_commit_callback = None
+        self._dnd_end_callback = None
     
     @property
     def dnd_widgets(self):
@@ -132,7 +135,29 @@ class OrderlyContainer(ttk.Canvas):
         self._bind_dnd_start(trigger=moved, moved=moved)
     
     def _bind_dnd_start(self, *, trigger:tk.Widget, moved:tk.Widget):
+        trigger.configure(cursor='hand2')
         trigger.bind('<ButtonPress-1>', self._get_dnd_start(moved))
+    
+    def set_dnd_start_callback(self, func:Callable):
+        assert callable(func), func
+        self._dnd_start_callback = func
+    
+    def remove_dnd_start_callback(self, func:Callable):
+        self._dnd_start_callback = None
+    
+    def set_dnd_commit_callback(self, func:Callable):
+        assert callable(func), func
+        self._dnd_commit_callback = func
+    
+    def remove_dnd_commit_callback(self, func:Callable):
+        self._dnd_commit_callback = None
+    
+    def set_dnd_end_callback(self, func:Callable):
+        assert callable(func), func
+        self._dnd_end_callback = func
+    
+    def remove_dnd_end_callback(self, func:Callable):
+        self._dnd_end_callback = None
     
     def _calculate_place_info(self,
                               r,
@@ -197,7 +222,7 @@ class OrderlyContainer(ttk.Canvas):
             if _sticky == (True, False):
                 place_info[xy] = xy_cell // N
                 return 'w' if xy == 'x' else 'n'  # lower bound
-            if _sticky == (False, True):
+            elif _sticky == (False, True):
                 place_info[xy] = xy_cell//N + dimension_cell//N
                 return 'e' if xy == 'x' else 's'  # higher bound
             # (False, False) => center
@@ -301,6 +326,8 @@ class OrderlyContainer(ttk.Canvas):
             
             source.lift()
             source.focus_set()
+            if self._dnd_start_callback:
+                self._dnd_start_callback(source, event)
         #
         return _init_dnd
     
@@ -363,6 +390,8 @@ class OrderlyContainer(ttk.Canvas):
         """(This will return a cross-window dragging function)
         """
         self._put(source)
+        if self._dnd_commit_callback:
+            self._dnd_commit_callback(source, event)
     
     def _get_dnd_widget_accept(self, target):
         """(This will return a function for dragging inside a window)
@@ -427,8 +456,12 @@ class OrderlyContainer(ttk.Canvas):
         """
         def _unset_focus(target, event):
             if target is None:
-                return self.winfo_toplevel().focus_set()
-            target.winfo_toplevel().focus_set()
+                self.winfo_toplevel().focus_set()
+            else:
+                self.winfo_toplevel().focus_set()
+            
+            if self._dnd_end_callback:
+                self._dnd_end_callback(target, event)
         #
         return _unset_focus
 
@@ -466,7 +499,8 @@ if __name__ == '__main__':
                       padding=10,
                       ipadding=6)
     
-    window = ttk.Toplevel(title='Button Trigger Drag and Drop', topmost=True)
+    window = ttk.Toplevel(title='Button Trigger Drag and Drop')
+    window.lift()
     window.focus_set()
     container = ButtonTriggerOrderlyContainer(window)
     container.pack(fill='both', expand=1)
@@ -479,7 +513,6 @@ if __name__ == '__main__':
             ttk.Button(frame,
                        text='::',
                        takefocus=True,
-                       cursor='hand2',
                        bootstyle='success-link').pack(side='left')
             ttk.Label(frame,
                       text=f'|<{dash} ({r}, {c}) {dash}>|',
