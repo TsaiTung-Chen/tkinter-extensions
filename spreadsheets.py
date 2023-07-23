@@ -8,6 +8,7 @@ Created on Mon May 22 22:35:24 2023
 
 import sys
 import copy
+import random
 import tkinter as tk
 import tkinter.font
 from contextlib import contextmanager
@@ -21,8 +22,10 @@ from ttkbootstrap.dialogs import dialogs, colorchooser
 from .dnd import ButtonTriggerOrderlyContainer
 from .scrolled_widgets import AutoHiddenScrollbar, ScrolledFrame
 
-COMMAND = 'Mod1' if sys.platform == 'darwin' else 'Control'
-OPTION = 'Mod2' if sys.platform == 'darwin' else 'Alt'
+platform = sys.platform
+
+COMMAND = 'Mod1' if platform == 'darwin' else 'Control'
+OPTION = 'Mod2' if platform == 'darwin' else 'Alt'
 CONTROL = 'Control'
 SHIFT = 'Shift'
 LOCK = 'Lock'
@@ -43,6 +46,8 @@ MODIFIER_MASKS = {
     "Button4": int('0b100000000000', base=2),
     "Button5": int('0b1000000000000', base=2)
 }
+
+RIGHTCLICK = '<ButtonPress-2>' if platform == 'darwin' else '<ButtonPress-3>'
 # =============================================================================
 # ---- Functions
 # =============================================================================
@@ -55,14 +60,27 @@ def get_modifiers(state:int):
     return modifiers
 
 
-def infinite_loop(item):
-    while True:
-        yield item
+def get_center_position(widget:tk.BaseWidget) -> Tuple[int]:
+    widget.update_idletasks()
+    width, height = widget.winfo_width(), widget.winfo_height()
+    x_root, y_root = widget.winfo_rootx(), widget.winfo_rooty()
+    
+    return (x_root + width//2, y_root + height//2)
+
+
+def center_window(to_center:tk.BaseWidget, center_of:tk.BaseWidget):
+    x_center, y_center = get_center_position(center_of)
+    width, height = to_center.winfo_reqwidth(), to_center.winfo_reqheight()
+    x, y = (x_center - width//2, y_center - height//2)
+    tk.Wm.wm_geometry(to_center, f'+{x}+{y}')
 
 
 # =============================================================================
 # ---- Classes
 # =============================================================================
+class DuplicateNameError(ValueError): pass
+
+
 class _DialogPositioning:
     def show(self, position:Union[tuple, list, Callable, None]=None):
         # Edit: accept a positioning function argument
@@ -270,6 +288,10 @@ class ColorChooserDialog(_DialogPositioning, colorchooser.ColorChooserDialog):
     pass
 
 
+class QueryDialog(_DialogPositioning, dialogs.QueryDialog):
+    pass
+
+
 class History:
     @property
     def step(self) -> int:
@@ -373,12 +395,6 @@ class History:
 class Sheet(ttk.Frame):
     _valid_header_states = ('normal', 'hover', 'selected')
     _valid_cell_states = ('normal', 'readonly')
-    
-    @property
-    def RightClick(self) -> str:
-        if self._windowingsystem == 'aqua':  # macOS
-            return '<ButtonPress-2>'
-        return '<ButtonPress-3>'
     
     @property
     def MouseScroll(self) -> List[str]:
@@ -732,17 +748,8 @@ class Sheet(ttk.Frame):
         )[::-1]
         return self._content_size
     
-    def _get_center_position(self) -> Tuple[int]:
-        self.update_idletasks()
-        width, height = self.winfo_width(), self.winfo_height()
-        x_root, y_root = self.winfo_rootx(), self.winfo_rooty()
-        return (x_root + width//2, y_root + height//2)
-    
     def _center_window(self, toplevel:tk.BaseWidget):
-        x_center, y_center = self._get_center_position()
-        width, height = toplevel.winfo_reqwidth(), toplevel.winfo_reqheight()
-        x, y = (x_center - width//2, y_center - height//2)
-        tk.Wm.wm_geometry(toplevel, f'+{x}+{y}')
+        center_window(to_center=toplevel, center_of=self)
     
     def __view(self, axis:int, *args):
         """Update the view of the canvas
@@ -1034,15 +1041,15 @@ class Sheet(ttk.Frame):
         # Manipulate values in cells
         menu.add_separator()
         menu.add_command(
-            label='Erase value(s)',
+            label='Erase Value(s)',
             command=lambda: self._selection_erase_values(undo=True)
         )
         menu.add_command(
-            label='Copy value(s)',
+            label='Copy Value(s)',
             command=self._selection_copy_values
         )
         menu.add_command(
-            label='Paste value(s)',
+            label='Paste Value(s)',
             command=lambda: self._selection_paste_values(undo=True)
         )
         menu.add_separator()
@@ -1050,37 +1057,37 @@ class Sheet(ttk.Frame):
         # Change text colors
         menu_textcolor = tk.Menu(menu, tearoff=0)
         menu_textcolor.add_command(
-            label='Choose color...',
+            label='Choose Color...',
             command=lambda: self._selection_set_foregroundcolor(undo=True)
         )
         menu_textcolor.add_command(
-            label='Reset color(s)',
+            label='Reset Color(s)',
             command=lambda: self._selection_set_foregroundcolor(
                 choose=False, undo=True)
         )
-        menu.add_cascade(label='Text color(s)', menu=menu_textcolor)
+        menu.add_cascade(label='Text Color(s)', menu=menu_textcolor)
         
         # Change background colors
         menu_bgcolor = tk.Menu(menu, tearoff=0)
         menu_bgcolor.add_command(
-            label='Choose color...',
+            label='Choose Color...',
             command=lambda: self._selection_set_backgroundcolor(undo=True)
         )
         menu_bgcolor.add_command(
-            label='Reset color(s)',
+            label='Reset Color(s)',
             command=lambda: self._selection_set_backgroundcolor(
                 choose=False, undo=True)
         )
-        menu.add_cascade(label='Background color(s)', menu=menu_bgcolor)
+        menu.add_cascade(label='Background Color(s)', menu=menu_bgcolor)
         
         # Change fonts
         menu_font = tk.Menu(menu, tearoff=0)
         menu_font.add_command(
-            label='Choose font...',
+            label='Choose Font...',
             command=lambda: self._selection_set_font(undo=True)
         )
         menu_font.add_command(
-            label='Reset font(s)',
+            label='Reset Font(s)',
             command=lambda: self._selection_set_font(choose=False, undo=True)
         )
         menu.add_cascade(label='Font(s)', menu=menu_font)
@@ -1228,7 +1235,7 @@ class Sheet(ttk.Frame):
         canvas.tag_bind(tag_cornerheader, '<Enter>', self._on_enter_header)
         canvas.tag_bind(tag_cornerheader, '<Leave>', self._on_leave_header)
         canvas.tag_bind(
-            tag_cornerheader, self.RightClick, self._on_rightclick_press_header)
+            tag_cornerheader, RIGHTCLICK, self._on_rightclick_press_header)
         canvas.tag_bind(tag_bg, '<ButtonPress-1>', self._on_leftclick_press)
         
         for handle in ['hhandle', 'vhandle']:
@@ -1342,8 +1349,7 @@ class Sheet(ttk.Frame):
         # Add bindings
         canvas.tag_bind(tag_header, '<Enter>', self._on_enter_header)
         canvas.tag_bind(tag_header, '<Leave>', self._on_leave_header)
-        canvas.tag_bind(
-            tag_header, self.RightClick, self._on_rightclick_press_header)
+        canvas.tag_bind(tag_header, RIGHTCLICK, self._on_rightclick_press_header)
         
         for tag in [tag_bg, tag_text]:
             canvas.tag_bind(tag, '<ButtonPress-1>', self._on_leftclick_press)
@@ -1455,15 +1461,15 @@ class Sheet(ttk.Frame):
         (r1, r2), (c1, c2) = [sorted([r1, r2]), sorted([c1, c2])]
         max_r, max_c = [ s - 1 for s in self.values.shape ]
         if type_ == 'rowheader':
-            axis_name, axis = ('row', 0)
+            axis_name, axis = ('Row', 0)
             if not ((r1 <= r <= r2) and (c1 == 0) and (c2 >= max_c)):
                 self._select_cells(r, 0, r, max_c, trace=False)
         elif type_ == 'colheader':
-            axis_name, axis = ('column', 1)
+            axis_name, axis = ('Column', 1)
             if not ((c1 <= c <= c2) and (r1 == 0) and (r2 >= max_r)):
                 self._select_cells(0, c, max_r, c, trace=False)
         else:
-            axis_name, axis = ('row', 0)
+            axis_name, axis = ('Row', 0)
             if not ((r1 == c1 == 0) and (r1 >= max_r) and (c2 >= max_c)):
                 self._select_cells(0, 0, max_r, max_c, trace=False)
         
@@ -1472,26 +1478,23 @@ class Sheet(ttk.Frame):
         
         if type_ in ('rowheader', 'colheader'):
             menu.add_command(
-                label=f'Insert a new {axis_name} ahead',
+                label=f'Insert New {axis_name} Ahead',
                 command=lambda: self._selection_insert_cells(
                     axis, mode='ahead', undo=True)
             )
             menu.add_command(
-                label=f'Insert a new {axis_name} behind',
+                label=f'Insert New {axis_name} Behind',
                 command=lambda: self._selection_insert_cells(
                     axis, mode='behind', undo=True)
             )
         menu.add_command(
-            label=f'Delete the selected {axis_name}(s)',
+            label=f'Delete Selected {axis_name}(s)',
             command=lambda: self._selection_delete_cells(undo=True)
         )
         menu, submenus = self._build_general_rightclick_menu()
         
         menu.post(event.x_root, event.y_root)
-        try:
-            menu.delete(0, 'end')
-        except:
-            pass
+        menu.delete(0, 'end')
         for submenu in submenus:
             submenu.destroy()
     
@@ -1659,8 +1662,7 @@ class Sheet(ttk.Frame):
         
         # Add Bindings
         tag_cell = self._make_tag("type", type_=type_)
-        canvas.tag_bind(
-            tag_cell, self.RightClick, self._on_rightclick_press_cell)
+        canvas.tag_bind(tag_cell, RIGHTCLICK, self._on_rightclick_press_cell)
         canvas.tag_bind(tag_cell, '<ButtonPress-1>', self._on_leftclick_press)
         canvas.tag_bind(tag_cell, '<B1-Motion>', self._on_leftclick_motion)
         canvas.tag_bind(
@@ -1904,10 +1906,7 @@ class Sheet(ttk.Frame):
         
         menu, submenus = self._build_general_rightclick_menu()
         menu.post(event.x_root, event.y_root)
-        try:
-            menu.delete(0, 'end')
-        except:
-            pass
+        menu.delete(0, 'end')
         for submenu in submenus:
             submenu.destroy()
     
@@ -2437,8 +2436,7 @@ class Sheet(ttk.Frame):
 class Book(ttk.Frame):
     @property
     def sheets(self) -> Dict[str, Sheet]:
-        return { title: props["sheet"]
-                 for title, props in self._sheets_props.items() }
+        return { ps["name"]: ps["sheet"] for ps in self._sheets_props.values() }
     
     @property
     def sheet(self) -> Union[Sheet, None]:
@@ -2454,7 +2452,7 @@ class Book(ttk.Frame):
         self._sidebar_hidden = True
         self._sidebar_toggle = ttk.Button(
             tb,
-            style=self._tb_btn_style,
+            style=self._button_style,
             text='▕ ▌ Sidebar',
             command=self._toggle_sidebar,
             takefocus=0
@@ -2466,7 +2464,7 @@ class Book(ttk.Frame):
         sep.place(x=0, y=0, relheight=1.)
         self._undo_btn = ttk.Button(
             tb,
-            style=self._tb_btn_style,
+            style=self._button_style,
             text='↺ Undo',
             command=lambda: self.sheet.undo(),
             takefocus=0
@@ -2474,7 +2472,7 @@ class Book(ttk.Frame):
         self._undo_btn.pack(side='left')
         self._redo_btn = ttk.Button(
             tb,
-            style=self._tb_btn_style,
+            style=self._button_style,
             text='↻ Redo',
             command=lambda: self.sheet.redo(),
             takefocus=0
@@ -2506,17 +2504,26 @@ class Book(ttk.Frame):
         
         ttk.Separator(self, takefocus=0).pack(fill='x')
         
-        # Build sidebar and sheet
+        # Build sidebar and sheet frame
         self._panedwindow = pw = ttk.Panedwindow(self, orient='horizontal')
         self._panedwindow.pack(fill='both', expand=1)
         
         ## Sidebar
         self._sidebar_width = 150
         self._sidebar_fm = sbfm = ScrolledFrame(pw, scroll_orient='vertical')
+        self._sidebar_add = ttk.Button(
+            sbfm,
+            style=self._bold_button_style,
+            text='  ＋  ',
+            command=self.insert_sheet,
+            takefocus=0
+        )
+        self._sidebar_add.pack(anchor='e')
         self._sidebar = sb = ButtonTriggerOrderlyContainer(sbfm, cursor='arrow')
         self._sidebar.pack(fill='both', expand=1)
-        self._sidebar.set_dnd_end_callback(self._focus_on_sheet)
+        self._sidebar.set_dnd_end_callback(self._on_dnd_end)
         self._panedwindow.add(sbfm.container)
+        self._sidebar_switch_menu = tk.Menu(sb, tearoff=0)
         
         def _show_sidebar(event=None):
             assert self._sidebar_hidden, self._sidebar_hidden
@@ -2525,17 +2532,17 @@ class Book(ttk.Frame):
         
         pw.bind('<Map>', _show_sidebar)
         
-        # Sheet padding frame
+        ## Sheet padding frame
         self._sheet_pad_fm = spfm = ttk.Frame(pw, padding=[3, 3, 0, 0])
         self._panedwindow.add(spfm)
         
         # Build the first sheet
         self._sheet_kw = kwargs.copy()
-        self._sheet_var = tk.StringVar(self, value='Sheet 1')
+        self._sheet_var = tk.IntVar(self)
         self._sheet_var.trace_add('write', self._switch_sheet)
-        self._sheets_props:Dict[str, list] = dict()
         self._sheet:Union[Sheet, None] = None
-        self._sheets_props:Dict[str, list] = self.insert_sheet(0)
+        self._sheets_props:Dict[int, list] = dict()
+        self._sheets_props:Dict[int, list] = self.insert_sheet(0)
         
         # Sizegrip
         ttk.Separator(self, takefocus=0).pack(fill='x')
@@ -2549,22 +2556,53 @@ class Book(ttk.Frame):
         self.bind('<<ThemeChanged>>', self._create_styles)
     
     def _create_styles(self, event=None):
-        ## Create switch styles
         ttkstyle = ttk.Style.get_instance()
+        colors = ttkstyle.colors
         dummy_btn = ttk.Button(self, bootstyle='link-primary')
-        dummy_switch = ttk.Radiobutton(self, bootstyle='toolbutton-primary')
+        dummy_rdbutton = ttk.Radiobutton(self, bootstyle='toolbutton-primary')
         dummy_entry = ttk.Entry(self)
-        self._tb_btn_style = 'Book.toolbar.' + dummy_btn["style"]
-        self._switch_btn_style = 'Book.switch.' + dummy_btn["style"]
-        self._switch_style = 'Book.switch.' + dummy_switch["style"]
-        self._entry_style = 'Book.entry.' + dummy_entry["style"]
-        ttkstyle.configure(self._tb_btn_style, padding=1)
-        ttkstyle.configure(self._switch_btn_style, padding=1)
-        ttkstyle.configure(self._switch_style, anchor='w', padding=[5, 2])
+        self._button_style = 'Book.' + dummy_btn["style"]
+        self._bold_button_style = 'Book.bold.' + dummy_btn["style"]
+        self._rdbutton_style = 'Book.' + dummy_rdbutton["style"]
+        self._entry_style = 'Book.' + dummy_entry["style"]
+        ttkstyle.configure(self._button_style, padding=1)
+        ttkstyle.configure(
+            self._bold_button_style,
+            padding=1,
+            font=('TkDefaultFont', 13, 'bold')
+        )
+        ttkstyle.configure(
+            self._rdbutton_style,
+            anchor='w',
+            padding=[5, 3],
+            background=colors.bg,
+            foreground=colors.fg,
+            borderwidth=0
+        )
         ttkstyle.configure(self._entry_style, padding=[5, 2])
         dummy_btn.destroy()
-        dummy_switch.destroy()
+        dummy_rdbutton.destroy()
         dummy_entry.destroy()
+    
+    def _on_dnd_end(self, *_):
+        self._rearrange_sheets()
+        self._focus_on_sheet()
+    
+    def _center_window(self, toplevel:tk.BaseWidget):
+        center_window(to_center=toplevel, center_of=self)
+    
+    def _rearrange_sheets(self, *_):
+        sheets_props = self._sheets_props.copy()
+        
+        new_sheets_props = dict()
+        for sf in self._sidebar.dnd_widgets:
+            for key, ps in sheets_props.items():
+                if ps["switch_frame"] == sf:
+                    break
+            new_sheets_props[key] = ps
+            sheets_props.pop(key)
+        
+        self._sheets_props = new_sheets_props
     
     def _focus_on_sheet(self, *_, **__):
         self.sheet._be_focus()
@@ -2584,11 +2622,22 @@ class Book(ttk.Frame):
             self._panedwindow.forget(0)
         self._sidebar_hidden = not self._sidebar_hidden
     
+    def _find_key(self, index_or_name:Union[int, str]) -> str:
+        if isinstance(index_or_name, str):  # name input
+            for key, ps in self._sheets_props.items():
+                if ps["name"] == index_or_name:
+                    return key
+            raise ValueError(
+                "Can't find the sheet with the name: {index_or_name}")
+        
+        # Index input
+        return list(self._sheets_props)[index_or_name]
+    
     def _switch_sheet(self, *_):
-        title = self._sheet_var.get()
+        key = self._sheet_var.get()
         
         old_sheet = self._sheet
-        self._sheet = new_sheet = self._sheets_props[title]["sheet"]
+        self._sheet = new_sheet = self._sheets_props[key]["sheet"]
         
         if old_sheet:
             old_sheet.pack_forget()
@@ -2605,76 +2654,191 @@ class Book(ttk.Frame):
         
         return new_sheet
     
-    def switch_sheet(self, index_or_title:Union[int, str]) -> Sheet:
-        if isinstance(index_or_title, str):
-            title = index_or_title
-        else:
-            title = list(self._sheets_props)[index_or_title]
-        
-        self._sheet_var.set(title)
+    def switch_sheet(self, index_or_name:Union[int, str]) -> Sheet:
+        key = self._find_key(index_or_name)
+        self._sheet_var.set(key)
         
         return self._sheet
     
-    def insert_sheet(self, index:int, title:Optional[str]=None, **kwargs):
-        assert isinstance(index, int), index
-        assert isinstance(title, (str, type(None))), title
+    def _get_unique_name(self, name:Optional[str]=None):
+        assert isinstance(name, (str, type(None))), name
+        
+        # Check name
+        sheets_props = self._sheets_props
+        names_exist = [ ps["name"] for ps in sheets_props.values() ]
+        if name is None:
+            i, name = (1, 'Sheet 1')
+            while name in names_exist:
+                i += 1
+                name = f'Sheet {i}'
+        else:
+            i, prefix = (1, name)
+            while name in names_exist:
+                i += 1
+                name = prefix + f' ({i})'
+        assert name not in names_exist, names_exist.keys()
+        
+        return name
+    
+    def insert_sheet(self,
+                     index:Optional[int]=None,
+                     name:Optional[str]=None,
+                     **kwargs):
+        assert isinstance(index, (int, type(None))), index
+        assert isinstance(name, (str, type(None))), name
         
         sheet_kw = self._sheet_kw.copy()
         sheet_kw.update(kwargs)
-        
-        # Check title
         sheets_props = self._sheets_props
-        if title is None:
-            i, title = (1, 'Sheet 1')
-            while title in sheets_props:
-                i += 1
-                title = f'Sheet {i}'
-        else:
-            i, _title = (1, title)
-            while title in sheets_props:
-                i += 1
-                title = _title + f' ({i})'
+        name = self._get_unique_name(name)
+        
+        if index is None:
+            index = len(sheets_props)
+        
+        # Generate a unique key
+        key = random.randint(-1e10, 1e+10)
+        while key in sheets_props:
+            key = random.randint(-1e10, 1e+10)
         
         # Build a new sheet widget and sidebar button
         sheet = Sheet(self._sheet_pad_fm, **sheet_kw)
         frame = ttk.Frame(self._sidebar)
         ttk.Button(
             frame,
-            style=self._switch_btn_style,
+            style=self._button_style,
             text='::',
             takefocus=0
         ).pack(side='left', padx=[0, 6])
         switch = ttk.Radiobutton(
             frame,
-            style=self._switch_style,
-            text=title,
-            value=title,
+            style=self._rdbutton_style,
+            text=name,
+            value=key,
             variable=self._sheet_var,
             takefocus=0
         )
         switch.pack(side='left', fill='x', expand=1)
+        switch.bind(RIGHTCLICK, lambda e: self._pop_switch_menu(e, key))
         
         # Modify the sheet dict
-        titles, props = (list(sheets_props.keys()), list(sheets_props.values()))
-        titles.insert(index, title)
+        keys, props = (list(sheets_props.keys()), list(sheets_props.values()))
+        keys.insert(index, key)
         props.insert(
-            index, {"sheet": sheet, "switch": switch, "switch_frame": frame})
-        self._sheets_props = dict(zip(titles, props))
+            index,
+            {"name": name,
+             "sheet": sheet,
+             "switch": switch,
+             "switch_frame": frame}
+        )
+        self._sheets_props = dict(zip(keys, props))
         
         # Remap the radio buttons
+        self._remap_switches()
+        self._sheet_var.set(key)
+        
+        return self._sheets_props
+    
+    def _remap_switches(self):
         self._sidebar.delete('all')
         self._sidebar.dnd_put(
-            [ ps["switch_frame"] for ps in props ],
+            [ ps["switch_frame"] for ps in self._sheets_props.values() ],
             sticky='we',
             expand=(True, False),
-            padding=9,
+            padding=[9, 3],
             ipadding=4
         )
         self._sidebar_fm._on_map_child()
+    
+    def _pop_switch_menu(self, event, key):
+        # Focus on the sheet that has been clicked
+        self.after_idle(self._sheet_var.set, key)
         
-        self.switch_sheet(title)
+        menu = self._sidebar_switch_menu
+        menu.add_command(
+            label='Rename Sheet',
+            command=lambda: self._rename_sheet(key)
+        )
+        menu.add_command(
+            label='Delete Sheet',
+            command=lambda: self._delete_sheet(key)
+        )
         
-        return self._sheets_props
+        menu.post(event.x_root, event.y_root)  # show the right click menu
+        menu.delete(0, 'end')
+    
+    def delete_sheet(self, name:str, destroy:bool=True) -> dict:
+        key = self._find_key(name)
+        return self._delete_sheet(key, destroy=destroy)
+    
+    def _delete_sheet(self, key, destroy:bool=True):
+        sheets_props = self._sheets_props
+        index = list(sheets_props).index(key)
+        ps = sheets_props.pop(key)  # remove the sheet properties
+        
+        # Update GUI
+        if sheets_props:  # the book is not empty after deleting the sheet
+            self._remap_switches()
+            
+            # Switch sheet
+            index_focus = min(index, len(sheets_props) - 1)
+            self._sheet_var.set(list(sheets_props.keys())[index_focus])
+        else:  # the book is empty after deleting the sheet
+            self.insert_sheet()  # add a new sheet
+        
+        if destroy:
+            for widget in (ps["sheet"], ps["switch_frame"]):
+                widget.destroy()
+        
+        return ps
+    
+    def rename_sheet(self,
+                     old_name:str,
+                     new_name:Optional[str]=None,
+                     auto_rename:bool=False):
+        sheets_props = self._sheets_props
+        key = self._find_key(old_name)
+        
+        if new_name == old_name:
+            return new_name
+        
+        if auto_rename:
+            new_name = self._get_unique_name(new_name)
+        
+        names = [ ps["name"] for ps in sheets_props.values() ]
+        if new_name in names:
+            raise DuplicateNameError(
+                f"`new_name` = {new_name}. Titles already exist: {names}")
+        
+        # Modify the sheet dict
+        ps = sheets_props[key]
+        ps["name"] = new_name
+        ps["switch"].configure(text=new_name)
+        
+        return new_name
+    
+    def _rename_sheet(
+            self, key, _prompt='Please enter a new name for the sheet:'):
+        # Ask for new name
+        old_name = self._sheets_props[key]["name"]
+        dialog = QueryDialog(
+            parent=self,
+            title='Rename Sheet',
+            prompt=_prompt,
+            initialvalue=old_name
+        )
+        dialog.show(position=self._center_window)
+        if (new_name := dialog.result) is None:  # cancelled
+            return
+        
+        # Submitted
+        try:
+            self.rename_sheet(old_name, new_name)
+        except DuplicateNameError:
+            self._rename_sheet(
+                key,
+                _prompt='The name already exist. '
+                       'Please enter another name for the sheet:'
+            )
 
 
 # =============================================================================
