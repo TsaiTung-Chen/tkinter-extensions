@@ -358,6 +358,7 @@ class _Scrolled_Mixin:
             cropper.bind('<Configure>', self._on_configure)
             container.bind('<Map>', self._on_map)
             self.bind('<<MapChild>>', self._on_map_child)
+        self.bind('<Destroy>', lambda e: container.destroy())
     
     @property
     def container(self): return self._container  # outer frame
@@ -443,34 +444,12 @@ class ScrolledTreeview(_Scrolled_Mixin, ttk.Treeview):
         super().__init__(*args, builtin_method=True, **kwargs)
 
 
-def ScrolledFrame(master=None,
-                  scroll_orient='both',
-                  autohide=True,
-                  hbootstyle='round',
-                  vbootstyle='round',
-                  **kwargs):
-    return ScrolledWidget(master=master,
-                          widget=ttk.Frame,
-                          scroll_orient=scroll_orient,
-                          autohide=autohide,
-                          hbootstyle=hbootstyle,
-                          vbootstyle=vbootstyle,
-                          **kwargs)
+class ScrolledFrame(GeneralXYView_Mixin, _Scrolled_Mixin, ttk.Frame):
+    pass
 
 
-def ScrolledLabelframe(master=None,
-                       scroll_orient='both',
-                       autohide=True,
-                       hbootstyle='round',
-                       vbootstyle='round',
-                       **kwargs):
-    return ScrolledWidget(master=master,
-                          widget=ttk.Labelframe,
-                          scroll_orient=scroll_orient,
-                          autohide=autohide,
-                          hbootstyle=hbootstyle,
-                          vbootstyle=vbootstyle,
-                          **kwargs)
+class ScrolledLabelframe(GeneralXYView_Mixin, _Scrolled_Mixin, ttk.Labelframe):
+    pass
 
 
 # =============================================================================
