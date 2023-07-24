@@ -29,33 +29,35 @@ OPTION = 'Mod2' if platform == 'darwin' else 'Alt'
 CONTROL = 'Control'
 SHIFT = 'Shift'
 LOCK = 'Lock'
-MODIFIERS = {COMMAND, OPTION, CONTROL, SHIFT}
+MODIFIERS = {COMMAND, OPTION, CONTROL, SHIFT, LOCK}
 
 MODIFIER_MASKS = {
     "Shift": int('0b1', base=2),
     "Lock": int('0b10', base=2),
     "Control": int('0b100', base=2),
-    "Mod1": int('0b1000', 2),  # command (Mac)
-    "Mod2": int('0b10000', base=2),   # option (Mac)
-    "Mod3": int('0b100000', base=2),
-    "Mod4": int('0b1000000', base=2),
-    "Mod5": int('0b10000000', base=2),
-    "Button1": int('0b100000000', base=2),
-    "Button2": int('0b1000000000', base=2),
-    "Button3": int('0b10000000000', base=2),
-    "Button4": int('0b100000000000', base=2),
-    "Button5": int('0b1000000000000', base=2)
+    "Mod1": int('0b1_000', 2),  # command (Mac)
+    "Mod2": int('0b10_000', base=2),   # option (Mac)
+    "Mod3": int('0b100_000', base=2),
+    "Mod4": int('0b1000_000', base=2),
+    "Mod5": int('0b10000_000', base=2),
+    "Button1": int('0b100_000_000', base=2),
+    "Button2": int('0b1_000_000_000', base=2),
+    "Button3": int('0b10_000_000_000', base=2),
+    "Button4": int('0b100_000_000_000', base=2),
+    "Button5": int('0b1000_000_000_000', base=2),
+    "Alt": int('0b100_000_000_000_000_000', base=2)
 }
 
 RIGHTCLICK = '<ButtonPress-2>' if platform == 'darwin' else '<ButtonPress-3>'
 # =============================================================================
 # ---- Functions
 # =============================================================================
-def get_modifiers(state:int):
-    modifiers = list()
-    for mod, mask in MODIFIER_MASKS.items():
-        if state & mask:
-            modifiers.append(mod)
+def get_modifiers(state:int, all:bool=False) -> set:
+    modifiers = set()
+    _modifiers = MODIFIER_MASKS if all else MODIFIERS
+    for mod in _modifiers:
+        if state & MODIFIER_MASKS[mod]:
+            modifiers.add(mod)
     
     return modifiers
 
@@ -531,7 +533,8 @@ class Sheet(ttk.Frame):
         self._history = History()
         
         self._rightclick_menu = tk.Menu(self, tearoff=0)
-        self._entry = entry = tk.Entry(self, textvariable=self._focus_value)
+        self._entry = entry = tk.Entry(
+            self, textvariable=self._focus_value, takefocus=0)
         entry.place(x=0, y=0)
         entry.lower()
         entry.bind('<KeyPress>', self._on_key_press_entry)
@@ -588,18 +591,21 @@ class Sheet(ttk.Frame):
         
         if (keysym in ('z', 'Z')) and (COMMAND in modifiers):
             self.undo()
-            return self._selection_rcs
+            self._selection_rcs
+            return True
         
         elif (keysym in ('y', 'Y')) and (COMMAND in modifiers):
             self.redo()
-            return self._selection_rcs
+            self._selection_rcs
+            return True
         
         elif keysym in ('Return', 'Tab'):
             if keysym == 'Return':
                 direction = 'up' if SHIFT in modifiers else 'down'
             else:
                 direction = 'left' if SHIFT in modifiers else 'right'
-            return self._move_selections(direction)
+            self._move_selections(direction)
+            return True
         
         elif keysym == 'Escape':
             self._focus_out_cell(discard=True)
@@ -608,7 +614,6 @@ class Sheet(ttk.Frame):
     def _on_key_press(self, event):
         keysym, char = event.keysym, event.char
         modifiers = get_modifiers(event.state)
-        modifiers_wo_lock = [ mod for mod in modifiers if mod != LOCK ]
         
         if self._on_key_press_entry(event):
             return
@@ -633,7 +638,8 @@ class Sheet(ttk.Frame):
             return self._selection_erase_values(undo=True)
         
         elif (MODIFIERS.isdisjoint(modifiers) and keysym == 'BackSpace') or (
-                modifiers_wo_lock in ([], [SHIFT]) and char):  # normal typing
+                not modifiers.difference({SHIFT, LOCK}) and char):
+            # Normal typing
             self._focus_in_cell()
             self._entry.delete(0, 'end')
             self._entry.insert('end', char)
@@ -1035,11 +1041,10 @@ class Sheet(ttk.Frame):
         
         return '\n'.join( t[:n_chars] for t in txt_split[:n_lines] )
     
-    def _build_general_rightclick_menu(self) -> tuple:
+    def _build_general_rightclick_menu(self) -> tk.Menu:
         menu = self._rightclick_menu
         
         # Manipulate values in cells
-        menu.add_separator()
         menu.add_command(
             label='Erase Value(s)',
             command=lambda: self._selection_erase_values(undo=True)
@@ -1137,11 +1142,16 @@ class Sheet(ttk.Frame):
         )
         menu.add_cascade(label='Align', menu=menu_align)
         
-        menu.add_separator()
+        return menu
+    
+    def _reset_rightclick_menu(self) -> tk.Menu:
+        menu = self._rightclick_menu
+        menu.delete(0, 'end')
         
-        submenus = (menu_textcolor, menu_bgcolor, menu_font, menu_align)
+        for child in menu.winfo_children():
+            child.destroy()
         
-        return menu, submenus
+        return menu
     
     def _redirect_widget_event(self, event) -> tk.Event:
         widget, canvas = (event.widget, self.canvas)
@@ -1491,12 +1501,11 @@ class Sheet(ttk.Frame):
             label=f'Delete Selected {axis_name}(s)',
             command=lambda: self._selection_delete_cells(undo=True)
         )
-        menu, submenus = self._build_general_rightclick_menu()
+        menu.add_separator()
+        self._build_general_rightclick_menu()
         
         menu.post(event.x_root, event.y_root)
-        menu.delete(0, 'end')
-        for submenu in submenus:
-            submenu.destroy()
+        self.after_idle(self._reset_rightclick_menu)
     
     def __on_leftclick_press_handle(self, event, axis:int):  # resize starts
         tagdict = self._hover
@@ -1904,11 +1913,9 @@ class Sheet(ttk.Frame):
         if not ((r_low <= r <= r_high) and (c_low <= c <= c_high)):
             self._select_cells(r, c, r, c, trace=False)
         
-        menu, submenus = self._build_general_rightclick_menu()
+        menu = self._build_general_rightclick_menu()
         menu.post(event.x_root, event.y_root)
-        menu.delete(0, 'end')
-        for submenu in submenus:
-            submenu.destroy()
+        self.after_idle(self._reset_rightclick_menu)
     
     def redraw(self,
                update_visible_rcs:bool=True,
@@ -2442,7 +2449,7 @@ class Book(ttk.Frame):
     def sheet(self) -> Union[Sheet, None]:
         return self._sheet
     
-    def __init__(self, master, **kwargs):
+    def __init__(self, master, bootstyle_scrollbar='round', **kwargs):
         super().__init__(master)
         self._create_styles()
         
@@ -2497,7 +2504,7 @@ class Book(ttk.Frame):
         C_label.pack(side='left')
         self._c_label = c_label = ttk.Label(label_fm, font=font)
         self._c_label.pack(side='left')
-        self._entry = en = ttk.Entry(ib, style=self._entry_style)
+        self._entry = en = ttk.Entry(ib, style=self._entry_style, takefocus=0)
         self._entry.grid(row=0, column=1, sticky='nesw', padx=[12, 0])
         en.bind('<FocusIn>', lambda e: self.sheet._refresh_entry())
         en.bind('<KeyPress>', lambda e: self.sheet._on_key_press_entry(e))
@@ -2510,11 +2517,12 @@ class Book(ttk.Frame):
         
         ## Sidebar
         self._sidebar_width = 150
-        self._sidebar_fm = sbfm = ScrolledFrame(pw, scroll_orient='vertical')
+        self._sidebar_fm = sbfm = ScrolledFrame(
+            pw, scroll_orient='vertical', hbootstyle=bootstyle_scrollbar)
         self._sidebar_add = ttk.Button(
             sbfm,
             style=self._bold_button_style,
-            text='  ＋  ',
+            text='  ＋',
             command=self.insert_sheet,
             takefocus=0
         )
@@ -2523,7 +2531,7 @@ class Book(ttk.Frame):
         self._sidebar.pack(fill='both', expand=1)
         self._sidebar.set_dnd_end_callback(self._on_dnd_end)
         self._panedwindow.add(sbfm.container)
-        self._sidebar_switch_menu = tk.Menu(sb, tearoff=0)
+        self._rightclick_menu = tk.Menu(sb, tearoff=0)
         
         def _show_sidebar(event=None):
             assert self._sidebar_hidden, self._sidebar_hidden
@@ -2537,6 +2545,7 @@ class Book(ttk.Frame):
         self._panedwindow.add(spfm)
         
         # Build the first sheet
+        kwargs["bootstyle_scrollbar"] = bootstyle_scrollbar
         self._sheet_kw = kwargs.copy()
         self._sheet_var = tk.IntVar(self)
         self._sheet_var.trace_add('write', self._switch_sheet)
@@ -2708,7 +2717,7 @@ class Book(ttk.Frame):
             style=self._button_style,
             text='::',
             takefocus=0
-        ).pack(side='left', padx=[0, 6])
+        ).pack(side='left', padx=[3, 6])
         switch = ttk.Radiobutton(
             frame,
             style=self._rdbutton_style,
@@ -2744,16 +2753,25 @@ class Book(ttk.Frame):
             [ ps["switch_frame"] for ps in self._sheets_props.values() ],
             sticky='we',
             expand=(True, False),
-            padding=[9, 3],
+            padding=[6, 3],
             ipadding=4
         )
         self._sidebar_fm._on_map_child()
+    
+    def _reset_rightclick_menu(self) -> tk.Menu:
+        menu = self._rightclick_menu
+        menu.delete(0, 'end')
+        
+        for child in menu.winfo_children():
+            child.destroy()
+        
+        return menu
     
     def _pop_switch_menu(self, event, key):
         # Focus on the sheet that has been clicked
         self.after_idle(self._sheet_var.set, key)
         
-        menu = self._sidebar_switch_menu
+        menu = self._rightclick_menu
         menu.add_command(
             label='Rename Sheet',
             command=lambda: self._rename_sheet(key)
@@ -2764,7 +2782,7 @@ class Book(ttk.Frame):
         )
         
         menu.post(event.x_root, event.y_root)  # show the right click menu
-        menu.delete(0, 'end')
+        self.after_idle(self._reset_rightclick_menu)
     
     def delete_sheet(self, name:str, destroy:bool=True) -> dict:
         key = self._get_key(name)
