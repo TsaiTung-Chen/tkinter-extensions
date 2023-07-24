@@ -410,7 +410,7 @@ class _Scrolled_Mixin:
 # ---- Scrolled Widgets
 # =============================================================================
 def ScrolledWidget(master=None,
-                   widget:tk.Widget=ttk.Frame,
+                   widget:tk.BaseWidget=ttk.Frame,
                    scroll_orient='both',
                    autohide=True,
                    hbootstyle='round',
@@ -423,7 +423,7 @@ def ScrolledWidget(master=None,
         <.2 horizontal scrollbar >
         <.3 vertical scrollbar >
     """
-    assert issubclass(widget, tk.Widget), widget
+    assert issubclass(widget, tk.BaseWidget), widget
     class _ScrolledWidget(GeneralXYView_Mixin, _Scrolled_Mixin, widget): pass
     return _ScrolledWidget(master=master,
                            scroll_orient=scroll_orient,
