@@ -458,7 +458,7 @@ class OrderlyContainer(ttk.Canvas):
             if target is None:
                 self.winfo_toplevel().focus_set()
             else:
-                self.winfo_toplevel().focus_set()
+                target.winfo_toplevel().focus_set()
             
             if self._dnd_end_callback:
                 self._dnd_end_callback(target, event)
