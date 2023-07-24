@@ -17,15 +17,7 @@ from .utils import (quit_if_all_closed,
 
 DEFAULT_FONT = 'TkDefaultFont'
 MODIFIER_MASKS = {
-    "Shift": int('0x0001', base=16),
-    "Caps Lock": int('0x0002', base=16),
-    "Control": int('0x0004', base=16),
-    "Left-hand Alt": int('0x0008', 16),
-    "Num Lock": int('0x0010', base=16),
-    "Right-hand Alt": int('0x0080', base=16),
-    "Mouse button 1": int('0x0100', base=16),
-    "Mouse button 2": int('0x0200', base=16),
-    "Mouse button 3": int('0x0400', base=16)
+    "Shift": int('0b1', base=2)
 }
 # =============================================================================
 # ---- Views
@@ -302,8 +294,8 @@ class _Scrolled_Mixin:
                  master=None,
                  scroll_orient='both',
                  autohide=True,
-                 hbootstyle='round-light',
-                 vbootstyle='round-light',
+                 hbootstyle='round',
+                 vbootstyle='round',
                  builtin_method=False,
                  **kwargs):
         assert scroll_orient in ('vertical', 'horizontal', 'both'), scroll_orient
@@ -420,8 +412,8 @@ def ScrolledWidget(master=None,
                    widget:tk.Widget=ttk.Frame,
                    scroll_orient='both',
                    autohide=True,
-                   hbootstyle='round-light',
-                   vbootstyle='round-light',
+                   hbootstyle='round',
+                   vbootstyle='round',
                    **kwargs):
     """Structure:
     <. Container (outer frame) >
@@ -454,30 +446,30 @@ class ScrolledTreeview(_Scrolled_Mixin, ttk.Treeview):
 def ScrolledFrame(master=None,
                   scroll_orient='both',
                   autohide=True,
-                  hbootstyle='round-light',
-                  vbootstyle='round-light',
+                  hbootstyle='round',
+                  vbootstyle='round',
                   **kwargs):
     return ScrolledWidget(master=master,
                           widget=ttk.Frame,
                           scroll_orient=scroll_orient,
                           autohide=autohide,
-                          hbootstyle='round-light',
-                          vbootstyle='round-light',
+                          hbootstyle=hbootstyle,
+                          vbootstyle=vbootstyle,
                           **kwargs)
 
 
 def ScrolledLabelframe(master=None,
                        scroll_orient='both',
                        autohide=True,
-                       hbootstyle='round-light',
-                       vbootstyle='round-light',
+                       hbootstyle='round',
+                       vbootstyle='round',
                        **kwargs):
     return ScrolledWidget(master=master,
                           widget=ttk.Labelframe,
                           scroll_orient=scroll_orient,
                           autohide=autohide,
-                          hbootstyle='round-light',
-                          vbootstyle='round-light',
+                          hbootstyle=hbootstyle,
+                          vbootstyle=vbootstyle,
                           **kwargs)
 
 
