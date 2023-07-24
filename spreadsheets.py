@@ -2622,7 +2622,7 @@ class Book(ttk.Frame):
             self._panedwindow.forget(0)
         self._sidebar_hidden = not self._sidebar_hidden
     
-    def _find_key(self, index_or_name:Union[int, str]) -> str:
+    def _get_key(self, index_or_name:Union[int, str]) -> str:
         if isinstance(index_or_name, str):  # name input
             for key, ps in self._sheets_props.items():
                 if ps["name"] == index_or_name:
@@ -2655,7 +2655,7 @@ class Book(ttk.Frame):
         return new_sheet
     
     def switch_sheet(self, index_or_name:Union[int, str]) -> Sheet:
-        key = self._find_key(index_or_name)
+        key = self._get_key(index_or_name)
         self._sheet_var.set(key)
         
         return self._sheet
@@ -2767,7 +2767,7 @@ class Book(ttk.Frame):
         menu.delete(0, 'end')
     
     def delete_sheet(self, name:str, destroy:bool=True) -> dict:
-        key = self._find_key(name)
+        key = self._get_key(name)
         return self._delete_sheet(key, destroy=destroy)
     
     def _delete_sheet(self, key, destroy:bool=True):
@@ -2796,7 +2796,7 @@ class Book(ttk.Frame):
                      new_name:Optional[str]=None,
                      auto_rename:bool=False):
         sheets_props = self._sheets_props
-        key = self._find_key(old_name)
+        key = self._get_key(old_name)
         
         if new_name == old_name:
             return new_name
