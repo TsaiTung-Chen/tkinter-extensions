@@ -6,6 +6,7 @@ Created on Mon May 22 22:35:24 2023
 @author: tungchentsai
 """
 
+import gc
 import sys
 import copy
 import random
@@ -1640,6 +1641,8 @@ class Sheet(ttk.Frame):
                 )
                 
                 # Text
+                if not (text := values.iat[r, c]):
+                    continue
                 tags = self._make_tags(type_=type_, subtype='text', **kw)
                 padx, pady = cell_style["padding"]
                 anchor, xy = (list(), list())
@@ -1659,8 +1662,8 @@ class Sheet(ttk.Frame):
                 justify = 'left' if 'w' in anchor else (
                     'right' if 'e' in anchor else 'center')
                 anchor = ''.join(anchor[::-1]) if anchor else 'center'
-                text = self._fit_size(
-                    values.iat[r, c],
+                text_fit = self._fit_size(
+                    text,
                     cell_style["font"],
                     width=x2 - x1 - padx,
                     height=y2 - y1 - pady
@@ -1668,7 +1671,7 @@ class Sheet(ttk.Frame):
                 canvas.create_text(
                     *xy,
                     anchor=anchor,
-                    text=text,
+                    text=text_fit,
                     justify=justify,
                     font=cell_style["font"],
                     fill=cell_style["foreground"],
@@ -2818,6 +2821,8 @@ class Book(ttk.Frame):
         if destroy:
             for widget in (ps["sheet"], ps["switch_frame"]):
                 widget.destroy()
+        
+        self.after(500, gc.collect)
         
         return ps
     
