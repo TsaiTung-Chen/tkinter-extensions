@@ -1146,10 +1146,16 @@ class Sheet(ttk.Frame):
     
     def _reset_rightclick_menu(self) -> tk.Menu:
         menu = self._rightclick_menu
-        menu.delete(0, 'end')
+        try:
+            menu.delete(0, 'end')
+        except tk.TclError:
+            pass
         
-        for child in menu.winfo_children():
-            child.destroy()
+        try:
+            for child in menu.winfo_children():
+                child.destroy()
+        except tk.TclError:
+            pass
         
         return menu
     
@@ -1965,7 +1971,7 @@ class Sheet(ttk.Frame):
     def reset(self, history:bool=True):
         for child in self.winfo_children():
             child.destroy()
-        _history = self._history
+        _history:History = self._history
         self.__init__(_reset=True, **self._init_configs)
         if not history:
             self._history = _history
@@ -2760,10 +2766,16 @@ class Book(ttk.Frame):
     
     def _reset_rightclick_menu(self) -> tk.Menu:
         menu = self._rightclick_menu
-        menu.delete(0, 'end')
+        try:
+            menu.delete(0, 'end')
+        except tk.TclError:
+            pass
         
-        for child in menu.winfo_children():
-            child.destroy()
+        try:
+            for child in menu.winfo_children():
+                child.destroy()
+        except tk.TclError:
+            pass
         
         return menu
     
