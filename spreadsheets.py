@@ -1271,15 +1271,16 @@ class Sheet(ttk.Frame):
         assert (i1 is not None) or (i2 is None), (i1, i2)
         assert axis in (0, 1), axis
         
-        if (i1 is None) or (i2 is None):
-            r1, c1, r2, c2 = self._visible_rcs
+        r1, c1, r2, c2 = self._visible_rcs
         
         if i1 is None:
             i1, i2 = (r1, r2) if axis == 0 else (c1, c2)
         elif i2 is None:
             i2 = r2 if axis == 0 else c2
         else:
+            i_min, i_max = (r1, r2) if axis == 0 else (c1, c2)
             i1, i2 = sorted([i1, i2])
+            i1, i2 = [max(i1, i_min), min(i2, i_max)]
         
         max_i = self.values.shape[axis] - 1
         assert 0 <= i1 <= i2 <= max_i, (i1, i2, max_i)
@@ -1577,20 +1578,23 @@ class Sheet(ttk.Frame):
         assert (r1 is not None) or (r2 is None), (r1, r2)
         assert (c1 is not None) or (c2 is None), (c1, c2)
         
+        r1_vis, c1_vis, r2_vis, c2_vis = self._visible_rcs
         gy2s, gx2s = self._gy2s_gx2s
         
         if r1 is None:
-            r1, _, r2, _ = self._visible_rcs
+            r1, r2 = (r1_vis, r2_vis)
         elif r2 is None:
-            _, _, r2, _ = self._visible_rcs
+            r2 = r2_vis
         else:
             r1, r2 = sorted([r1, r2])
+            r1, r2 = [max(r1, r1_vis), min(r2, r2_vis)]
         if c1 is None:
-            _, c1, _, c2 = self._visible_rcs
+            c1, c2 = (c1_vis, c2_vis)
         elif c2 is None:
-            *_, c2 = self._visible_rcs
+            c2 = c2_vis
         else:
             c1, c2 = sorted([c1, c2])
+            c1, c2 = [max(c1, c1_vis), min(c2, c2_vis)]
         
         max_r, max_c = [ s - 1 for s in self.values.shape ]
         assert 0 <= r1 <= r2 <= max_r, (r1, r2, max_r)
@@ -1812,15 +1816,16 @@ class Sheet(ttk.Frame):
                     axis=1, new=gy2, is_start=False)
         
         # Set each header's state
+        r1_vis, c1_vis, r2_vis, c2_vis = self._visible_rcs
         max_r, max_c = [ s - 1 for s in self.values.shape ]
-        rows_on = np.arange(r_low, r_high+1)
-        cols_on = np.arange(c_low, c_high+1)
-        for r in range(0, max_r+1):
+        rows_on = set(range(r_low, r_high+1)) & set(range(r1_vis, r2_vis+1))
+        cols_on = set(range(c_low, c_high+1)) & set(range(c1_vis, c2_vis+1))
+        for r in range(r1_vis, r2_vis+1):
             tagdict = self._make_tags(type_='rowheader', row=r, withkey=False)
             self._set_header_state(
                 tagdict, state='selected' if r in rows_on else 'normal'
             )
-        for c in range(0, max_c+1):
+        for c in range(c1_vis, c2_vis+1):
             tagdict = self._make_tags(type_='colheader', col=c, withkey=False)
             self._set_header_state(
                 tagdict, state='selected' if c in cols_on else 'normal'
