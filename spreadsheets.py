@@ -157,6 +157,7 @@ class FontDialog(_DialogPositioning, dialogs.FontDialog):
         for f in tk.font.families():
             if all([f, not f.startswith("@"), "emoji" not in f.lower()]):
                 self._families.add(f)
+        self._families = sorted(self._families)  #EDIT
     
     def create_body(self, master):
         # Edit: use natural window size
@@ -292,7 +293,9 @@ class ColorChooserDialog(_DialogPositioning, colorchooser.ColorChooserDialog):
 
 
 class QueryDialog(_DialogPositioning, dialogs.QueryDialog):
-    pass
+    def create_body(self, master):
+        super().create_body(master=master)
+        self._initial_focus.select_range(0, 'end')
 
 
 class History:
@@ -313,6 +316,9 @@ class History:
         self._step = 0
         self._sequence:Union[Dict[str, List[Callable]], None] = None
         self._stack = {"forward": list(), "backward": list()}
+    
+    def reset(self):
+        self.__init__()
     
     def add(self, forward:Callable, backward:Callable):
         assert callable(forward) and callable(backward), (forward, backward)
@@ -361,9 +367,6 @@ class History:
             self._callback()
         
         return trailing
-    
-    def reset(self):
-        self.__init__()
     
     def back(self):
         assert self.step > 0, self.step
@@ -433,6 +436,10 @@ class Sheet(ttk.Frame):
     def values(self) -> pd.DataFrame:
         return self._values
     
+    @property
+    def shape(self) -> tuple:
+        return self._values.shape
+    
     def __init__(self,
                  master,
                  shape:Union[Tuple[int], List[int]]=(10, 10),
@@ -459,7 +466,7 @@ class Sheet(ttk.Frame):
         assert get_style is None or callable(get_style), get_style
         
         # Stacking order: CornerCanvas > ColCanvas > RowCanvas > CoverFrame
-        # > SelectionFrame > Entry > CellCanvas
+        # > Entry > CellCanvas
         top_left = {"row": 0, "column": 0}
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(1, weight=1)
@@ -488,7 +495,7 @@ class Sheet(ttk.Frame):
             orient='vertical',
         )
         self._vbar.grid(row=0, column=2, rowspan=2, sticky='ns', padx=(1, 0))
-        self._cover = ttk.Frame(self)  # covers entry and selection frames
+        self._cover = ttk.Frame(self)  # covers the entry widget
         self._cover.grid(row=2, column=2, sticky='nesw')  # right bottom corner
         self._cover.lift(canvas)
         self._mousewheel_sensitivity = mousewheel_sensitivity
@@ -502,6 +509,7 @@ class Sheet(ttk.Frame):
         colcanvas.create_rectangle(1, 1, 1, 1, width=0, tag='invisible-bg')
         colcanvas.tag_bind('invisible-bg', '<Button-1>', self._be_focus)
         
+        # Init the backend states
         self._get_style = get_style
         self._default_styles = self._update_default_styles()
         self._default_cell_shape = shape
@@ -533,6 +541,7 @@ class Sheet(ttk.Frame):
         self._resize_start = None
         self._history = History()
         
+        # Create right-click menu and entry widgets
         self._rightclick_menu = tk.Menu(self, tearoff=0)
         self._entry = entry = tk.Entry(
             self, textvariable=self._focus_value, takefocus=0)
@@ -540,31 +549,34 @@ class Sheet(ttk.Frame):
         entry.lower()
         entry.bind('<KeyPress>', self._on_key_press_entry)
         
-        self._selframes = selframes = [ tk.Frame(self) for i in range(4) ]
-        for frame in selframes:
-            frame.place(x=0, y=0)
-            frame.lift(canvas)
-            frame.bind('<ButtonPress-1>', self._on_leftclick_press_selframe)
-            frame.bind('<B1-Motion>', self._on_leftclick_motion_selframe)
-            frame.bind(
-                '<Double-ButtonPress-1>',
-                self._on_leftclick_double_press_selframe
-            )
+        # Init the selection frame
+        canvas.create_rectangle(1, 1, 1, 1, fill='', tags='selection-frame')
+        canvas.tag_bind(
+            'selection-frame', '<ButtonPress-1>', self._on_leftclick_press)
+        canvas.tag_bind(
+            'selection-frame', '<B1-Motion>', self._on_leftclick_motion)
+        canvas.tag_bind(
+            'selection-frame',
+            '<Double-ButtonPress-1>',
+            self._on_leftclick_double_selframe
+        )
         
         self._selection_rcs:Tuple[int] = (-1, -1, -1, -1)
         self._selection_rcs:Tuple[int] = self._select_cells(0, 0, 0, 0)
         
+        # Add bindings
         self.bind('<<ThemeChanged>>', self._on_theme_changed)
         self.bind('<KeyPress>', self._on_key_press)
         self.bind('<<SelectAll>>', self._on_select_all)
         self.bind('<<Copy>>', self._on_copy)
         self.bind('<<Paste>>', self._on_paste)
         canvas.bind('<Configure>', self._on_configure_canvas)
-        for widget in [canvas, rowcanvas, colcanvas, entry, *selframes]:
+        for widget in [canvas, rowcanvas, colcanvas, entry]:
             widget.configure(takefocus=0)
             for scrollseq in self.MouseScroll:
                 widget.bind(scrollseq, self._on_mousewheel_scroll)
         
+        # Refresh the canvases and scrollbars
         self.xview_scroll(0, 'units')
         self.yview_scroll(0, 'units')
         self.focus_set()
@@ -854,8 +866,6 @@ class Sheet(ttk.Frame):
             
             self.canvas.move('xscroll', delta_canvas, 0)
             header_canvas.move('all', delta_canvas, 0)
-            for widget in [self._entry, *self._selframes]:
-                widget.place(x=int(widget.place_info()["x"]) + delta_canvas)
         else:
             key = "row"
             old_i1, old_i2, new_i1, new_i2 = (old_r1, old_r2, new_r1, new_r2)
@@ -863,8 +873,6 @@ class Sheet(ttk.Frame):
             
             self.canvas.move('yscroll', 0, delta_canvas)
             header_canvas.move('all', 0, delta_canvas)
-            for widget in [self._entry, *self._selframes]:
-                widget.place(y=int(widget.place_info()["y"]) + delta_canvas)
         
         # Delete out-of-view items
         idc_out = set(range(old_i1, old_i2+1)) - set(range(new_i1, new_i2+1))
@@ -1069,7 +1077,7 @@ class Sheet(ttk.Frame):
         menu_textcolor.add_command(
             label='Reset Color(s)',
             command=lambda: self._selection_set_foregroundcolor(
-                choose=False, undo=True)
+                dialog=False, undo=True)
         )
         menu.add_cascade(label='Text Color(s)', menu=menu_textcolor)
         
@@ -1082,7 +1090,7 @@ class Sheet(ttk.Frame):
         menu_bgcolor.add_command(
             label='Reset Color(s)',
             command=lambda: self._selection_set_backgroundcolor(
-                choose=False, undo=True)
+                dialog=False, undo=True)
         )
         menu.add_cascade(label='Background Color(s)', menu=menu_bgcolor)
         
@@ -1094,7 +1102,7 @@ class Sheet(ttk.Frame):
         )
         menu_font.add_command(
             label='Reset Font(s)',
-            command=lambda: self._selection_set_font(choose=False, undo=True)
+            command=lambda: self._selection_set_font(dialog=False, undo=True)
         )
         menu.add_cascade(label='Font(s)', menu=menu_font)
         
@@ -1160,24 +1168,15 @@ class Sheet(ttk.Frame):
         
         return menu
     
-    def _redirect_widget_event(self, event) -> tk.Event:
+    def _redirect_widget_event(self, event) -> tk.Event:  # not used
         widget, canvas = (event.widget, self.canvas)
         event.x += widget.winfo_x() - canvas.winfo_x()
         event.y += widget.winfo_y() - canvas.winfo_y()
         event.widget = canvas
         return event
     
-    def _on_leftclick_press_selframe(self, event):
-        event = self._redirect_widget_event(event)
-        self.__on_leftclick_to_select(event, expand=False)
-    
-    def _on_leftclick_motion_selframe(self, event):
-        event = self._redirect_widget_event(event)
-        self.__on_leftclick_to_select(event, expand=True)
-    
-    def _on_leftclick_double_press_selframe(self, event):
+    def _on_leftclick_double_selframe(self, event):
         self._be_focus()
-        event = self._redirect_widget_event(event)
         x, y, canvas = (event.x, event.y, event.widget)
         for oid in canvas.find_overlapping(x, y, x, y):
             try:
@@ -1272,17 +1271,15 @@ class Sheet(ttk.Frame):
         assert axis in (0, 1), axis
         
         r1, c1, r2, c2 = self._visible_rcs
+        i1_vis, i2_vis = (r1, r2) if axis == 0 else (c1, c2)
         
         if i1 is None:
-            i1, i2 = (r1, r2) if axis == 0 else (c1, c2)
+            i1, i2 = (i1_vis, i2_vis)
         elif i2 is None:
-            i2 = r2 if axis == 0 else c2
-        else:
-            i_min, i_max = (r1, r2) if axis == 0 else (c1, c2)
-            i1, i2 = sorted([i1, i2])
-            i1, i2 = [max(i1, i_min), min(i2, i_max)]
+            i2 = i2_vis
+        i1, i2 = sorted([ np.clip(i, i1_vis, i2_vis) for i in (i1, i2) ])
         
-        max_i = self.values.shape[axis] - 1
+        max_i = self.shape[axis] - 1
         assert 0 <= i1 <= i2 <= max_i, (i1, i2, max_i)
         
         (vx1, vx2), (vy1, vy2) = self._pview
@@ -1394,8 +1391,8 @@ class Sheet(ttk.Frame):
         if type_ == 'cornerheader':
             if skip_selected and (
                 (r1 == c1 == 0) and
-                (r2 >= self.values.shape[0] - 1) and
-                (c2 >= self.values.shape[1] - 1)):
+                (r2 >= self.shape[0] - 1) and
+                (c2 >= self.shape[1] - 1)):
                 return 'selected'
             
             canvas = self.cornercanvas
@@ -1477,7 +1474,7 @@ class Sheet(ttk.Frame):
         r, c = self._get_rc(tagdict, to_tuple=True, canvas=event.widget)
         r1, c1, r2, c2 = self._selection_rcs
         (r1, r2), (c1, c2) = [sorted([r1, r2]), sorted([c1, c2])]
-        max_r, max_c = [ s - 1 for s in self.values.shape ]
+        max_r, max_c = [ s - 1 for s in self.shape ]
         if type_ == 'rowheader':
             axis_name, axis = ('Row', 0)
             if not ((r1 <= r <= r2) and (c1 == 0) and (c2 >= max_c)):
@@ -1496,12 +1493,12 @@ class Sheet(ttk.Frame):
         
         if type_ in ('rowheader', 'colheader'):
             menu.add_command(
-                label=f'Insert New {axis_name} Ahead',
+                label=f'Insert New {axis_name}s Ahead',
                 command=lambda: self._selection_insert_cells(
                     axis, mode='ahead', undo=True)
             )
             menu.add_command(
-                label=f'Insert New {axis_name} Behind',
+                label=f'Insert New {axis_name}s Behind',
                 command=lambda: self._selection_insert_cells(
                     axis, mode='behind', undo=True)
             )
@@ -1509,6 +1506,33 @@ class Sheet(ttk.Frame):
             label=f'Delete Selected {axis_name}(s)',
             command=lambda: self._selection_delete_cells(undo=True)
         )
+        menu.add_separator()
+        if type_ in ('cornerheader', 'rowheader'):
+            menu_height = tk.Menu(menu, tearoff=0)
+            menu_height.add_command(
+                label='Set Height...',
+                command=lambda: self._selection_resize_cells(
+                    axis=0, undo=True)
+            )
+            menu_height.add_command(
+                label='Reset Height(s)',
+                command=lambda: self._selection_resize_cells(
+                    axis=0, dialog=False, undo=True)
+            )
+            menu.add_cascade(label="Rows' Height(s)", menu=menu_height)
+        if type_ in ('cornerheader', 'colheader'):
+            menu_width = tk.Menu(menu, tearoff=0)
+            menu_width.add_command(
+                label='Set Width...',
+                command=lambda: self._selection_resize_cells(
+                    axis=1, undo=True)
+            )
+            menu_width.add_command(
+                label='Reset Width(s)',
+                command=lambda: self._selection_resize_cells(
+                    axis=1, dialog=False, undo=True)
+            )
+            menu.add_cascade(label="Columns' Width(s)", menu=menu_width)
         menu.add_separator()
         self._build_general_rightclick_menu()
         
@@ -1553,15 +1577,17 @@ class Sheet(ttk.Frame):
             size = start["size"] + event.y - start["y"]
         else:
             size = start["size"] + event.x - start["x"]
-        self.resize_cells(start["i"], axis, size=size, trace=False, undo=False)
+        self.resize_cells(
+            start["i"], axis=axis, N=1, sizes=[size], trace=False, undo=False)
         
         history = self._history
         if history.step > start["step"]:
             history.pop()
         history.add(
-            forward=lambda: self.resize_cells(start["i"], axis, size=size),
+            forward=lambda: self.resize_cells(
+                start["i"], axis=axis, N=1, sizes=[size]),
             backward=lambda: self.resize_cells(
-                start["i"], axis, size=start["size"])
+                start["i"], axis=axis, sizes=[start["size"]])
         )
     
     _on_leftclick_motion_hhandle = lambda self, event: (
@@ -1585,18 +1611,14 @@ class Sheet(ttk.Frame):
             r1, r2 = (r1_vis, r2_vis)
         elif r2 is None:
             r2 = r2_vis
-        else:
-            r1, r2 = sorted([r1, r2])
-            r1, r2 = [max(r1, r1_vis), min(r2, r2_vis)]
         if c1 is None:
             c1, c2 = (c1_vis, c2_vis)
         elif c2 is None:
             c2 = c2_vis
-        else:
-            c1, c2 = sorted([c1, c2])
-            c1, c2 = [max(c1, c1_vis), min(c2, c2_vis)]
         
-        max_r, max_c = [ s - 1 for s in self.values.shape ]
+        r1, r2 = sorted([ np.clip(r, r1_vis, r2_vis) for r in (r1, r2) ])
+        c1, c2 = sorted([ np.clip(c, c1_vis, c2_vis) for c in (c1, c2) ])
+        max_r, max_c = [ s - 1 for s in self.shape ]
         assert 0 <= r1 <= r2 <= max_r, (r1, r2, max_r)
         assert 0 <= c1 <= c2 <= max_c, (c1, c2, max_c)
         
@@ -1690,8 +1712,11 @@ class Sheet(ttk.Frame):
         canvas.tag_bind(
             tag_cell,
             '<Double-ButtonPress-1>',
-            self._on_leftclick_double_press_cell
+            self._on_leftclick_double_cell
         )
+        
+        # Keep the selection frame on the top
+        canvas.tag_raise('selection-frame')
     
     def _refresh_entry(self, r:Optional[int]=None, c:Optional[int]=None):
         assert (r is None) == (c is None), (r, c)
@@ -1762,7 +1787,7 @@ class Sheet(ttk.Frame):
         assert (r1 is not None) or (r2 is None), (r1, r2)
         assert (c1 is not None) or (c2 is None), (c1, c2)
         
-        max_r, max_c = [ s - 1 for s in self.values.shape ]
+        max_r, max_c = [ s - 1 for s in self.shape ]
         r1 = 0 if r1 is None else np.clip(r1, 0, max_r)
         c1 = 0 if c1 is None else np.clip(c1, 0, max_c)
         r2 = max_r if r2 is None else np.clip(r2, 0, max_r)
@@ -1783,18 +1808,13 @@ class Sheet(ttk.Frame):
         # Update selection frames' styles
         selection_style = self._default_styles["selection"]
         color, w = selection_style["color"], selection_style["width"]
-        for selframe in self._selframes:
-            selframe.configure(background=color)
+        self.canvas.itemconfigure('selection-frame', outline=color, width=w)
         
         # Relocate the selection frames
-        left, top, right, bottom = self._selframes
         gy2s, gx2s = self._gy2s_gx2s
         x1, x2 = self._canvasx(gx2s[c_low] + 1, gx2s[c_high+1])
         y1, y2 = self._canvasy(gy2s[r_low] + 1, gy2s[r_high+1])
-        left.place(anchor='ne', x=x1, y=y1-w, width=w, height=y2-y1+2*w)
-        top.place(anchor='sw', x=x1, y=y1, width=x2-x1, height=w)
-        right.place(anchor='sw', x=x2, y=y2+w, width=w, height=y2-y1+2*w)
-        bottom.place(anchor='ne', x=x2, y=y2, width=x2-x1, height=w)
+        self.canvas.coords('selection-frame', x1-w+1, y1-w+1, x2+w-1, y2+w-1)
         
         # Relocate the viewing window to trace the last selected cell (r2, c2)
         if trace:
@@ -1817,7 +1837,7 @@ class Sheet(ttk.Frame):
         
         # Set each header's state
         r1_vis, c1_vis, r2_vis, c2_vis = self._visible_rcs
-        max_r, max_c = [ s - 1 for s in self.values.shape ]
+        max_r, max_c = [ s - 1 for s in self.shape ]
         rows_on = set(range(r_low, r_high+1)) & set(range(r1_vis, r2_vis+1))
         cols_on = set(range(c_low, c_high+1)) & set(range(c1_vis, c2_vis+1))
         for r in range(r1_vis, r2_vis+1):
@@ -1855,7 +1875,7 @@ class Sheet(ttk.Frame):
         assert isinstance(expand, bool), expand
         
         old_r1, old_c1, old_r2, old_c2 = self._selection_rcs
-        max_rc = [ s - 1 for s in self.values.shape ]
+        max_rc = [ s - 1 for s in self.shape ]
         axis = 0 if direction in ('up', 'down') else 1
         new_rc1 = [old_r1, old_c1]
         old_rc2, new_rc2 = [old_r2, old_c2], [old_r2, old_c2]
@@ -1914,7 +1934,7 @@ class Sheet(ttk.Frame):
         
         return self._select_cells(*new_rc1, *new_rc2)
     
-    def _on_leftclick_double_press_cell(self, event=None):
+    def _on_leftclick_double_cell(self, event=None):
         tagdict = self._get_tags('current')
         self._focus_in_cell(tagdict["row"], tagdict["col"])
     
@@ -1987,166 +2007,241 @@ class Sheet(ttk.Frame):
     def resize_cells(self,
                      i:int,
                      axis:int,
-                     size:Optional[int]=None,
+                     N:int=1,
+                     sizes:Optional[np.ndarray]=None,
+                     dialog:bool=False,
                      trace:bool=True,
                      undo:bool=False):
         assert i >= -1, i
         assert axis in (0, 1), axis
+        assert N >= 1, N
         
-        r1, c1, r2, c2 = self._visible_rcs
-        _i = int(i) + 1
+        # Update the status of the resized rows or cols
+        r1_vis, c1_vis, r2_vis, c2_vis = self._visible_rcs
+        idc = np.arange(i+1, i+N+1)
         key = ("row", "col")[axis]
-        header_canvas = (self.rowcanvas, self.colcanvas)[axis]
         min_size = self._min_sizes[axis]
-        old_size = self._cell_sizes[axis][_i]
-        new_size = self._default_cell_sizes[axis] if size is None else int(size)
-        delta = max(new_size - old_size, min_size - old_size)
-        self._cell_sizes[axis][_i] += delta
-        i2 = (r2, c2)[axis]
-        dx, dy = [(0, delta), (delta, 0)][axis]
+        old_sizes = self._cell_sizes[axis][idc]
         
-        # Move the rows below or cols on the right side
-        for i_move in range(i+1, i2+1):
+        if dialog:
+            dimension = ('height', 'width')[axis]
+            dialog = QueryDialog(
+                parent=self,
+                prompt=f'Enter the new {dimension}:',
+                initialvalue=old_sizes[0],
+                datatype=int
+            )
+            dialog.show(position=self._center_window)
+            if not isinstance(size := dialog.result, int):
+                return
+            new_sizes = sizes = np.full(N, size)
+        elif sizes is None:  # reset the rows or cols sizes
+            new_sizes = np.full(N, self._default_cell_sizes[axis])
+        else:
+            assert np.shape(sizes) == (N,), (sizes, N)
+            new_sizes = np.asarray(sizes)
+        
+        deltas = np.maximum(new_sizes - old_sizes, min_size - old_sizes)
+        self._cell_sizes[axis][idc] += deltas
+        self._update_content_size()
+        
+        # Move the bottom rows or right cols
+        if axis == 0:
+            header_canvas = self.rowcanvas
+            i2 = r2_vis
+            dx, dy = (0, deltas.sum())
+        else:
+            header_canvas = self.colcanvas
+            i2 = c2_vis
+            dx, dy = (deltas.sum(), 0)
+        
+        for i_move in range(i+N, i2+1):
             tag_move = self._make_tag(key, row=i_move, col=i_move)
             header_canvas.move(tag_move, dx, dy)
             self.canvas.move(tag_move, dx, dy)
         
-        tag_resize = self._make_tag(key, row=i, col=i)
-        self._canvases_delete(tag_resize)  # delete the row or col
-        self._update_content_size()
+        # Delete the resized rows or cols
+        for i_resized in idc - 1:
+            tag_resized = self._make_tag(key, row=i_resized, col=i_resized)
+            self._canvases_delete(tag_resized)
         
-        # Redraw the deleted row or col
-        (self.yview_scroll, self.xview_scroll)[axis](0, 'units')
-        self._select_cells(
-            **(dict(r1=i, r2=i), dict(c1=i, c2=i))[axis], trace=trace)
+        # Redraw the deleted rows or cols
+        if axis == 0:
+            self.yview_scroll(0, 'units')
+            self._select_cells(r1=i, r2=i+N-1, trace=trace)
+        else:
+            self.xview_scroll(0, 'units')
+            self._select_cells(c1=i, c2=i+N-1, trace=trace)
         
         if undo:
             self._history.add(
-                forward=lambda: self.resize_cells(i, axis=axis, size=size),
-                backward=lambda: self.resize_cells(i, axis=axis, size=old_size)
+                forward=lambda: self.resize_cells(
+                    i, axis=axis, N=N, sizes=copy.copy(sizes)),
+                backward=lambda: self.resize_cells(
+                    i, axis=axis, N=N, sizes=copy.copy(old_sizes))
             )
+        
+        return new_sizes
     
     def insert_cells(self,
                      i:int,
                      axis:int,
+                     N:int=1,
                      df:Optional[pd.DataFrame]=None,
-                     size:Optional[int]=None,
+                     sizes:Optional[np.ndarray]=None,
                      styles=None,
                      redraw:bool=True,
                      trace:bool=True,
                      undo:bool=False):
         assert axis in (0, 1), axis
-        _df, shape = self.values, self.values.shape
-        max_i = shape[axis] - 1
+        old_df, old_shape = self.values, self.shape
+        max_i = old_shape[axis] - 1
+        N = int(N)
         assert 0 <= i <= max_i + 1, (i, max_i)
-        assert isinstance(df, (type(None), pd.DataFrame)), df
+        assert N >= 1, N
         
-        # Create a new row or col
-        shape_new = list(shape)
-        shape_new[axis] = 1
-        df_new = pd.DataFrame(np.full(shape_new, '', dtype=object)) \
-            if df is None else df
-        
-        # Insert the new row or col to the DataFrame
-        if axis == 0:
-            df_leading, df_trailing = _df.iloc[:i, :], _df.iloc[i:, :]
+        # Create a dataframe containing the new values (a 2-D dataframe)
+        new_shape = list(old_shape)
+        new_shape[axis] = N
+        new_shape = tuple(new_shape)
+        if df is None:
+            new_df = pd.DataFrame(np.full(new_shape, '', dtype=object))
         else:
-            df_leading, df_trailing = _df.iloc[:, :i], _df.iloc[:, i:]
+            assert np.shape(df) == new_shape, (df, new_shape)
+            new_df = pd.DataFrame(df)
+        
+        # Create a list of new sizes (a 1-D list)
+        if sizes is None:
+            new_size = self._default_cell_sizes[axis]
+            new_sizes = np.array([ new_size for i in range(N) ])
+        else:
+            assert np.shape(sizes) == (N,), (sizes, N)
+            new_sizes = np.asarray(sizes)
+        
+        # Create a list of new styles
+        if styles is None:
+            new_styles = np.array([ [ dict() for _ in range(new_shape[1]) ]
+                                    for _ in range(new_shape[0]) ])
+        else:
+            assert np.shape(styles) == new_shape, styles
+            new_styles = np.asarray(styles)
+        
+        # Insert the new values
+        if axis == 0:
+            leading, trailing = old_df.iloc[:i, :], old_df.iloc[i:, :]
+        else:
+            leading, trailing = old_df.iloc[:, :i], old_df.iloc[:, i:]
         self._values = pd.concat(
-            [df_leading, df_new, df_trailing],
+            [leading, new_df, trailing],
             axis=axis,
             ignore_index=True,
             copy=False
         )
         
-        # Insert a new size with the default value
-        _i = i + 1
-        new_size = self._default_cell_sizes[axis] if size is None else size
-        self._cell_sizes[axis] = np.insert(self._cell_sizes[axis], _i, new_size)
+        # Insert the new sizes
+        idc = [i+1] * N  # add 1 to skip the header size
+        self._cell_sizes[axis] = np.insert(self._cell_sizes[axis], idc, new_sizes)
         self._update_content_size()
         
-        # Insert a new row or col of styles
-        new_styles = [ dict() for _i in range(shape_new[axis-1]) ] \
-            if styles is None else styles
-        assert np.ndim(new_styles) == 1, np.shape(new_styles)
+        # Insert the new styles
+        idc = [i] * N
         self._cell_styles = np.insert(
-            self._cell_styles, i, new_styles, axis=axis)
+            self._cell_styles, idc, new_styles, axis=axis)
         
-        self._set_selection(**(dict(r1=i, r2=i), dict(c1=i, c2=i))[axis])
+        if axis == 0:
+            selection_kw = {"r1": i, "r2": i + N - 1}
+            scrollbar = 'y'
+        else:
+            selection_kw = {"c1": i, "c2": i + N - 1}
+            scrollbar = 'x'
+        
+        # Select cells
+        self._set_selection(**selection_kw)
         
         # Redraw
         if redraw:
-            self.refresh(scrollbar=('y', 'x')[axis], trace=trace)
+            self.refresh(scrollbar=scrollbar, trace=trace)
         
         if undo:
             self._history.add(
                 forward=lambda: self.insert_cells(
                     i,
-                    axis,
+                    axis=axis,
+                    N=N,
                     df=None if df is None else df.copy(),
-                    size=None if size is None else copy.copy(size),
+                    sizes=None if sizes is None else copy.copy(sizes),
                     styles=None if styles is None else np.array(
                         [ [ d.copy() for d in dicts] for dicts in styles ]),
                     redraw=redraw
                 ),
-                backward=lambda: self.delete_cells(i, axis=axis, redraw=redraw)
+                backward=lambda: self.delete_cells(
+                    i, axis=axis, N=N, redraw=redraw)
             )
     
     def delete_cells(self,
                      i:int,
                      axis:int,
+                     N:int=1,
                      redraw:bool=True,
                      trace:bool=True,
                      undo:bool=False):
         assert axis in (0, 1), axis
-        max_i = self.values.shape[axis] - 1
+        max_i = self.shape[axis] - 1
+        N = int(N)
         assert 0 <= i <= max_i, (i, max_i)
+        assert N >= 1, N
         
-        # Delete the row or col in the DataFrame
+        # Delete the values
+        idc = np.arange(i, i+N)
+        idc_2d = (idc, slice(None)) if axis == 0 else (slice(None), idc)
+        deleted_df = self.values.iloc[idc_2d].copy()
+        self.values.drop(idc, axis=axis, inplace=True)
         if axis == 0:
-            idc, idc_2d = (i, slice(None)), (slice(i, i+1), slice(None))
+            self.values.index = range(self.shape[axis])
         else:
-            idc, idc_2d = (slice(None), i), (slice(None), slice(i, i+1))
-        df_deleted = self.values.iloc[idc_2d].copy()
-        self.values.drop(i, axis=axis, inplace=True)
-        if axis == 0:
-            self.values.index = range(max_i)
-        else:
-            self.values.columns = range(max_i)
+            self.values.columns = range(self.shape[axis])
         
-        # Delete the size
-        _i = i + 1
-        all_sizes = [ _sizes.copy() for _sizes in self._cell_sizes ]
-        size_deleted = self._cell_sizes[axis][_i]
-        self._cell_sizes[axis] = np.delete(self._cell_sizes[axis], _i)
+        # Delete the sizes
+        _idc = idc + 1  # add 1 to skip the header size
+        all_sizes = [ sizes.copy() for sizes in self._cell_sizes ]
+        deleted_sizes = self._cell_sizes[axis][_idc].copy()
+        self._cell_sizes[axis] = np.delete(self._cell_sizes[axis], _idc)
         self._update_content_size()
         
-        # Delete the row or col of styles
-        styles_deleted = np.array([ d.copy() for d in self._cell_styles[idc] ])
-        self._cell_styles = np.delete(self._cell_styles, i, axis=axis)
+        # Delete the styles
+        deleted_styles = np.array([ [ d.copy() for d in dicts ]
+                                    for dicts in self._cell_styles[idc_2d] ])
+        self._cell_styles = np.delete(self._cell_styles, idc, axis=axis)
         
-        self._set_selection(**(dict(r1=i, r2=i), dict(c1=i, c2=i))[axis])
+        if axis == 0:
+            selection_kw = {"r1": i, "r2": i + N - 1}
+        else:
+            selection_kw = {"c1": i, "c2": i + N - 1}
         
-        reset = False
+        # Select cells
+        self._set_selection(**selection_kw)
+        
+        # Redraw
+        was_reset = False
         if self.values.empty:  # reset the Sheet if no cells exist
             self.reset(history=False)
-            reset = True
+            deleted_sizes = all_sizes
+            was_reset = True
         elif redraw:
-            self.refresh(scrollbar=('y', 'x')[axis], trace=trace)
+            self.refresh(trace=trace)
         
         if undo:
-            if not reset:
-                all_sizes = None
             self._history.add(
-                forward=lambda: self.delete_cells(i, axis=axis, redraw=redraw),
+                forward=lambda: self.delete_cells(
+                    i, axis=axis, N=N, redraw=redraw),
                 backward=lambda: self._undo_delete_cells(
                     i,
-                    axis,
-                    df=df_deleted,
-                    size=size_deleted,
-                    styles=styles_deleted,
-                    all_sizes=all_sizes,
-                    reset=reset,
+                    axis=axis,
+                    N=N,
+                    df=deleted_df,
+                    sizes=deleted_sizes,
+                    styles=deleted_styles,
+                    was_reset=was_reset,
                     redraw=redraw
                 )
             )
@@ -2154,37 +2249,46 @@ class Sheet(ttk.Frame):
     def _undo_delete_cells(self,
                            i:int,
                            axis:int,
+                           N:int,
                            df:pd.DataFrame,
-                           size:int,
-                           styles,
-                           all_sizes:Optional[List[np.ndarray]]=None,
-                           reset:bool=False,
+                           sizes:Union[np.ndarray, List[np.ndarray]],
+                           styles:np.ndarray,
+                           was_reset:bool,
                            redraw:bool=True):
         assert isinstance(df, pd.DataFrame), df
-        assert df.ndim == 2, df.shape
+        assert isinstance(styles, np.ndarray), styles
+        assert isinstance(sizes, (np.ndarray, list)), sizes
+        assert styles.shape == df.shape, (styles.shape, df.shape)
         
-        if reset:
+        if was_reset:
             n_rows, n_cols = df.shape
-            assert isinstance(all_sizes, list), all_sizes
-            assert isinstance(styles, np.ndarray), styles
-            assert df.shape[axis-1] == styles.size, (df.shape, styles.shape)
-            assert n_rows == all_sizes[0].size - 1, (n_rows, all_sizes[0].size)
-            assert n_cols == all_sizes[1].size - 1, (n_cols, all_sizes[1].size)
+            assert isinstance(sizes, list), type(sizes)
+            assert all( isinstance(ss, np.ndarray) for ss in sizes ), sizes
+            assert sizes[0].shape == (n_rows+1,), (sizes[0].shape, df.shape)
+            assert sizes[1].shape == (n_cols+1,), (sizes[1].shape, df.shape)
             
             self._values = df.copy()
-            self._cell_sizes = [ _sizes.copy() for _sizes in all_sizes ]
-            self._cell_styles = np.expand_dims(
-                np.array([ d.copy() for d in styles ]),
-                axis
-            )
+            self._cell_styles = np.array([ [ d.copy() for d in dicts ]
+                                           for dicts in styles ])
+            self._cell_sizes = [ ss.copy() for ss in sizes ]
             self._update_content_size()
+            
             self._set_selection()
+            
             if redraw:
                 self.refresh(trace=False)
                 self.xview_moveto(0.)
                 self.yview_moveto(0.)
         else:
-            self.insert_cells(i, axis, df=df, size=size, styles=styles)
+            self.insert_cells(
+                i,
+                axis=axis,
+                N=N,
+                df=df,
+                sizes=sizes,
+                styles=styles,
+                redraw=redraw
+            )
     
     def set_values(self,
                    r1=None, c1=None, r2=None, c2=None,
@@ -2224,18 +2328,22 @@ class Sheet(ttk.Frame):
             r1, c1, r2, c2, values='', redraw=redraw, undo=undo, trace=trace)
     
     def copy_values(self, r1=None, c1=None, r2=None, c2=None):
+        r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
-        self.values.iloc[idc].to_clipboard(sep='\t', index=False, header=False)
+        values_to_copy = self.values.iloc[idc]
+        values_to_copy.to_clipboard(sep='\t', index=False, header=False)
+        
+        return values_to_copy
     
-    def set_property(self,
-                     r1=None, c1=None, r2=None, c2=None,
-                     *,
-                     property_:str,
-                     values=None,
-                     redraw:bool=True,
-                     trace:bool=True,
-                     undo:bool=False):
+    def set_style(self,
+                  r1=None, c1=None, r2=None, c2=None,
+                  *,
+                  property_:str,
+                  values=None,
+                  redraw:bool=True,
+                  trace:bool=True,
+                  undo:bool=False):
         r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
@@ -2270,20 +2378,20 @@ class Sheet(ttk.Frame):
         
         if undo:
             self._history.add(
-                forward=lambda: self.set_property(
+                forward=lambda: self.set_style(
                     *rcs, property_=property_, values=values, redraw=redraw),
-                backward=lambda: self.set_property(
+                backward=lambda: self.set_style(
                     *rcs, property_=property_, values=old_values, redraw=redraw)
             )
     
     def set_font(self,
                   r1=None, c1=None, r2=None, c2=None,
                   fonts=None,
-                  choose:bool=False,
+                  dialog:bool=False,
                   redraw:bool=True,
                   trace:bool=True,
                   undo:bool=False):
-        if choose:
+        if dialog:
             style_topleft = self._cell_styles[min(r1, r2), min(c1, c2)]
             font_topleft = style_topleft.get("font")
             dialog = FontDialog(parent=self, default=font_topleft)
@@ -2291,7 +2399,7 @@ class Sheet(ttk.Frame):
             if (fonts := dialog.result) is None:
                 return
         
-        self.set_property(
+        self.set_style(
             r1, c1, r2, c2,
             property_='font',
             values=fonts,
@@ -2299,18 +2407,20 @@ class Sheet(ttk.Frame):
             undo=undo,
             trace=trace
         )
+        
+        return fonts
     
     def _set_color(self,
                    r1=None, c1=None, r2=None, c2=None,
                    field:str='foreground',
                    colors=None,
-                   choose:bool=False,
+                   dialog:bool=False,
                    redraw:bool=True,
                    trace:bool=True,
                    undo:bool=False):
         assert field in ('foreground', 'background'), field
         
-        if choose:
+        if dialog:
             style_topleft = self._cell_styles[min(r1, r2), min(c1, c2)]
             color_topleft = style_topleft.get(field)
             dialog = ColorChooserDialog(parent=self, initialcolor=color_topleft)
@@ -2319,7 +2429,7 @@ class Sheet(ttk.Frame):
                 return
             colors = colors.hex
         
-        self.set_property(
+        self.set_style(
             r1, c1, r2, c2,
             property_=field,
             values=colors,
@@ -2327,70 +2437,64 @@ class Sheet(ttk.Frame):
             undo=undo,
             trace=trace
         )
+        
+        return colors
     
     def set_foregroundcolor(self, *args, **kwargs):
-        self._set_color(*args, field='foreground', **kwargs)
+        return self._set_color(*args, field='foreground', **kwargs)
     
     def set_backgroundcolor(self, *args, **kwargs):
-        self._set_color(*args, field='background', **kwargs)
+        return self._set_color(*args, field='background', **kwargs)
     
     def _selection_insert_cells(
-            self, axis:Optional[int]=None, mode:str='ahead', undo:bool=False):
-        assert axis in (None, 0, 1), axis
+            self, axis:int, mode:str='ahead', undo:bool=False):
+        assert axis in (0, 1), axis
         assert mode in ('ahead', 'behind'), mode
         
         r1, c1, r2, c2 = self._selection_rcs
         rcs = [(r1, r2), (c1, c2)] = [sorted([r1, r2]), sorted([c1, c2])]
-        max_r, max_c = [ s - 1 for s in self.values.shape ]
-        if axis is None:
-            if (r1 == 0) and (r2 >= max_r):  # cols selected
-                axis = 1
-            elif (c1 == 0) and (c2 >= max_c):  # rows selected
-                axis = 0
-            else:
-                raise ValueError(
-                    'Inserting new cells requires a entire row(s)/col(s) being '
-                    'selected. However, the selected row(s) and col(s) indices '
-                    f'are: {r1} <= r <= {r2} and {c1} <= c <= {c2}'
-                )
-        else:
-            (i1, i2), max_i = rcs[axis-1], [max_r, max_c][axis-1]
-            assert (i1 == 0) and (i2 >= max_i), (axis, i1, i2, max_i)
+        max_r, max_c = [ s - 1 for s in self.shape ]
+        (_i1, _i2), max_i = rcs[axis-1], [max_r, max_c][axis-1]
+        assert (_i1 == 0) and (_i2 >= max_i), (axis, (r1, c1, r2, c2), self.shape)
         
         if mode == 'ahead':
             i = rcs[axis][0]
         else:
             i = rcs[axis][1] + 1
-        self.insert_cells(i, axis=axis, undo=undo, trace=False)
+        
+        # Ask for number of rows/cols to insert
+        axis_name = ('rows', 'columns')[axis]
+        dialog = QueryDialog(
+            parent=self,
+            title='Rename Sheet',
+            prompt=f"Enter the number of {axis_name} to insert:",
+            datatype=int,
+            initialvalue=1,
+            minvalue=1,
+            maxvalue=100000
+        )
+        dialog.show(position=self._center_window)
+        
+        if isinstance(N := dialog.result, int):
+            self.insert_cells(i, axis=axis, N=N, undo=undo, trace=False)
     
     def _selection_delete_cells(self, undo:bool=False):
         r1, c1, r2, c2 = self._selection_rcs
         rcs = [(r1, r2), (c1, c2)] = [sorted([r1, r2]), sorted([c1, c2])]
-        max_r, max_c = [ s - 1 for s in self.values.shape ]
+        max_r, max_c = [ s - 1 for s in self.shape ]
         if (r1 == 0) and (r2 >= max_r):  # cols selected
             axis = 1
         elif (c1 == 0) and (c2 >= max_c):  # rows selected
             axis = 0
         else:
             raise ValueError(
-                'Inserting new cells requires a entire row(s)/col(s) being '
+                'Inserting new cells requires entire row(s)/col(s) being '
                 'selected. However, the selected row(s) and col(s) indices are: '
                 f'{r1} <= r <= {r2} and {c1} <= c <= {c2}'
             )
         
         i1, i2 = rcs[axis]
-        with self._history.add_sequence() as sequences:
-            for i in range(i2, i1-1, -1):  # from higher index to lower index
-                self.delete_cells(i, axis=axis, redraw=False, undo=undo)
-            set_selection = lambda: self._set_selection(
-                **(dict(r1=i1, r2=i2), dict(c1=i1, c2=i2))[axis])
-            sequences["forward"].append(set_selection)
-            sequences["forward"].append(self.refresh)
-            sequences["backward"].insert(0, set_selection)
-            sequences["backward"].insert(0, self.refresh)
-        
-        # Redraw
-        self.refresh(scrollbar=('y', 'x')[axis], trace=False)
+        self.delete_cells(i1, axis=axis, N=i2-i1+1, undo=undo)
     
     def _selection_erase_values(self, undo:bool=False):
         rcs = self._selection_rcs
@@ -2398,7 +2502,7 @@ class Sheet(ttk.Frame):
     
     def _selection_copy_values(self):
         rcs = self._selection_rcs
-        self.copy_values(*rcs)
+        return self.copy_values(*rcs)
     
     def _selection_paste_values(self, undo:bool=False):
         df = pd.read_clipboard(
@@ -2409,49 +2513,72 @@ class Sheet(ttk.Frame):
             skip_blank_lines=False,
             keep_default_na=False
         )
+        
         n_rows, n_cols = df.shape
         r1, c1, r2, c2 = self._selection_rcs
-        r_low, c_low = (min(r1, r2), min(c1, c2))
-        r_high, c_high = (r_low + n_rows - 1, c_low + n_cols - 1)
+        r_start, c_start = (min(r1, r2), min(c1, c2))
+        r_end, c_end = (r_start + n_rows - 1, c_start + n_cols - 1)
         
-        idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
-        n_rows_current, n_cols_current = self.values.iloc[idc].shape
+        idc = (slice(r_start, r_end + 1), slice(c_start, c_end + 1))
+        n_rows_exist, n_cols_exist = self.values.iloc[idc].shape
+        r_add, c_add = self.shape  # add new cells at the end
         with self._history.add_sequence() as seq:
-            # Insert new rows/cols before pasting if the table to be paste has 
+            # Add new rows/cols before pasting if the table to be paste has 
             # a larger shape
-            if (n_rows_insert := n_rows - n_rows_current):
-                for r in range(r_low + 1, r_low + n_rows_insert + 1):
-                    self.insert_cells(r, axis=0, redraw=False, undo=True)
-            if (n_cols_insert := n_cols - n_cols_current):
-                for c in range(c_low + 1, c_low + n_cols_insert + 1):
-                    self.insert_cells(c, axis=1, redraw=False, undo=True)
+            if (n_rows_add := n_rows - n_rows_exist):
+                self.insert_cells(
+                    r_add, axis=0, N=n_rows_add, redraw=False, undo=True)
+            if (n_cols_add := n_cols - n_cols_exist):
+                self.insert_cells(
+                    c_add, axis=1, N=n_cols_add, redraw=False, undo=True)
             
             # Set the values
             self.set_values(
-                r_high, c_high, r_low, c_low, values=df, redraw=False, undo=True)
+                r_end, c_end, r_start, c_start,
+                values=df,
+                redraw=False,
+                undo=True
+            )
             
             seq["forward"].append(self.refresh)
             seq["backward"].insert(0, self.refresh)
         
         self.refresh(trace=False)
+        
+        return df
     
     def _selection_set_property(
             self, property_:str, values=None, undo:bool=False):
         rcs = self._selection_rcs
-        self.set_property(
+        self.set_style(
             *rcs, property_=property_, values=values, undo=undo, trace=False)
     
-    def _selection_set_font(self, choose:bool=True, undo:bool=False):
+    def _selection_set_font(self, dialog:bool=True, undo:bool=False):
         rcs = self._selection_rcs
-        self.set_font(*rcs, choose=choose, undo=undo, trace=False)
+        return self.set_font(
+            *rcs, dialog=dialog, undo=undo, trace=False)
     
-    def _selection_set_foregroundcolor(self, choose:bool=True, undo:bool=False):
+    def _selection_set_foregroundcolor(self, dialog:bool=True, undo:bool=False):
         rcs = self._selection_rcs
-        self.set_foregroundcolor(*rcs, choose=choose, undo=undo, trace=False)
+        return self.set_foregroundcolor(
+            *rcs, dialog=dialog, undo=undo, trace=False)
     
-    def _selection_set_backgroundcolor(self, choose:bool=True, undo:bool=False):
+    def _selection_set_backgroundcolor(self, dialog:bool=True, undo:bool=False):
         rcs = self._selection_rcs
-        self.set_backgroundcolor(*rcs, choose=choose, undo=undo, trace=False)
+        return self.set_backgroundcolor(
+            *rcs, dialog=dialog, undo=undo, trace=False)
+    
+    def _selection_resize_cells(
+            self, axis:int, dialog:bool=True, undo:bool=False):
+        r1, c1, r2, c2 = self._selection_rcs
+        rcs = [(r1, r2), (c1, c2)] = [sorted([r1, r2]), sorted([c1, c2])]
+        max_r, max_c = [ s - 1 for s in self.shape ]
+        (_i1, _i2), max_i = rcs[axis-1], [max_r, max_c][axis-1]
+        assert (_i1 == 0) and (_i2 >= max_i), (axis, (r1, c1, r2, c2), self.shape)
+        
+        i1, i2 = rcs[axis]
+        return self.resize_cells(
+            i1, axis=axis, N=i2-i1+1, dialog=dialog, undo=undo, trace=False)
 
 
 class Book(ttk.Frame):
@@ -2910,16 +3037,15 @@ if __name__ == '__main__':
     book = Book(root)
     book.pack(fill='both', expand=1)
     
-    book.insert_sheet(1, 'index = 1')
-    book.insert_sheet(0, 'index = 0')
-    book.insert_sheet(1, 'index = 1')
-    book.insert_sheet(-1, 'index = -1')
+    book.insert_sheet(1, name='index = 1')
+    book.insert_sheet(0, name='index = 0')
+    book.insert_sheet(1, name='index = 1')
+    book.insert_sheet(-1, name='index = -1')
     
-    book.after(4000, lambda: root.style.theme_use('minty'))
-    book.after(8000, lambda: root.style.theme_use('cyborg'))
+    book.after(3000, lambda: root.style.theme_use('minty'))
+    book.after(5000, lambda: root.style.theme_use('cyborg'))
     
     #"""
     
     root.mainloop()
-    
-    
+
