@@ -18,6 +18,7 @@ from typing import Union, Optional, List, Tuple, Dict, Callable, Literal
 import numpy as np
 import pandas as pd
 import ttkbootstrap as ttk
+from ttkbootstrap import colorutils
 from ttkbootstrap.dialogs import dialogs, colorchooser
 
 from .dnd import ButtonTriggerOrderlyContainer
@@ -458,9 +459,9 @@ class Sheet(ttk.Frame):
             if k not in ("self", "kw", "_reset", "__class__")
         }
         self._init_configs.update(kw)
-        
         if not _reset:
             super().__init__(master)
+        
         assert len(shape) == 2 and all( s > 0 for s in shape ), shape
         assert cell_width >= 1 and cell_height >= 1, (cell_width, cell_height)
         assert get_style is None or callable(get_style), get_style
@@ -531,7 +532,7 @@ class Sheet(ttk.Frame):
         self.update_idletasks()
         self._canvas_size = (canvas.winfo_width(), canvas.winfo_height())
         self._content_size = self._update_content_size()
-        self._pview = [(0, 0), (0, 0)]  # x view and y view in pixel
+        self._visible_xys = [(0, 0), (0, 0)]  # x view and y view in pixel
         self._visible_rcs, self._gy2s_gx2s = self._update_visible_rcs_gp2s()
         self._focus_old_value = None
         self._focus_row = tk.IntVar(self)
@@ -598,18 +599,16 @@ class Sheet(ttk.Frame):
         self.xview_scroll(0, 'units')
         self.yview_scroll(0, 'units')
     
-    def _on_key_press_entry(self, event):
+    def _on_key_press_entry(self, event) -> bool:
         keysym = event.keysym
         modifiers = get_modifiers(event.state)
         
         if (keysym in ('z', 'Z')) and (COMMAND in modifiers):
             self.undo()
-            self._selection_rcs
             return True
         
         elif (keysym in ('y', 'Y')) and (COMMAND in modifiers):
             self.redo()
-            self._selection_rcs
             return True
         
         elif keysym in ('Return', 'Tab'):
@@ -623,19 +622,22 @@ class Sheet(ttk.Frame):
         elif keysym == 'Escape':
             self._focus_out_cell(discard=True)
             return True
+        
+        return False
     
-    def _on_key_press(self, event):
+    def _on_key_press(self, event) -> bool:
         keysym, char = event.keysym, event.char
         modifiers = get_modifiers(event.state)
         
         if self._on_key_press_entry(event):
-            return
+            return True
         
         elif keysym in ('Up', 'Down', 'Left', 'Right'):
             direction = keysym.lower()
             area = 'paragraph' if COMMAND in modifiers else None
             expand = SHIFT in modifiers
-            return self._move_selections(direction, area=area, expand=expand)
+            self._move_selections(direction, area=area, expand=expand)
+            return True
         
         elif keysym in ('Home', 'End', 'Prior', 'Next'):
             direction = {
@@ -645,10 +647,12 @@ class Sheet(ttk.Frame):
                 "Next": 'down'
             }[keysym]
             expand = SHIFT in modifiers
-            return self._move_selections(direction, area='all', expand=expand)
+            self._move_selections(direction, area='all', expand=expand)
+            return True
         
         elif keysym == 'Delete':  # delete all characters in the selected cells
-            return self._selection_erase_values(undo=True)
+            self._selection_erase_values(undo=True)
+            return True
         
         elif (MODIFIERS.isdisjoint(modifiers) and keysym == 'BackSpace') or (
                 not modifiers.difference({SHIFT, LOCK}) and char):
@@ -656,6 +660,9 @@ class Sheet(ttk.Frame):
             self._focus_in_cell()
             self._entry.delete(0, 'end')
             self._entry.insert('end', char)
+            return True
+        
+        return False
     
     def _on_mousewheel_scroll(self, event):
         """Callback for when the mouse wheel is scrolled.
@@ -685,13 +692,14 @@ class Sheet(ttk.Frame):
     def _on_paste(self, event=None):
         self._selection_paste_values()
     
-    def _update_default_styles(self):
+    def _update_default_styles(self) -> dict:
         if self._get_style:
             self._default_styles = dict(self._get_style())
             return self._default_styles
         
         style = ttk.Style.get_instance()
         
+        # Create some dummy widgets and get the ttk style name from them
         header = ttk.Checkbutton(self, bootstyle='primary-outline-toolbutton')
         header_style = header["style"]
         
@@ -701,7 +709,8 @@ class Sheet(ttk.Frame):
         selection = ttk.Frame(self, bootstyle='primary')
         selection_style = selection["style"]
         
-        self._default_styles = {
+        # Generate a dictionary to store the default styles
+        self._default_styles = default_styles = {
             "header": {
                 "background": {
                     "normal": style.lookup(header_style, "background"),
@@ -755,13 +764,24 @@ class Sheet(ttk.Frame):
             }
         }
         
+        # The ttkbootstrap styles of the header button above usually use the 
+        # same color in both the button background and border. So we slightly 
+        # modify the lightness of the border color to distinguish between them
+        header_style = default_styles["header"]
+        bdcolors = header_style["bordercolor"]
+        for state, bdcolor in bdcolors.items():
+            h, s, l = colorutils.color_to_hsl(bdcolor, model='hex')
+            l += 20 if l < 50 else -20  # lightness must be in [0, 100]
+            bdcolors[state] = colorutils.color_to_hex((h, s, l), model='hsl')
+        
+        # Release the resources
         header.destroy()
         cell.destroy()
         selection.destroy()
         
         return self._default_styles
     
-    def _update_content_size(self):
+    def _update_content_size(self) -> tuple:
         self._content_size = tuple(
             np.sum(self._cell_sizes[axis]) + 1 for axis in range(2)
         )[::-1]
@@ -771,12 +791,12 @@ class Sheet(ttk.Frame):
         center_window(to_center=toplevel, center_of=self)
     
     def __view(self, axis:int, *args):
-        """Update the view of the canvas
+        """Update the view from the canvas
         """
         assert axis in (0, 1), axis
         
         if not args:
-            f1, f2 = self.__to_fraction(axis, *self._pview[axis])
+            f1, f2 = self.__to_fraction(axis, *self._visible_xys[axis])
             return max(f1, 0.), min(f2, 1.)
         
         action, args = args[0], args[1:]
@@ -791,7 +811,7 @@ class Sheet(ttk.Frame):
     yview = lambda self, *args: self.__view(1, *args)
     
     def __view_moveto(self, axis:int, fraction:float):
-        """Move the view of the canvas
+        """Move the view from the canvas
         """
         # Check the start and stop locations are valid
         start = self.__to_pixel(axis, fraction)
@@ -803,11 +823,11 @@ class Sheet(ttk.Frame):
     yview_moveto = lambda self, *args, **kw: self.__view_moveto(1, *args, **kw)
     
     def __view_scroll(self, axis:int, number:int, what:str):
-        """Scroll the view of the canvas
+        """Scroll the view from the canvas
         """
         magnification = {"units": 10., "pages": 50.}[what]
         # Check the start and stop locations are valid
-        start, _ = self._pview[axis]
+        start, _ = self._visible_xys[axis]
         start += round(number * magnification)
         
         # Update widgets
@@ -852,9 +872,9 @@ class Sheet(ttk.Frame):
                                        new:int,
                                        is_start:bool=True):
         new_start, new_stop = self.__confine_region(axis, new, is_start)
-        old_start, old_stop = self._pview[axis]
-        old_r1, old_c1, old_r2, old_c2 = self._visible_rcs
-        self._pview[axis] = (new_start, new_stop)
+        old_start, old_stop = self._visible_xys[axis]
+        old_r1, old_r2, old_c1, old_c2 = self._visible_rcs
+        self._visible_xys[axis] = (new_start, new_stop)
         (new_r1, new_c1, new_r2, new_c2), _ = self._update_visible_rcs_gp2s()
         
         # Move xscrollable or yscrollable items
@@ -1012,43 +1032,44 @@ class Sheet(ttk.Frame):
         ))
     
     def _update_visible_rcs_gp2s(self) -> tuple:
-        vx12, vy12 = self._pview
+        gx12_vis, gy12_vis = self._visible_xys
         r12, c12, gy2s_gx2s = [None, None], [None, None], [None, None]
-        for axis, [(v1, v2), i12] in enumerate(zip([vy12, vx12], [r12, c12])):
+        for axis, [(gp1_vis, gp2_vis), i12] in enumerate(
+                zip([gy12_vis, gx12_vis], [r12, c12])):
             gy2s_gx2s[axis] = np.cumsum(self._cell_sizes[axis])
-            v2s = gy2s_gx2s[axis][1:]
-            within = (v1 <= v2s) & (v2s <= v2)
-            i12[0] = i1 = 0 if within.all() else within.argmax()
-            i12[1] = len(within) - 1 if (tail := within[i1:]).all() \
+            gp2s = gy2s_gx2s[axis][1:]
+            visible = (gp1_vis <= gp2s) & (gp2s <= gp2_vis)
+            i12[0] = i1 = 0 if visible.all() else visible.argmax()
+            i12[1] = len(visible) - 1 if (tail := visible[i1:]).all() \
                 else tail.argmin() + i1
         
-        self._visible_rcs = (r12[0], c12[0], r12[1], c12[1])  # (r1, c1, r2, c2)
+        self._visible_rcs = (*r12, *c12)  # (r1, r2, c1, c2)
         self._gy2s_gx2s = tuple(gy2s_gx2s)  # (y2s_headers, x2s_header)
         
         return self._visible_rcs, self._gy2s_gx2s
     
     def _canvasx(self, *xs):
-        (gx1, gx2), (gy1, gy2) = self._pview
+        (gx1, gx2), (gy1, gy2) = self._visible_xys
         transformed = tuple(np.asarray(xs) - gx1)
         return transformed
     
     def _canvasy(self, *ys):
-        (gx1, gx2), (gy1, gy2) = self._pview
+        (gx1, gx2), (gy1, gy2) = self._visible_xys
         transformed = tuple(np.asarray(ys) - gy1)
         return transformed
     
     def _fit_size(self, text:str, font, width:int, height:int) -> str:
         width, height = (max(width, 0), max(height, 0))
         canvas = self.canvas
-        txt_split = text.split('\n')
+        lines = text.split('\n')
         oid = canvas.create_text(*self._canvas_size, text=text, font=font)
         x1, y1, x2, y2 = canvas.bbox(oid)
         canvas.delete(oid)
-        txt_longest = sorted(txt_split, key=lambda t: len(t))[-1]
-        n_chars = int( len(txt_longest) / (x2 - x1) * width )
-        n_lines = int( len(txt_split) / (y2 - y1) * height )
+        longest_line = sorted(lines, key=lambda t: len(t))[-1]
+        n_chars = int( len(longest_line) / (x2 - x1) * width )
+        n_lines = int( len(lines) / (y2 - y1) * height )
         
-        return '\n'.join( t[:n_chars] for t in txt_split[:n_lines] )
+        return '\n'.join( t[:n_chars] for t in lines[:n_lines] )
     
     def _build_general_rightclick_menu(self) -> tk.Menu:
         menu = self._rightclick_menu
@@ -1072,12 +1093,12 @@ class Sheet(ttk.Frame):
         menu_textcolor = tk.Menu(menu, tearoff=0)
         menu_textcolor.add_command(
             label='Choose Color...',
-            command=lambda: self._selection_set_foregroundcolor(undo=True)
+            command=lambda: self._selection_set_foregroundcolors(
+                dialog=True, undo=True)
         )
         menu_textcolor.add_command(
             label='Reset Color(s)',
-            command=lambda: self._selection_set_foregroundcolor(
-                dialog=False, undo=True)
+            command=lambda: self._selection_set_foregroundcolors(undo=True)
         )
         menu.add_cascade(label='Text Color(s)', menu=menu_textcolor)
         
@@ -1085,12 +1106,12 @@ class Sheet(ttk.Frame):
         menu_bgcolor = tk.Menu(menu, tearoff=0)
         menu_bgcolor.add_command(
             label='Choose Color...',
-            command=lambda: self._selection_set_backgroundcolor(undo=True)
+            command=lambda: self._selection_set_backgroundcolors(
+                dialog=True, undo=True)
         )
         menu_bgcolor.add_command(
             label='Reset Color(s)',
-            command=lambda: self._selection_set_backgroundcolor(
-                dialog=False, undo=True)
+            command=lambda: self._selection_set_backgroundcolors(undo=True)
         )
         menu.add_cascade(label='Background Color(s)', menu=menu_bgcolor)
         
@@ -1098,11 +1119,11 @@ class Sheet(ttk.Frame):
         menu_font = tk.Menu(menu, tearoff=0)
         menu_font.add_command(
             label='Choose Font...',
-            command=lambda: self._selection_set_font(undo=True)
+            command=lambda: self._selection_set_fonts(dialog=True, undo=True)
         )
         menu_font.add_command(
             label='Reset Font(s)',
-            command=lambda: self._selection_set_font(dialog=False, undo=True)
+            command=lambda: self._selection_set_fonts(undo=True)
         )
         menu.add_cascade(label='Font(s)', menu=menu_font)
         
@@ -1110,43 +1131,43 @@ class Sheet(ttk.Frame):
         menu_align = tk.Menu(menu, tearoff=0)
         menu_align.add_command(
             label='↑ Top',
-            command=lambda: self._selection_set_property(
+            command=lambda: self._selection_set_styles(
                 "aligny", 'n', undo=True)
         )
         menu_align.add_command(
             label='↓ Bottom',
-            command=lambda: self._selection_set_property(
+            command=lambda: self._selection_set_styles(
                 "aligny", 's', undo=True)
         )
         menu_align.add_command(
             label='⎯ Center',
-            command=lambda: self._selection_set_property(
+            command=lambda: self._selection_set_styles(
                 "aligny", 'center', undo=True)
         )
         menu_align.add_command(
             label='⤬ Reset',
-            command=lambda: self._selection_set_property(
+            command=lambda: self._selection_set_styles(
                 "aligny", None, undo=True)
         )
         menu_align.add_separator()
         menu_align.add_command(
             label='← Left',
-            command=lambda: self._selection_set_property(
+            command=lambda: self._selection_set_styles(
                 "alignx", 'w', undo=True)
         )
         menu_align.add_command(
             label='→ Right',
-            command=lambda: self._selection_set_property(
+            command=lambda: self._selection_set_styles(
                 "alignx", 'e', undo=True)
         )
         menu_align.add_command(
             label='⏐ Center',
-            command=lambda: self._selection_set_property(
+            command=lambda: self._selection_set_styles(
                 "alignx", 'center', undo=True)
         )
         menu_align.add_command(
             label='⤬ Reset',
-            command=lambda: self._selection_set_property(
+            command=lambda: self._selection_set_styles(
                 "alignx", None, undo=True)
         )
         menu.add_cascade(label='Align', menu=menu_align)
@@ -1168,7 +1189,7 @@ class Sheet(ttk.Frame):
         
         return menu
     
-    def _redirect_widget_event(self, event) -> tk.Event:  # not used
+    def _redirect_widget_event(self, event) -> tk.Event:  # currently not used
         widget, canvas = (event.widget, self.canvas)
         event.x += widget.winfo_x() - canvas.winfo_x()
         event.y += widget.winfo_y() - canvas.winfo_y()
@@ -1265,12 +1286,17 @@ class Sheet(ttk.Frame):
                 getattr(self, f"_on_leftclick_press_{handle}")
             )
     
-    def redraw_headers(self, i1=None, i2=None, *, axis:int, skip_exist=False):
+    def redraw_headers(self,
+                       i1:Union[int, None]=None,
+                       i2:Union[int, None]=None,
+                       *,
+                       axis:int,
+                       skip_exist=False):
         axis = int(axis)
         assert (i1 is not None) or (i2 is None), (i1, i2)
         assert axis in (0, 1), axis
         
-        r1, c1, r2, c2 = self._visible_rcs
+        r1, r2, c1, c2 = self._visible_rcs
         i1_vis, i2_vis = (r1, r2) if axis == 0 else (c1, c2)
         
         if i1 is None:
@@ -1282,11 +1308,11 @@ class Sheet(ttk.Frame):
         max_i = self.shape[axis] - 1
         assert 0 <= i1 <= i2 <= max_i, (i1, i2, max_i)
         
-        (vx1, vx2), (vy1, vy2) = self._pview
+        (gx1_vis, gx2_vis), (gy1_vis, gy2_vis) = self._visible_xys
         heights, widths = self._cell_sizes
         if axis == 0:
             type_, prefix, handle = ('rowheader', 'R', 'hhandle')
-            x1, x2 = self._canvasx(vx1, vx1 + widths[0])
+            x1, x2 = self._canvasx(gx1_vis, gx1_vis + widths[0])
             y2s = self._canvasy(*self._gy2s_gx2s[axis][1:])
             y1s = y2s - heights[1:]
             coords_gen = (
@@ -1300,7 +1326,7 @@ class Sheet(ttk.Frame):
             canvas = self.rowcanvas
         else:
             type_, prefix, handle = ('colheader', 'C', 'vhandle')
-            y1, y2 = self._canvasy(vy1, vy1 + heights[0])
+            y1, y2 = self._canvasy(gy1_vis, gy1_vis + heights[0])
             x2s = self._canvasx(*self._gy2s_gx2s[axis][1:])
             x1s = x2s - widths[1:]
             coords_gen = (
@@ -1512,12 +1538,11 @@ class Sheet(ttk.Frame):
             menu_height.add_command(
                 label='Set Height...',
                 command=lambda: self._selection_resize_cells(
-                    axis=0, undo=True)
+                    axis=0, dialog=True, undo=True)
             )
             menu_height.add_command(
                 label='Reset Height(s)',
-                command=lambda: self._selection_resize_cells(
-                    axis=0, dialog=False, undo=True)
+                command=lambda: self._selection_resize_cells(axis=0, undo=True)
             )
             menu.add_cascade(label="Rows' Height(s)", menu=menu_height)
         if type_ in ('cornerheader', 'colheader'):
@@ -1525,12 +1550,11 @@ class Sheet(ttk.Frame):
             menu_width.add_command(
                 label='Set Width...',
                 command=lambda: self._selection_resize_cells(
-                    axis=1, undo=True)
+                    axis=1, dialog=True, undo=True)
             )
             menu_width.add_command(
                 label='Reset Width(s)',
-                command=lambda: self._selection_resize_cells(
-                    axis=1, dialog=False, undo=True)
+                command=lambda: self._selection_resize_cells(axis=1, undo=True)
             )
             menu.add_cascade(label="Columns' Width(s)", menu=menu_width)
         menu.add_separator()
@@ -1600,11 +1624,16 @@ class Sheet(ttk.Frame):
             event.widget.unbind(seq)
         self._resize_start = None
     
-    def redraw_cells(self, r1=None, c1=None, r2=None, c2=None, skip_exist=False):
+    def redraw_cells(self,
+                     r1:Union[int, None]=None,
+                     c1:Union[int, None]=None,
+                     r2:Union[int, None]=None,
+                     c2:Union[int, None]=None,
+                     skip_exist=False):
         assert (r1 is not None) or (r2 is None), (r1, r2)
         assert (c1 is not None) or (c2 is None), (c1, c2)
         
-        r1_vis, c1_vis, r2_vis, c2_vis = self._visible_rcs
+        r1_vis, r2_vis, c1_vis, c2_vis = self._visible_rcs
         gy2s, gx2s = self._gy2s_gx2s
         
         if r1 is None:
@@ -1783,7 +1812,11 @@ class Sheet(ttk.Frame):
         self._entry.lower()
         self.focus_set()
     
-    def _set_selection(self, r1=None, c1=None, r2=None, c2=None) -> tuple:
+    def _set_selection(self,
+                       r1:Union[int, None]=None,
+                       c1:Union[int, None]=None,
+                       r2:Union[int, None]=None,
+                       c2:Union[int, None]=None) -> tuple:
         assert (r1 is not None) or (r2 is None), (r1, r2)
         assert (c1 is not None) or (c2 is None), (c1, c2)
         
@@ -1797,8 +1830,12 @@ class Sheet(ttk.Frame):
         
         return self._selection_rcs
     
-    def _select_cells(
-            self, r1=None, c1=None, r2=None, c2=None, trace:bool=True) -> tuple:
+    def _select_cells(self,
+                      r1:Union[int, None]=None,
+                      c1:Union[int, None]=None,
+                      r2:Union[int, None]=None,
+                      c2:Union[int, None]=None,
+                      trace:bool=True) -> tuple:
         self._focus_out_cell()
         
         r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
@@ -1818,25 +1855,25 @@ class Sheet(ttk.Frame):
         
         # Relocate the viewing window to trace the last selected cell (r2, c2)
         if trace:
-            (gx1_view, gx2_view), (gy1_view, gy2_view) = self._pview
+            (gx1_vis, gx2_vis), (gy1_vis, gy2_vis) = self._visible_xys
             heights, widths = self._cell_sizes
             gx2, gy2 = (gx2s[c2+1] + 1, gy2s[r2+1] + 1)
             gx1, gy1 = (gx2 - widths[c2+1], gy2 - heights[r2+1])
-            if gx1 < (gx1_view + widths[0]):
+            if gx1 < (gx1_vis + widths[0]):
                 self.__update_content_and_scrollbar(
                     axis=0, new=gx1 - widths[0], is_start=True)
-            elif gx2 > gx2_view:
+            elif gx2 > gx2_vis:
                 self.__update_content_and_scrollbar(
                     axis=0, new=gx2, is_start=False)
-            if gy1 < (gy1_view + heights[0]):
+            if gy1 < (gy1_vis + heights[0]):
                 self.__update_content_and_scrollbar(
                     axis=1, new=gy1 - heights[0], is_start=True)
-            elif gy2 > gy2_view:
+            elif gy2 > gy2_vis:
                 self.__update_content_and_scrollbar(
                     axis=1, new=gy2, is_start=False)
         
         # Set each header's state
-        r1_vis, c1_vis, r2_vis, c2_vis = self._visible_rcs
+        r1_vis, r2_vis, c1_vis, c2_vis = self._visible_rcs
         max_r, max_c = [ s - 1 for s in self.shape ]
         rows_on = set(range(r_low, r_high+1)) & set(range(r1_vis, r2_vis+1))
         cols_on = set(range(c_low, c_high+1)) & set(range(c1_vis, c2_vis+1))
@@ -2017,7 +2054,7 @@ class Sheet(ttk.Frame):
         assert N >= 1, N
         
         # Update the status of the resized rows or cols
-        r1_vis, c1_vis, r2_vis, c2_vis = self._visible_rcs
+        r1_vis, r2_vis, c1_vis, c2_vis = self._visible_rcs
         idc = np.arange(i+1, i+N+1)
         key = ("row", "col")[axis]
         min_size = self._min_sizes[axis]
@@ -2090,14 +2127,33 @@ class Sheet(ttk.Frame):
                      df:Optional[pd.DataFrame]=None,
                      sizes:Optional[np.ndarray]=None,
                      styles=None,
+                     dialog:bool=False,
                      redraw:bool=True,
                      trace:bool=True,
                      undo:bool=False):
         assert axis in (0, 1), axis
         old_df, old_shape = self.values, self.shape
         max_i = old_shape[axis] - 1
-        N = int(N)
         assert 0 <= i <= max_i + 1, (i, max_i)
+        
+        if dialog:
+            # Ask for number of rows/cols to insert
+            axis_name = ('rows', 'columns')[axis]
+            dialog = QueryDialog(
+                parent=self,
+                title='Rename Sheet',
+                prompt=f"Enter the number of {axis_name} to insert:",
+                datatype=int,
+                initialvalue=1,
+                minvalue=1,
+                maxvalue=100000
+            )
+            dialog.show(position=self._center_window)
+            
+            if not isinstance(N := dialog.result, int):
+                return
+        else:
+            N = int(N)
         assert N >= 1, N
         
         # Create a dataframe containing the new values (a 2-D dataframe)
@@ -2291,7 +2347,10 @@ class Sheet(ttk.Frame):
             )
     
     def set_values(self,
-                   r1=None, c1=None, r2=None, c2=None,
+                   r1:Union[int, None]=None,
+                   c1:Union[int, None]=None,
+                   r2:Union[int, None]=None,
+                   c2:Union[int, None]=None,
                    values:Union[pd.DataFrame, str]='',
                    redraw:bool=True,
                    trace:bool=True,
@@ -2320,14 +2379,21 @@ class Sheet(ttk.Frame):
             )
     
     def erase_values(self,
-                     r1=None, c1=None, r2=None, c2=None,
+                     r1:Union[int, None]=None,
+                     c1:Union[int, None]=None,
+                     r2:Union[int, None]=None,
+                     c2:Union[int, None]=None,
                      redraw:bool=True,
                      trace:bool=True,
                      undo:bool=False):
         self.set_values(
             r1, c1, r2, c2, values='', redraw=redraw, undo=undo, trace=trace)
     
-    def copy_values(self, r1=None, c1=None, r2=None, c2=None):
+    def copy_values(self,
+                    r1:Union[int, None]=None,
+                    c1:Union[int, None]=None,
+                    r2:Union[int, None]=None,
+                    c2:Union[int, None]=None):
         r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
@@ -2336,14 +2402,17 @@ class Sheet(ttk.Frame):
         
         return values_to_copy
     
-    def set_style(self,
-                  r1=None, c1=None, r2=None, c2=None,
-                  *,
-                  property_:str,
-                  values=None,
-                  redraw:bool=True,
-                  trace:bool=True,
-                  undo:bool=False):
+    def set_styles(self,
+                   r1:Union[int, None]=None,
+                   c1:Union[int, None]=None,
+                   r2:Union[int, None]=None,
+                   c2:Union[int, None]=None,
+                   *,
+                   property_:str,
+                   values=None,
+                   redraw:bool=True,
+                   trace:bool=True,
+                   undo:bool=False):
         r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
@@ -2378,14 +2447,17 @@ class Sheet(ttk.Frame):
         
         if undo:
             self._history.add(
-                forward=lambda: self.set_style(
+                forward=lambda: self.set_styles(
                     *rcs, property_=property_, values=values, redraw=redraw),
-                backward=lambda: self.set_style(
+                backward=lambda: self.set_styles(
                     *rcs, property_=property_, values=old_values, redraw=redraw)
             )
     
-    def set_font(self,
-                  r1=None, c1=None, r2=None, c2=None,
+    def set_fonts(self,
+                  r1:Union[int, None]=None,
+                  c1:Union[int, None]=None,
+                  r2:Union[int, None]=None,
+                  c2:Union[int, None]=None,
                   fonts=None,
                   dialog:bool=False,
                   redraw:bool=True,
@@ -2399,7 +2471,7 @@ class Sheet(ttk.Frame):
             if (fonts := dialog.result) is None:
                 return
         
-        self.set_style(
+        self.set_styles(
             r1, c1, r2, c2,
             property_='font',
             values=fonts,
@@ -2410,14 +2482,17 @@ class Sheet(ttk.Frame):
         
         return fonts
     
-    def _set_color(self,
-                   r1=None, c1=None, r2=None, c2=None,
-                   field:str='foreground',
-                   colors=None,
-                   dialog:bool=False,
-                   redraw:bool=True,
-                   trace:bool=True,
-                   undo:bool=False):
+    def _set_colors(self,
+                    r1:Union[int, None]=None,
+                    c1:Union[int, None]=None,
+                    r2:Union[int, None]=None,
+                    c2:Union[int, None]=None,
+                    field:str='foreground',
+                    colors=None,
+                    dialog:bool=False,
+                    redraw:bool=True,
+                    trace:bool=True,
+                    undo:bool=False):
         assert field in ('foreground', 'background'), field
         
         if dialog:
@@ -2429,7 +2504,7 @@ class Sheet(ttk.Frame):
                 return
             colors = colors.hex
         
-        self.set_style(
+        self.set_styles(
             r1, c1, r2, c2,
             property_=field,
             values=colors,
@@ -2440,14 +2515,14 @@ class Sheet(ttk.Frame):
         
         return colors
     
-    def set_foregroundcolor(self, *args, **kwargs):
-        return self._set_color(*args, field='foreground', **kwargs)
+    def set_foregroundcolors(self, *args, **kwargs):
+        return self._set_colors(*args, field='foreground', **kwargs)
     
-    def set_backgroundcolor(self, *args, **kwargs):
-        return self._set_color(*args, field='background', **kwargs)
+    def set_backgroundcolors(self, *args, **kwargs):
+        return self._set_colors(*args, field='background', **kwargs)
     
     def _selection_insert_cells(
-            self, axis:int, mode:str='ahead', undo:bool=False):
+            self, axis:int, mode:str='ahead', dialog:bool=False, undo:bool=False):
         assert axis in (0, 1), axis
         assert mode in ('ahead', 'behind'), mode
         
@@ -2462,21 +2537,7 @@ class Sheet(ttk.Frame):
         else:
             i = rcs[axis][1] + 1
         
-        # Ask for number of rows/cols to insert
-        axis_name = ('rows', 'columns')[axis]
-        dialog = QueryDialog(
-            parent=self,
-            title='Rename Sheet',
-            prompt=f"Enter the number of {axis_name} to insert:",
-            datatype=int,
-            initialvalue=1,
-            minvalue=1,
-            maxvalue=100000
-        )
-        dialog.show(position=self._center_window)
-        
-        if isinstance(N := dialog.result, int):
-            self.insert_cells(i, axis=axis, N=N, undo=undo, trace=False)
+        self.insert_cells(i, axis=axis, dialog=dialog, undo=undo, trace=False)
     
     def _selection_delete_cells(self, undo:bool=False):
         r1, c1, r2, c2 = self._selection_rcs
@@ -2547,29 +2608,28 @@ class Sheet(ttk.Frame):
         
         return df
     
-    def _selection_set_property(
-            self, property_:str, values=None, undo:bool=False):
+    def _selection_set_styles(self, property_:str, values=None, undo:bool=False):
         rcs = self._selection_rcs
-        self.set_style(
+        self.set_styles(
             *rcs, property_=property_, values=values, undo=undo, trace=False)
     
-    def _selection_set_font(self, dialog:bool=True, undo:bool=False):
+    def _selection_set_fonts(self, dialog:bool=False, undo:bool=False):
         rcs = self._selection_rcs
-        return self.set_font(
+        return self.set_fonts(
             *rcs, dialog=dialog, undo=undo, trace=False)
     
-    def _selection_set_foregroundcolor(self, dialog:bool=True, undo:bool=False):
+    def _selection_set_foregroundcolors(self, dialog:bool=False, undo:bool=False):
         rcs = self._selection_rcs
-        return self.set_foregroundcolor(
+        return self.set_foregroundcolors(
             *rcs, dialog=dialog, undo=undo, trace=False)
     
-    def _selection_set_backgroundcolor(self, dialog:bool=True, undo:bool=False):
+    def _selection_set_backgroundcolors(self, dialog:bool=False, undo:bool=False):
         rcs = self._selection_rcs
-        return self.set_backgroundcolor(
+        return self.set_backgroundcolors(
             *rcs, dialog=dialog, undo=undo, trace=False)
     
     def _selection_resize_cells(
-            self, axis:int, dialog:bool=True, undo:bool=False):
+            self, axis:int, dialog:bool=False, undo:bool=False):
         r1, c1, r2, c2 = self._selection_rcs
         rcs = [(r1, r2), (c1, c2)] = [sorted([r1, r2]), sorted([c1, c2])]
         max_r, max_c = [ s - 1 for s in self.shape ]
@@ -2974,7 +3034,7 @@ class Book(ttk.Frame):
         names = [ ps["name"] for ps in sheets_props.values() ]
         if new_name in names:
             raise DuplicateNameError(
-                f"`new_name` = {new_name}. Titles already exist: {names}")
+                f"`new_name` = {new_name}. The name already exists: {names}")
         
         # Modify the sheet dict
         ps = sheets_props[key]
@@ -2984,7 +3044,7 @@ class Book(ttk.Frame):
         return new_name
     
     def _rename_sheet(
-            self, key, _prompt='Please enter a new name for the sheet:'):
+            self, key, _prompt='Enter a new name for this sheet:'):
         # Ask for new name
         old_name = self._sheets_props[key]["name"]
         dialog = QueryDialog(
@@ -3003,8 +3063,8 @@ class Book(ttk.Frame):
         except DuplicateNameError:
             self._rename_sheet(
                 key,
-                _prompt='The name already exist. '
-                       'Please enter another name for the sheet:'
+                _prompt='The name you entered already exists. '
+                       'Please enter another name for this sheet:'
             )
 
 
@@ -3018,9 +3078,9 @@ if __name__ == '__main__':
     ss = Sheet(root, bootstyle_scrollbar='light-round')
     ss.pack(fill='both', expand=1)
     
-    ss.set_foregroundcolor(5, 3, 5, 3, colors='#FF0000', undo=True)
-    ss.set_backgroundcolor(5, 3, 5, 3, colors='#2A7AD5', undo=True)
-    ss.resize_cells(5, axis=0, size=80, trace=False, undo=True)
+    ss.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)
+    ss.set_backgroundcolors(5, 3, 5, 3, colors='#2A7AD5', undo=True)
+    ss.resize_cells(5, axis=0, sizes=[80], trace=False, undo=True)
     
     def _set_value_method1():
         ss.set_values(4, 3, 4, 3, values='r4, c3 (method 1)')
