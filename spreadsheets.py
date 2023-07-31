@@ -13,7 +13,7 @@ import random
 import tkinter as tk
 import tkinter.font
 from contextlib import contextmanager
-from typing import Union, Optional, List, Tuple, Dict, Callable, Literal
+from typing import Any, Union, Optional, List, Tuple, Dict, Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -54,9 +54,9 @@ RIGHTCLICK = '<ButtonPress-2>' if platform == 'darwin' else '<ButtonPress-3>'
 # =============================================================================
 # ---- Functions
 # =============================================================================
-def get_modifiers(state:int, all:bool=False) -> set:
+def get_modifiers(state:int, platform_specific:bool=True) -> set:
     modifiers = set()
-    _modifiers = MODIFIER_MASKS if all else MODIFIERS
+    _modifiers = MODIFIERS if platform_specific else MODIFIER_MASKS
     for mod in _modifiers:
         if state & MODIFIER_MASKS[mod]:
             modifiers.add(mod)
@@ -64,7 +64,7 @@ def get_modifiers(state:int, all:bool=False) -> set:
     return modifiers
 
 
-def get_center_position(widget:tk.BaseWidget) -> Tuple[int]:
+def get_center_position(widget:tk.BaseWidget) -> Tuple[int, int]:
     widget.update_idletasks()
     width, height = widget.winfo_width(), widget.winfo_height()
     x_root, y_root = widget.winfo_rootx(), widget.winfo_rooty()
@@ -86,7 +86,10 @@ class DuplicateNameError(ValueError): pass
 
 
 class _DialogPositioning:
-    def show(self, position:Union[tuple, list, Callable, None]=None):
+    def show(self,
+             position:Union[
+                 tuple, list, Callable[[tk.BaseWidget, ...], Any], None]=None
+             ):
         # Edit: accept a positioning function argument
         
         self._result = None
@@ -312,16 +315,16 @@ class History:
     def forwardable(self) -> bool:
         return self.step < len(self._stack["forward"])
     
-    def __init__(self, callback:Optional[Callable]=None):
-        self._callback:Union[Callable, None] = callback
-        self._step = 0
-        self._sequence:Union[Dict[str, List[Callable]], None] = None
+    def __init__(self, callback:Optional[Callable[[...], Any]]=None):
+        self._callback: Optional[Callable[[...], Any]] = callback
+        self._sequence: Optional[Dict[str, List[Callable[[...], Any]]]] = None
         self._stack = {"forward": list(), "backward": list()}
+        self._step = 0
     
     def reset(self):
         self.__init__()
     
-    def add(self, forward:Callable, backward:Callable):
+    def add(self, forward:Callable[[...], Any], backward:Callable[[...], Any]):
         assert callable(forward) and callable(backward), (forward, backward)
         
         if self._sequence is None:
@@ -355,7 +358,7 @@ class History:
             backward=lambda: [ func() for func in sequences["backward"][::-1] ]
         )
     
-    def pop(self) -> Dict[str, List[Callable]]:
+    def pop(self) -> Dict[str, List[Callable[[...], Any]]]:
         assert self.step > 0, self.step
         
         self._step -= 1
@@ -390,10 +393,10 @@ class History:
         
         return self.step
     
-    def set_callback(self, func:Callable):
+    def set_callback(self, func:Callable[[...], Any]):
         self._callback = func
     
-    def remove_callback(self) -> Callable:
+    def remove_callback(self) -> Callable[[...], Any]:
         func = self._callback
         self._callback = None
         return func
@@ -443,12 +446,12 @@ class Sheet(ttk.Frame):
     
     def __init__(self,
                  master,
-                 shape:Union[Tuple[int], List[int]]=(10, 10),
+                 shape:Union[Tuple[int, int], List[int]]=(10, 10),
                  cell_width:int=80,
                  cell_height:int=25,
                  min_width:int=10,
                  min_height:int=10,
-                 get_style:Optional[Callable]=None,
+                 get_style:Optional[Callable[[...], Any]]=None,
                  autohide_scrollbar:bool=True,
                  mousewheel_sensitivity=1.,
                  bootstyle_scrollbar='round',
@@ -533,14 +536,17 @@ class Sheet(ttk.Frame):
         self._canvas_size = (canvas.winfo_width(), canvas.winfo_height())
         self._content_size = self._update_content_size()
         self._visible_xys = [(0, 0), (0, 0)]  # x view and y view in pixel
-        self._visible_rcs, self._gy2s_gx2s = self._update_visible_rcs_gp2s()
-        self._focus_old_value = None
+        visible_rcs, gyx2s = self._update_visible_rcs_xy2s()
+        self._visible_rcs: Tuple[int, int, int, int] = visible_rcs
+        self._gy2s_gx2s: Tuple[np.ndarray, np.ndarray] = gyx2s
+        
+        self._history = History()
+        self._resize_start: Optional[dict] = None
+        self._hover: Optional[Dict[str, str]] = None
+        self._focus_old_value: Optional[str] = None
         self._focus_row = tk.IntVar(self)
         self._focus_col = tk.IntVar(self)
         self._focus_value = tk.StringVar(self)
-        self._hover = None
-        self._resize_start = None
-        self._history = History()
         
         # Create right-click menu and entry widgets
         self._rightclick_menu = tk.Menu(self, tearoff=0)
@@ -548,22 +554,22 @@ class Sheet(ttk.Frame):
             self, textvariable=self._focus_value, takefocus=0)
         entry.place(x=0, y=0)
         entry.lower()
-        entry.bind('<KeyPress>', self._on_key_press_entry)
+        entry.bind('<KeyPress>', self._on_entry_key_press)
         
         # Init the selection frame
         canvas.create_rectangle(1, 1, 1, 1, fill='', tags='selection-frame')
         canvas.tag_bind(
-            'selection-frame', '<ButtonPress-1>', self._on_leftclick_press)
+            'selection-frame', '<ButtonPress-1>', self._on_leftbutton_press)
         canvas.tag_bind(
-            'selection-frame', '<B1-Motion>', self._on_leftclick_motion)
+            'selection-frame', '<B1-Motion>', self._on_leftbutton_motion)
         canvas.tag_bind(
             'selection-frame',
             '<Double-ButtonPress-1>',
-            self._on_leftclick_double_selframe
+            self._on_selframe_double_leftclick
         )
         
-        self._selection_rcs:Tuple[int] = (-1, -1, -1, -1)
-        self._selection_rcs:Tuple[int] = self._select_cells(0, 0, 0, 0)
+        self._selection_rcs: Tuple[int, int, int, int] = (-1, -1, -1, -1)
+        self._selection_rcs = self._select_cells(0, 0, 0, 0)
         
         # Add bindings
         self.bind('<<ThemeChanged>>', self._on_theme_changed)
@@ -582,115 +588,130 @@ class Sheet(ttk.Frame):
         self.yview_scroll(0, 'units')
         self.focus_set()
     
-    def _be_focus(self, *_, **__):
-        self._focus_out_cell()
-        self.focus_set()
-    
-    def _on_theme_changed(self, event=None):
-        self._update_default_styles()
-        self._canvases_delete('temp')
-        self.redraw()
-    
-    def _on_configure_canvas(self, event):
-        self._canvas_size = canvas_size = (event.width, event.height)
-        self.canvas.coords('invisible-bg', 0, 0, *canvas_size)
-        self.rowcanvas.coords('invisible-bg', 0, 0, *canvas_size)
-        self.colcanvas.coords('invisible-bg', 0, 0, *canvas_size)
-        self.xview_scroll(0, 'units')
-        self.yview_scroll(0, 'units')
-    
-    def _on_key_press_entry(self, event) -> bool:
-        keysym = event.keysym
-        modifiers = get_modifiers(event.state)
-        
-        if (keysym in ('z', 'Z')) and (COMMAND in modifiers):
-            self.undo()
-            return True
-        
-        elif (keysym in ('y', 'Y')) and (COMMAND in modifiers):
-            self.redo()
-            return True
-        
-        elif keysym in ('Return', 'Tab'):
-            if keysym == 'Return':
-                direction = 'up' if SHIFT in modifiers else 'down'
-            else:
-                direction = 'left' if SHIFT in modifiers else 'right'
-            self._move_selections(direction)
-            return True
-        
-        elif keysym == 'Escape':
-            self._focus_out_cell(discard=True)
-            return True
-        
-        return False
-    
-    def _on_key_press(self, event) -> bool:
-        keysym, char = event.keysym, event.char
-        modifiers = get_modifiers(event.state)
-        
-        if self._on_key_press_entry(event):
-            return True
-        
-        elif keysym in ('Up', 'Down', 'Left', 'Right'):
-            direction = keysym.lower()
-            area = 'paragraph' if COMMAND in modifiers else None
-            expand = SHIFT in modifiers
-            self._move_selections(direction, area=area, expand=expand)
-            return True
-        
-        elif keysym in ('Home', 'End', 'Prior', 'Next'):
-            direction = {
-                "Home": 'left',
-                "End": 'right',
-                "Prior": 'up',
-                "Next": 'down'
-            }[keysym]
-            expand = SHIFT in modifiers
-            self._move_selections(direction, area='all', expand=expand)
-            return True
-        
-        elif keysym == 'Delete':  # delete all characters in the selected cells
-            self._selection_erase_values(undo=True)
-            return True
-        
-        elif (MODIFIERS.isdisjoint(modifiers) and keysym == 'BackSpace') or (
-                not modifiers.difference({SHIFT, LOCK}) and char):
-            # Normal typing
-            self._focus_in_cell()
-            self._entry.delete(0, 'end')
-            self._entry.insert('end', char)
-            return True
-        
-        return False
-    
-    def _on_mousewheel_scroll(self, event):
-        """Callback for when the mouse wheel is scrolled.
-        Modified from: `ttkbootstrap.scrolled.ScrolledFrame._on_mousewheel`
+    def __view(self, axis:int, *args):
+        """Update the view from the canvas
         """
-        if event.num == 4:  # Linux
-            delta = 10.
-        elif event.num == 5:  # Linux
-            delta = -10.
-        elif self._windowingsystem == "win32":  # Windows
-            delta = event.delta / 120.
-        else:  # Mac
-            delta = event.delta
-        number = -round(delta * self._mousewheel_sensitivity)
+        assert axis in (0, 1), axis
         
-        if event.state & MODIFIER_MASKS["Shift"]:
-            self.xview_scroll(number, 'units')
+        if not args:
+            f1, f2 = self.__to_fraction(axis, *self._visible_xys[axis])
+            return max(f1, 0.), min(f2, 1.)
+        
+        action, args = args[0], args[1:]
+        if action == 'moveto':
+            return self.__view_moveto(axis, float(args[0]))
+        elif action == 'scroll':
+            return self.__view_scroll(axis, int(args[0]), args[1])
+        raise ValueError("The first argument must be 'moveto' or 'scroll' but "
+                         f"got: {repr(args[0])}")
+    
+    xview = lambda self, *args: self.__view(0, *args)
+    yview = lambda self, *args: self.__view(1, *args)
+    
+    def __view_moveto(self, axis:int, fraction:float):
+        """Move the view from the canvas
+        """
+        # Check the start and stop locations are valid
+        start = self.__to_pixel(axis, fraction)
+        
+        # Update the canvas and scrollbar
+        self.__update_content_and_scrollbar(axis, start)
+    
+    xview_moveto = lambda self, *args, **kw: self.__view_moveto(0, *args, **kw)
+    yview_moveto = lambda self, *args, **kw: self.__view_moveto(1, *args, **kw)
+    
+    def __view_scroll(self, axis:int, number:int, what:str):
+        """Scroll the view from the canvas
+        """
+        magnification = {"units": 10., "pages": 50.}[what]
+        # Check the start and stop locations are valid
+        start, _ = self._visible_xys[axis]
+        start += round(number * magnification)
+        
+        # Update widgets
+        self.__update_content_and_scrollbar(axis, start)
+    
+    xview_scroll = lambda self, *args, **kw: self.__view_scroll(0, *args, **kw)
+    yview_scroll = lambda self, *args, **kw: self.__view_scroll(1, *args, **kw)
+    
+    def __to_fraction(self, axis:int, *pixels) -> Union[Tuple[float, ...], float]:
+        assert axis in (0, 1), axis
+        complete = self._content_size[axis]
+        fractions = tuple( pixel / complete for pixel in pixels )
+        if len(fractions) == 1:
+            return fractions[0]
+        return fractions
+    
+    def __to_pixel(self, axis:int, *fractions) -> Union[Tuple[int, ...], int]:
+        assert axis in (0, 1), axis
+        complete = self._content_size[axis]
+        pixels = tuple( round(fraction * complete) for fraction in fractions )
+        if len(pixels) == 1:
+            return pixels[0]
+        return pixels
+    
+    def __confine_region(self, axis:int, new, is_start:bool=True):
+        complete = self._content_size[axis]
+        showing = min(self._canvas_size[axis], complete)
+        
+        if is_start:
+            start, stop = (new, new + showing)
         else:
-            self.yview_scroll(number, 'units')
+            start, stop = (new - showing, new)
+        
+        if start < 0:
+            start = 0
+            stop = showing
+        elif stop > complete:
+            stop = complete
+            start = stop - showing
+        
+        return start, stop
     
-    def _on_select_all(self, event=None):
-        self._select_cells()
-    
-    def _on_copy(self, event=None):
-        self._selection_copy_values()
-    
-    def _on_paste(self, event=None):
-        self._selection_paste_values()
+    def __update_content_and_scrollbar(self,
+                                       axis:int,
+                                       new:int,
+                                       is_start:bool=True):
+        new_start, new_stop = self.__confine_region(axis, new, is_start)
+        old_start, old_stop = self._visible_xys[axis]
+        old_r1, old_r2, old_c1, old_c2 = self._visible_rcs
+        self._visible_xys[axis] = (new_start, new_stop)
+        (new_r1, new_c1, new_r2, new_c2), _ = self._update_visible_rcs_xy2s()
+        
+        # Move xscrollable or yscrollable items
+        delta_canvas = old_start - new_start  # -delta_view
+        if axis == 0:
+            key = "col"
+            old_i1, old_i2, new_i1, new_i2 = (old_c1, old_c2, new_c1, new_c2)
+            header_canvas = self.colcanvas
+            
+            self.canvas.move('xscroll', delta_canvas, 0)
+            header_canvas.move('all', delta_canvas, 0)
+        else:
+            key = "row"
+            old_i1, old_i2, new_i1, new_i2 = (old_r1, old_r2, new_r1, new_r2)
+            header_canvas = self.rowcanvas
+            
+            self.canvas.move('yscroll', 0, delta_canvas)
+            header_canvas.move('all', 0, delta_canvas)
+        
+        # Delete out-of-view items
+        idc_out = set(range(old_i1, old_i2+1)) - set(range(new_i1, new_i2+1))
+        tags_out = [ self._make_tag(key, row=i, col=i) for i in idc_out ]
+        for tag in tags_out:
+            for canvas in (self.canvas, header_canvas):
+                canvas.delete(tag)
+        
+        # Draw new items
+        self.redraw(
+            update_visible_rcs=False,
+            skip_exist=True,
+            trace=None
+        )
+        
+        # Update x or y scrollbar
+        first, last = self.__to_fraction(axis, new_start, new_stop)
+        (self.hbar, self.vbar)[axis].set(first, last)
     
     def _update_default_styles(self) -> dict:
         if self._get_style:
@@ -787,130 +808,114 @@ class Sheet(ttk.Frame):
         )[::-1]
         return self._content_size
     
+    def _be_focus(self, *_, **__):
+        self._focus_out_cell()
+        self.focus_set()
+    
+    def _on_theme_changed(self, event=None):
+        self._update_default_styles()
+        self._canvases_delete('temp')
+        self.redraw()
+    
+    def _on_configure_canvas(self, event):
+        self._canvas_size = canvas_size = (event.width, event.height)
+        self.canvas.coords('invisible-bg', 0, 0, *canvas_size)
+        self.rowcanvas.coords('invisible-bg', 0, 0, *canvas_size)
+        self.colcanvas.coords('invisible-bg', 0, 0, *canvas_size)
+        self.xview_scroll(0, 'units')
+        self.yview_scroll(0, 'units')
+    
+    def _on_mousewheel_scroll(self, event):
+        """Callback for when the mouse wheel is scrolled.
+        Modified from: `ttkbootstrap.scrolled.ScrolledFrame._on_mousewheel`
+        """
+        if event.num == 4:  # Linux
+            delta = 10.
+        elif event.num == 5:  # Linux
+            delta = -10.
+        elif self._windowingsystem == "win32":  # Windows
+            delta = event.delta / 120.
+        else:  # Mac
+            delta = event.delta
+        number = -round(delta * self._mousewheel_sensitivity)
+        
+        if event.state & MODIFIER_MASKS["Shift"]:
+            self.xview_scroll(number, 'units')
+        else:
+            self.yview_scroll(number, 'units')
+    
+    def _on_select_all(self, event=None):
+        self._select_cells()
+    
+    def _on_copy(self, event=None):
+        self._selection_copy_values()
+    
+    def _on_paste(self, event=None):
+        self._selection_paste_values(undo=True)
+    
+    def _on_entry_key_press(self, event) -> Optional[str]:
+        keysym = event.keysym
+        modifiers = get_modifiers(event.state)
+        
+        if (keysym in ('z', 'Z')) and (COMMAND in modifiers):
+            self.undo()
+            return 'break'
+        
+        elif (keysym in ('y', 'Y')) and (COMMAND in modifiers):
+            self.redo()
+            return 'break'
+        
+        elif keysym in ('Return', 'Tab'):
+            if keysym == 'Return':
+                direction = 'up' if SHIFT in modifiers else 'down'
+            else:
+                direction = 'left' if SHIFT in modifiers else 'right'
+            self._move_selections(direction)
+            return 'break'
+        
+        elif keysym == 'Escape':
+            self._focus_out_cell(discard=True)
+            return 'break'
+    
+    def _on_key_press(self, event) -> Optional[str]:
+        keysym, char = event.keysym, event.char
+        modifiers = get_modifiers(event.state)
+        
+        if self._on_entry_key_press(event):
+            return 'break'
+        
+        elif keysym in ('Up', 'Down', 'Left', 'Right'):
+            direction = keysym.lower()
+            area = 'paragraph' if COMMAND in modifiers else None
+            expand = SHIFT in modifiers
+            self._move_selections(direction, area=area, expand=expand)
+            return 'break'
+        
+        elif keysym in ('Home', 'End', 'Prior', 'Next'):
+            direction = {
+                "Home": 'left',
+                "End": 'right',
+                "Prior": 'up',
+                "Next": 'down'
+            }[keysym]
+            expand = SHIFT in modifiers
+            self._move_selections(direction, area='all', expand=expand)
+            return 'break'
+        
+        elif keysym == 'Delete':  # delete all characters in the selected cells
+            self._selection_erase_values(undo=True)
+            return 'break'
+        
+        elif (MODIFIERS.isdisjoint(modifiers) and keysym == 'BackSpace') or (
+                not modifiers.difference({SHIFT, LOCK}) and char):
+            # Normal typing
+            self._focus_in_cell()
+            self._entry.delete(0, 'end')
+            self._entry.insert('end', char)
+            return 'break'
+    
     def _center_window(self, toplevel:tk.BaseWidget):
         center_window(to_center=toplevel, center_of=self)
-    
-    def __view(self, axis:int, *args):
-        """Update the view from the canvas
-        """
-        assert axis in (0, 1), axis
-        
-        if not args:
-            f1, f2 = self.__to_fraction(axis, *self._visible_xys[axis])
-            return max(f1, 0.), min(f2, 1.)
-        
-        action, args = args[0], args[1:]
-        if action == 'moveto':
-            return self.__view_moveto(axis, float(args[0]))
-        elif action == 'scroll':
-            return self.__view_scroll(axis, int(args[0]), args[1])
-        raise ValueError("The first argument must be 'moveto' or 'scroll' but "
-                         f"got: {repr(args[0])}")
-    
-    xview = lambda self, *args: self.__view(0, *args)
-    yview = lambda self, *args: self.__view(1, *args)
-    
-    def __view_moveto(self, axis:int, fraction:float):
-        """Move the view from the canvas
-        """
-        # Check the start and stop locations are valid
-        start = self.__to_pixel(axis, fraction)
-        
-        # Update the canvas and scrollbar
-        self.__update_content_and_scrollbar(axis, start)
-    
-    xview_moveto = lambda self, *args, **kw: self.__view_moveto(0, *args, **kw)
-    yview_moveto = lambda self, *args, **kw: self.__view_moveto(1, *args, **kw)
-    
-    def __view_scroll(self, axis:int, number:int, what:str):
-        """Scroll the view from the canvas
-        """
-        magnification = {"units": 10., "pages": 50.}[what]
-        # Check the start and stop locations are valid
-        start, _ = self._visible_xys[axis]
-        start += round(number * magnification)
-        
-        # Update widgets
-        self.__update_content_and_scrollbar(axis, start)
-    
-    xview_scroll = lambda self, *args, **kw: self.__view_scroll(0, *args, **kw)
-    yview_scroll = lambda self, *args, **kw: self.__view_scroll(1, *args, **kw)
-    
-    def __to_fraction(self, axis:int, *pixels) -> Tuple[float]:
-        assert axis in (0, 1), axis
-        complete = self._content_size[axis]
-        return tuple( pixel / complete for pixel in pixels )
-    
-    def __to_pixel(self, axis:int, *fractions) -> Union[Tuple[int], int]:
-        assert axis in (0, 1), axis
-        complete = self._content_size[axis]
-        numbers = tuple( round(fraction * complete) for fraction in fractions )
-        if len(numbers) == 1:
-            return numbers[0]
-        return numbers
-    
-    def __confine_region(self, axis:int, new, is_start:bool=True):
-        complete = self._content_size[axis]
-        showing = min(self._canvas_size[axis], complete)
-        
-        if is_start:
-            start, stop = (new, new + showing)
-        else:
-            start, stop = (new - showing, new)
-        
-        if start < 0:
-            start = 0
-            stop = showing
-        elif stop > complete:
-            stop = complete
-            start = stop - showing
-        
-        return start, stop
-    
-    def __update_content_and_scrollbar(self,
-                                       axis:int,
-                                       new:int,
-                                       is_start:bool=True):
-        new_start, new_stop = self.__confine_region(axis, new, is_start)
-        old_start, old_stop = self._visible_xys[axis]
-        old_r1, old_r2, old_c1, old_c2 = self._visible_rcs
-        self._visible_xys[axis] = (new_start, new_stop)
-        (new_r1, new_c1, new_r2, new_c2), _ = self._update_visible_rcs_gp2s()
-        
-        # Move xscrollable or yscrollable items
-        delta_canvas = old_start - new_start  # -delta_view
-        if axis == 0:
-            key = "col"
-            old_i1, old_i2, new_i1, new_i2 = (old_c1, old_c2, new_c1, new_c2)
-            header_canvas = self.colcanvas
-            
-            self.canvas.move('xscroll', delta_canvas, 0)
-            header_canvas.move('all', delta_canvas, 0)
-        else:
-            key = "row"
-            old_i1, old_i2, new_i1, new_i2 = (old_r1, old_r2, new_r1, new_r2)
-            header_canvas = self.rowcanvas
-            
-            self.canvas.move('yscroll', 0, delta_canvas)
-            header_canvas.move('all', 0, delta_canvas)
-        
-        # Delete out-of-view items
-        idc_out = set(range(old_i1, old_i2+1)) - set(range(new_i1, new_i2+1))
-        tags_out = [ self._make_tag(key, row=i, col=i) for i in idc_out ]
-        for tag in tags_out:
-            for canvas in (self.canvas, header_canvas):
-                canvas.delete(tag)
-        
-        # Draw new items
-        self.redraw(
-            update_visible_rcs=False,
-            skip_exist=True,
-            trace=False
-        )
-        
-        # Update x or y scrollbar
-        first, last = self.__to_fraction(axis, new_start, new_stop)
-        (self.hbar, self.vbar)[axis].set(first, last)
     
     def _make_tags(self,
                    type_=None,
@@ -1031,7 +1036,7 @@ class Sheet(ttk.Frame):
             )
         ))
     
-    def _update_visible_rcs_gp2s(self) -> tuple:
+    def _update_visible_rcs_xy2s(self) -> tuple:
         gx12_vis, gy12_vis = self._visible_xys
         r12, c12, gy2s_gx2s = [None, None], [None, None], [None, None]
         for axis, [(gp1_vis, gp2_vis), i12] in enumerate(
@@ -1044,19 +1049,17 @@ class Sheet(ttk.Frame):
                 else tail.argmin() + i1
         
         self._visible_rcs = (*r12, *c12)  # (r1, r2, c1, c2)
-        self._gy2s_gx2s = tuple(gy2s_gx2s)  # (y2s_headers, x2s_header)
+        self._gy2s_gx2s = tuple(gy2s_gx2s)  # (y2s_headers, x2s_headers)
         
         return self._visible_rcs, self._gy2s_gx2s
     
     def _canvasx(self, *xs):
         (gx1, gx2), (gy1, gy2) = self._visible_xys
-        transformed = tuple(np.asarray(xs) - gx1)
-        return transformed
+        return tuple(np.asarray(xs) - gx1)  # => to canvas coordinates
     
     def _canvasy(self, *ys):
         (gx1, gx2), (gy1, gy2) = self._visible_xys
-        transformed = tuple(np.asarray(ys) - gy1)
-        return transformed
+        return tuple(np.asarray(ys) - gy1)  # => to canvas coordinates
     
     def _fit_size(self, text:str, font, width:int, height:int) -> str:
         width, height = (max(width, 0), max(height, 0))
@@ -1196,7 +1199,7 @@ class Sheet(ttk.Frame):
         event.widget = canvas
         return event
     
-    def _on_leftclick_double_selframe(self, event):
+    def _on_selframe_double_leftclick(self, event):
         self._be_focus()
         x, y, canvas = (event.x, event.y, event.widget)
         for oid in canvas.find_overlapping(x, y, x, y):
@@ -1206,7 +1209,7 @@ class Sheet(ttk.Frame):
                 continue
             self._focus_in_cell(r, c)
     
-    def __on_leftclick_to_select(self, event, expand:bool):
+    def __on_leftbutton_to_select(self, event, expand:bool):
         self._be_focus()
         x, y, canvas = (event.x, event.y, event.widget)
         for oid in canvas.find_overlapping(x, y, x, y):
@@ -1219,11 +1222,11 @@ class Sheet(ttk.Frame):
                 r1, c1, *_ = self._selection_rcs
             else:
                 r1, c1 = rc2
-            self._select_cells(r1, c1, r2, c2, trace=False)
+            self._select_cells(r1, c1, r2, c2)
     
-    _on_leftclick_press = lambda self, event: self.__on_leftclick_to_select(
+    _on_leftbutton_press = lambda self, event: self.__on_leftbutton_to_select(
         event, expand=False)
-    _on_leftclick_motion = lambda self, event: self.__on_leftclick_to_select(
+    _on_leftbutton_motion = lambda self, event: self.__on_leftbutton_to_select(
         event, expand=True)
     
     def redraw_cornerheader(self, skip_exist=False):
@@ -1269,11 +1272,11 @@ class Sheet(ttk.Frame):
         # Add bindings
         tag_cornerheader = self._make_tag("type", type_=type_)
         tag_bg = self._make_tag("type", type_=type_, subtype='background')
-        canvas.tag_bind(tag_cornerheader, '<Enter>', self._on_enter_header)
-        canvas.tag_bind(tag_cornerheader, '<Leave>', self._on_leave_header)
+        canvas.tag_bind(tag_cornerheader, '<Enter>', self._on_header_enter)
+        canvas.tag_bind(tag_cornerheader, '<Leave>', self._on_header_leave)
         canvas.tag_bind(
-            tag_cornerheader, RIGHTCLICK, self._on_rightclick_press_header)
-        canvas.tag_bind(tag_bg, '<ButtonPress-1>', self._on_leftclick_press)
+            tag_cornerheader, RIGHTCLICK, self._on_header_rightbutton_press)
+        canvas.tag_bind(tag_bg, '<ButtonPress-1>', self._on_leftbutton_press)
         
         for handle in ['hhandle', 'vhandle']:
             tag_cornerhandle = self._make_tag(
@@ -1283,7 +1286,7 @@ class Sheet(ttk.Frame):
             canvas.tag_bind(
                 tag_cornerhandle,
                 '<ButtonPress-1>',
-                getattr(self, f"_on_leftclick_press_{handle}")
+                getattr(self, f"_on_{handle}_leftbutton_press")
             )
     
     def redraw_headers(self,
@@ -1388,17 +1391,17 @@ class Sheet(ttk.Frame):
         canvas.tag_raise(tag_handle)
         
         # Add bindings
-        canvas.tag_bind(tag_header, '<Enter>', self._on_enter_header)
-        canvas.tag_bind(tag_header, '<Leave>', self._on_leave_header)
-        canvas.tag_bind(tag_header, RIGHTCLICK, self._on_rightclick_press_header)
+        canvas.tag_bind(tag_header, '<Enter>', self._on_header_enter)
+        canvas.tag_bind(tag_header, '<Leave>', self._on_header_leave)
+        canvas.tag_bind(tag_header, RIGHTCLICK, self._on_header_rightbutton_press)
         
         for tag in [tag_bg, tag_text]:
-            canvas.tag_bind(tag, '<ButtonPress-1>', self._on_leftclick_press)
-            canvas.tag_bind(tag, '<B1-Motion>', self._on_leftclick_motion)
+            canvas.tag_bind(tag, '<ButtonPress-1>', self._on_leftbutton_press)
+            canvas.tag_bind(tag, '<B1-Motion>', self._on_leftbutton_motion)
         canvas.tag_bind(
             tag_handle,
             '<ButtonPress-1>',
-            getattr(self, f"_on_leftclick_press_{handle}")
+            getattr(self, f"_on_{handle}_leftbutton_press")
         )
     
     def _set_header_state(self,
@@ -1466,7 +1469,7 @@ class Sheet(ttk.Frame):
         
         return state
     
-    def __on_enter_leave_header(self, event, enter_or_leave:str):
+    def __on_header_enter_leave(self, event, enter_or_leave:str):
         assert enter_or_leave in ('enter', 'leave'), enter_or_leave
         
         state = 'hover' if enter_or_leave == 'enter' else 'normal'
@@ -1486,12 +1489,12 @@ class Sheet(ttk.Frame):
         
         self._hover = tagdict if enter_or_leave == 'enter' else None
     
-    _on_enter_header = lambda self, event: self.__on_enter_leave_header(
+    _on_header_enter = lambda self, event: self.__on_header_enter_leave(
         event, 'enter')
-    _on_leave_header = lambda self, event: self.__on_enter_leave_header(
+    _on_header_leave = lambda self, event: self.__on_header_enter_leave(
         event, 'leave')
     
-    def _on_rightclick_press_header(self, event):
+    def _on_header_rightbutton_press(self, event):
         tagdict = self._hover
         type_ = tagdict["type"]
         assert type_ in ('cornerheader', 'rowheader', 'colheader'), self._hover
@@ -1504,15 +1507,15 @@ class Sheet(ttk.Frame):
         if type_ == 'rowheader':
             axis_name, axis = ('Row', 0)
             if not ((r1 <= r <= r2) and (c1 == 0) and (c2 >= max_c)):
-                self._select_cells(r, 0, r, max_c, trace=False)
+                self._select_cells(r, 0, r, max_c)
         elif type_ == 'colheader':
             axis_name, axis = ('Column', 1)
             if not ((c1 <= c <= c2) and (r1 == 0) and (r2 >= max_r)):
-                self._select_cells(0, c, max_r, c, trace=False)
+                self._select_cells(0, c, max_r, c)
         else:
             axis_name, axis = ('Row', 0)
             if not ((r1 == c1 == 0) and (r1 >= max_r) and (c2 >= max_c)):
-                self._select_cells(0, 0, max_r, max_c, trace=False)
+                self._select_cells(0, 0, max_r, max_c)
         
         # Setup the right click menu
         menu = self._rightclick_menu
@@ -1521,12 +1524,12 @@ class Sheet(ttk.Frame):
             menu.add_command(
                 label=f'Insert New {axis_name}s Ahead',
                 command=lambda: self._selection_insert_cells(
-                    axis, mode='ahead', undo=True)
+                    axis, mode='ahead', dialog=True, undo=True)
             )
             menu.add_command(
                 label=f'Insert New {axis_name}s Behind',
                 command=lambda: self._selection_insert_cells(
-                    axis, mode='behind', undo=True)
+                    axis, mode='behind', dialog=True, undo=True)
             )
         menu.add_command(
             label=f'Delete Selected {axis_name}(s)',
@@ -1563,7 +1566,7 @@ class Sheet(ttk.Frame):
         menu.post(event.x_root, event.y_root)
         self.after_idle(self._reset_rightclick_menu)
     
-    def __on_leftclick_press_handle(self, event, axis:int):  # resize starts
+    def __on_handle_leftbutton_press(self, event, axis:int):  # resize starts
         tagdict = self._hover
         type_ = tagdict["type"]
         assert type_ in ('cornerheader', 'rowheader', 'colheader'), self._hover
@@ -1574,12 +1577,12 @@ class Sheet(ttk.Frame):
         
         if axis == 0:
             i = -1 if r is None else r
-            canvas.bind('<B1-Motion>', self._on_leftclick_motion_hhandle)
-            canvas.bind('<ButtonRelease-1>', self._on_leftclick_release_handle)
+            canvas.bind('<B1-Motion>', self._on_hhandle_leftbutton_motion)
+            canvas.bind('<ButtonRelease-1>', self._on_handle_leftbutton_release)
         else:
             i = -1 if c is None else c
-            canvas.bind('<B1-Motion>', self._on_leftclick_motion_vhandle)
-            canvas.bind('<ButtonRelease-1>', self._on_leftclick_release_handle)
+            canvas.bind('<B1-Motion>', self._on_vhandle_leftbutton_motion)
+            canvas.bind('<ButtonRelease-1>', self._on_handle_leftbutton_release)
         
         _i = i + 1
         self._resize_start = {
@@ -1590,36 +1593,35 @@ class Sheet(ttk.Frame):
             "step": self._history.step
         }
     
-    _on_leftclick_press_hhandle = lambda self, event: (
-        self.__on_leftclick_press_handle(event, axis=0))
-    _on_leftclick_press_vhandle = lambda self, event: (
-        self.__on_leftclick_press_handle(event, axis=1))
+    _on_hhandle_leftbutton_press = lambda self, event: (
+        self.__on_handle_leftbutton_press(event, axis=0))
+    _on_vhandle_leftbutton_press = lambda self, event: (
+        self.__on_handle_leftbutton_press(event, axis=1))
     
-    def __on_leftclick_motion_handle(self, event, axis:int):  # resizing
+    def __on_handle_leftbutton_motion(self, event, axis:int):  # resizing
         start = self._resize_start
         if axis == 0:
             size = start["size"] + event.y - start["y"]
         else:
             size = start["size"] + event.x - start["x"]
-        self.resize_cells(
-            start["i"], axis=axis, N=1, sizes=[size], trace=False, undo=False)
+        self.resize_cells(start["i"], axis=axis, N=1, sizes=[size], undo=False)
         
         history = self._history
         if history.step > start["step"]:
             history.pop()
         history.add(
             forward=lambda: self.resize_cells(
-                start["i"], axis=axis, N=1, sizes=[size]),
+                start["i"], axis=axis, N=1, sizes=[size], trace='first'),
             backward=lambda: self.resize_cells(
-                start["i"], axis=axis, sizes=[start["size"]])
+                start["i"], axis=axis, sizes=[start["size"]], trace='first')
         )
     
-    _on_leftclick_motion_hhandle = lambda self, event: (
-        self.__on_leftclick_motion_handle(event, axis=0))
-    _on_leftclick_motion_vhandle = lambda self, event: (
-        self.__on_leftclick_motion_handle(event, axis=1))
+    _on_hhandle_leftbutton_motion = lambda self, event: (
+        self.__on_handle_leftbutton_motion(event, axis=0))
+    _on_vhandle_leftbutton_motion = lambda self, event: (
+        self.__on_handle_leftbutton_motion(event, axis=1))
     
-    def _on_leftclick_release_handle(self, event):  # resize ends
+    def _on_handle_leftbutton_release(self, event):  # resize ends
         for seq in ['<B1-Motion>', '<ButtonRelease-1>']:
             event.widget.unbind(seq)
         self._resize_start = None
@@ -1735,17 +1737,34 @@ class Sheet(ttk.Frame):
         
         # Add Bindings
         tag_cell = self._make_tag("type", type_=type_)
-        canvas.tag_bind(tag_cell, RIGHTCLICK, self._on_rightclick_press_cell)
-        canvas.tag_bind(tag_cell, '<ButtonPress-1>', self._on_leftclick_press)
-        canvas.tag_bind(tag_cell, '<B1-Motion>', self._on_leftclick_motion)
+        canvas.tag_bind(tag_cell, RIGHTCLICK, self._on_cell_rightbutton_press)
+        canvas.tag_bind(tag_cell, '<ButtonPress-1>', self._on_leftbutton_press)
+        canvas.tag_bind(tag_cell, '<B1-Motion>', self._on_leftbutton_motion)
         canvas.tag_bind(
             tag_cell,
             '<Double-ButtonPress-1>',
-            self._on_leftclick_double_cell
+            self._on_cell_double_leftclick
         )
         
         # Keep the selection frame on the top
         canvas.tag_raise('selection-frame')
+    
+    def _on_cell_double_leftclick(self, event=None):
+        tagdict = self._get_tags('current')
+        self._focus_in_cell(tagdict["row"], tagdict["col"])
+    
+    def _on_cell_rightbutton_press(self, event):
+        tagdict = self._get_tags('current')
+        r, c = self._get_rc(tagdict, to_tuple=True)
+        r1, c1, r2, c2 = self._selection_rcs
+        (r_low, r_high), (c_low, c_high) = sorted([r1, r2]), sorted([c1, c2])
+        
+        if not ((r_low <= r <= r_high) and (c_low <= c <= c_high)):
+            self._select_cells(r, c, r, c)
+        
+        menu = self._build_general_rightclick_menu()
+        menu.post(event.x_root, event.y_root)
+        self.after_idle(self._reset_rightclick_menu)
     
     def _refresh_entry(self, r:Optional[int]=None, c:Optional[int]=None):
         assert (r is None) == (c is None), (r, c)
@@ -1801,8 +1820,10 @@ class Sheet(ttk.Frame):
                 self.redraw_cells(*rcs)
                  # put redraw here to avoid recursive function calls
                 self._history.add(
-                    forward=lambda: self.set_values(*rcs, values=new_value),
-                    backward=lambda: self.set_values(*rcs, values=old_value)
+                    forward=lambda: self.set_values(
+                        *rcs, values=new_value, trace='first'),
+                    backward=lambda: self.set_values(
+                        *rcs, values=old_value, trace='first')
                 )
             else:  # Restore the old value
                 self._entry.delete(0, 'end')
@@ -1826,7 +1847,7 @@ class Sheet(ttk.Frame):
         r2 = max_r if r2 is None else np.clip(r2, 0, max_r)
         c2 = max_c if c2 is None else np.clip(c2, 0, max_c)
         
-        self._selection_rcs:Tuple[int] = (r1, c1, r2, c2)
+        self._selection_rcs:Tuple[int, int, int, int] = (r1, c1, r2, c2)
         
         return self._selection_rcs
     
@@ -1835,7 +1856,9 @@ class Sheet(ttk.Frame):
                       c1:Union[int, None]=None,
                       r2:Union[int, None]=None,
                       c2:Union[int, None]=None,
-                      trace:bool=True) -> tuple:
+                      trace:Optional[str]=None) -> tuple:
+        assert trace in (None, 'first', 'last'), trace
+        
         self._focus_out_cell()
         
         r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
@@ -1853,24 +1876,26 @@ class Sheet(ttk.Frame):
         y1, y2 = self._canvasy(gy2s[r_low] + 1, gy2s[r_high+1])
         self.canvas.coords('selection-frame', x1-w+1, y1-w+1, x2+w-1, y2+w-1)
         
-        # Relocate the viewing window to trace the last selected cell (r2, c2)
+        # Relocate the viewing window to trace the first selected cell (r1, c1) 
+        # or the last selected cell (r2, c2)
         if trace:
+            r, c = (r1, c1) if trace == 'first' else (r2, c2)
             (gx1_vis, gx2_vis), (gy1_vis, gy2_vis) = self._visible_xys
             heights, widths = self._cell_sizes
-            gx2, gy2 = (gx2s[c2+1] + 1, gy2s[r2+1] + 1)
-            gx1, gy1 = (gx2 - widths[c2+1], gy2 - heights[r2+1])
+            gx2, gy2 = (gx2s[c+1], gy2s[r+1])
+            gx1, gy1 = (gx2 - widths[c+1], gy2 - heights[r+1])
             if gx1 < (gx1_vis + widths[0]):
                 self.__update_content_and_scrollbar(
                     axis=0, new=gx1 - widths[0], is_start=True)
             elif gx2 > gx2_vis:
                 self.__update_content_and_scrollbar(
-                    axis=0, new=gx2, is_start=False)
+                    axis=0, new=gx2+1, is_start=False)
             if gy1 < (gy1_vis + heights[0]):
                 self.__update_content_and_scrollbar(
                     axis=1, new=gy1 - heights[0], is_start=True)
             elif gy2 > gy2_vis:
                 self.__update_content_and_scrollbar(
-                    axis=1, new=gy2, is_start=False)
+                    axis=1, new=gy2+1, is_start=False)
         
         # Set each header's state
         r1_vis, r2_vis, c1_vis, c2_vis = self._visible_rcs
@@ -1923,7 +1948,7 @@ class Sheet(ttk.Frame):
             if not expand:  # single-cell selection
                 new_rc1 = new_rc2
             
-            return self._select_cells(*new_rc1, *new_rc2)
+            return self._select_cells(*new_rc1, *new_rc2, trace='last')
         
         elif area == 'paragraph':
             # Move the last selection to the nearset nonempty cell in the same
@@ -1960,7 +1985,7 @@ class Sheet(ttk.Frame):
             if not expand:  # single-cell selection
                 new_rc1 = new_rc2
             
-            return self._select_cells(*new_rc1, *new_rc2)
+            return self._select_cells(*new_rc1, *new_rc2, trace='last')
         
         # Move the last selection by 1 step
         step = -1 if direction in ('up', 'left') else +1
@@ -1969,38 +1994,21 @@ class Sheet(ttk.Frame):
         if not expand:  # single-cell selection
             new_rc1 = new_rc2
         
-        return self._select_cells(*new_rc1, *new_rc2)
-    
-    def _on_leftclick_double_cell(self, event=None):
-        tagdict = self._get_tags('current')
-        self._focus_in_cell(tagdict["row"], tagdict["col"])
-    
-    def _on_rightclick_press_cell(self, event):
-        tagdict = self._get_tags('current')
-        r, c = self._get_rc(tagdict, to_tuple=True)
-        r1, c1, r2, c2 = self._selection_rcs
-        (r_low, r_high), (c_low, c_high) = sorted([r1, r2]), sorted([c1, c2])
-        
-        if not ((r_low <= r <= r_high) and (c_low <= c <= c_high)):
-            self._select_cells(r, c, r, c, trace=False)
-        
-        menu = self._build_general_rightclick_menu()
-        menu.post(event.x_root, event.y_root)
-        self.after_idle(self._reset_rightclick_menu)
+        return self._select_cells(*new_rc1, *new_rc2, trace='last')
     
     def redraw(self,
                update_visible_rcs:bool=True,
                skip_exist:bool=False,
-               trace:bool=True):
+               trace:Optional[str]=None):
         if update_visible_rcs:
-            self._update_visible_rcs_gp2s()
+            self._update_visible_rcs_xy2s()
         self.redraw_cornerheader(skip_exist=skip_exist)
         self.redraw_headers(axis=0, skip_exist=skip_exist)
         self.redraw_headers(axis=1, skip_exist=skip_exist)
         self.redraw_cells(skip_exist=skip_exist)
         self._reselect_cells(trace=trace)
     
-    def refresh(self, scrollbar:Optional[str]='both', trace:bool=True):
+    def refresh(self, scrollbar:Optional[str]='both', trace:Optional[str]=None):
         assert scrollbar in (None, 'x', 'y', 'both'), scrollbar
         
         self._canvases_delete('temp')
@@ -2047,10 +2055,12 @@ class Sheet(ttk.Frame):
                      N:int=1,
                      sizes:Optional[np.ndarray]=None,
                      dialog:bool=False,
-                     trace:bool=True,
+                     trace:Optional[str]=None,
                      undo:bool=False):
-        assert i >= -1, i
         assert axis in (0, 1), axis
+        assert i >= -1, i
+        max_i = self.shape[axis] - 1
+        assert 0 <= i <= max_i + 1, (i, max_i)
         assert N >= 1, N
         
         # Update the status of the resized rows or cols
@@ -2113,9 +2123,9 @@ class Sheet(ttk.Frame):
         if undo:
             self._history.add(
                 forward=lambda: self.resize_cells(
-                    i, axis=axis, N=N, sizes=copy.copy(sizes)),
+                    i, axis=axis, N=N, sizes=copy.copy(sizes), trace='first'),
                 backward=lambda: self.resize_cells(
-                    i, axis=axis, N=N, sizes=copy.copy(old_sizes))
+                    i, axis=axis, N=N, sizes=copy.copy(old_sizes), trace='first')
             )
         
         return new_sizes
@@ -2129,7 +2139,7 @@ class Sheet(ttk.Frame):
                      styles=None,
                      dialog:bool=False,
                      redraw:bool=True,
-                     trace:bool=True,
+                     trace:Optional[str]=None,
                      undo:bool=False):
         assert axis in (0, 1), axis
         old_df, old_shape = self.values, self.shape
@@ -2205,10 +2215,10 @@ class Sheet(ttk.Frame):
             self._cell_styles, idc, new_styles, axis=axis)
         
         if axis == 0:
-            selection_kw = {"r1": i, "r2": i + N - 1}
+            selection_kw = dict(r1=i, r2=i+N-1)
             scrollbar = 'y'
         else:
-            selection_kw = {"c1": i, "c2": i + N - 1}
+            selection_kw = dict(c1=i, c2=i+N-1)
             scrollbar = 'x'
         
         # Select cells
@@ -2228,10 +2238,11 @@ class Sheet(ttk.Frame):
                     sizes=None if sizes is None else copy.copy(sizes),
                     styles=None if styles is None else np.array(
                         [ [ d.copy() for d in dicts] for dicts in styles ]),
-                    redraw=redraw
+                    redraw=redraw,
+                    trace='first'
                 ),
                 backward=lambda: self.delete_cells(
-                    i, axis=axis, N=N, redraw=redraw)
+                    i, axis=axis, N=N, redraw=redraw, trace='first')
             )
     
     def delete_cells(self,
@@ -2239,7 +2250,7 @@ class Sheet(ttk.Frame):
                      axis:int,
                      N:int=1,
                      redraw:bool=True,
-                     trace:bool=True,
+                     trace:Optional[str]=None,
                      undo:bool=False):
         assert axis in (0, 1), axis
         max_i = self.shape[axis] - 1
@@ -2270,9 +2281,9 @@ class Sheet(ttk.Frame):
         self._cell_styles = np.delete(self._cell_styles, idc, axis=axis)
         
         if axis == 0:
-            selection_kw = {"r1": i, "r2": i + N - 1}
+            selection_kw = dict(r1=i, r2=i+N-1)
         else:
-            selection_kw = {"c1": i, "c2": i + N - 1}
+            selection_kw = dict(c1=i, c2=i+N-1)
         
         # Select cells
         self._set_selection(**selection_kw)
@@ -2289,7 +2300,7 @@ class Sheet(ttk.Frame):
         if undo:
             self._history.add(
                 forward=lambda: self.delete_cells(
-                    i, axis=axis, N=N, redraw=redraw),
+                    i, axis=axis, N=N, redraw=redraw, trace='first'),
                 backward=lambda: self._undo_delete_cells(
                     i,
                     axis=axis,
@@ -2298,7 +2309,8 @@ class Sheet(ttk.Frame):
                     sizes=deleted_sizes,
                     styles=deleted_styles,
                     was_reset=was_reset,
-                    redraw=redraw
+                    redraw=redraw,
+                    trace='first'
                 )
             )
     
@@ -2310,7 +2322,8 @@ class Sheet(ttk.Frame):
                            sizes:Union[np.ndarray, List[np.ndarray]],
                            styles:np.ndarray,
                            was_reset:bool,
-                           redraw:bool=True):
+                           redraw:bool=True,
+                           trace:Optional[str]=None):
         assert isinstance(df, pd.DataFrame), df
         assert isinstance(styles, np.ndarray), styles
         assert isinstance(sizes, (np.ndarray, list)), sizes
@@ -2319,6 +2332,7 @@ class Sheet(ttk.Frame):
         if was_reset:
             n_rows, n_cols = df.shape
             assert isinstance(sizes, list), type(sizes)
+            assert len(sizes) == 2, sizes
             assert all( isinstance(ss, np.ndarray) for ss in sizes ), sizes
             assert sizes[0].shape == (n_rows+1,), (sizes[0].shape, df.shape)
             assert sizes[1].shape == (n_cols+1,), (sizes[1].shape, df.shape)
@@ -2332,7 +2346,7 @@ class Sheet(ttk.Frame):
             self._set_selection()
             
             if redraw:
-                self.refresh(trace=False)
+                self.refresh(trace=trace)
                 self.xview_moveto(0.)
                 self.yview_moveto(0.)
         else:
@@ -2343,7 +2357,8 @@ class Sheet(ttk.Frame):
                 df=df,
                 sizes=sizes,
                 styles=styles,
-                redraw=redraw
+                redraw=redraw,
+                trace=trace
             )
     
     def set_values(self,
@@ -2353,7 +2368,7 @@ class Sheet(ttk.Frame):
                    c2:Union[int, None]=None,
                    values:Union[pd.DataFrame, str]='',
                    redraw:bool=True,
-                   trace:bool=True,
+                   trace:Optional[str]=None,
                    undo:bool=False):
         assert isinstance(values, (pd.DataFrame, str)), type(values)
         
@@ -2373,9 +2388,9 @@ class Sheet(ttk.Frame):
         if undo:
             self._history.add(
                 forward=lambda: self.set_values(
-                    *rcs, values=df.copy(), redraw=redraw),
+                    *rcs, values=df.copy(), redraw=redraw, trace='first'),
                 backward=lambda: self.set_values(
-                    *rcs, values=old_values, redraw=redraw)
+                    *rcs, values=old_values, redraw=redraw, trace='first')
             )
     
     def erase_values(self,
@@ -2384,7 +2399,7 @@ class Sheet(ttk.Frame):
                      r2:Union[int, None]=None,
                      c2:Union[int, None]=None,
                      redraw:bool=True,
-                     trace:bool=True,
+                     trace:Optional[str]=None,
                      undo:bool=False):
         self.set_values(
             r1, c1, r2, c2, values='', redraw=redraw, undo=undo, trace=trace)
@@ -2411,7 +2426,7 @@ class Sheet(ttk.Frame):
                    property_:str,
                    values=None,
                    redraw:bool=True,
-                   trace:bool=True,
+                   trace:Optional[str]=None,
                    undo:bool=False):
         r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
@@ -2448,9 +2463,19 @@ class Sheet(ttk.Frame):
         if undo:
             self._history.add(
                 forward=lambda: self.set_styles(
-                    *rcs, property_=property_, values=values, redraw=redraw),
+                    *rcs,
+                    property_=property_,
+                    values=values,
+                    redraw=redraw,
+                    trace='first'
+                ),
                 backward=lambda: self.set_styles(
-                    *rcs, property_=property_, values=old_values, redraw=redraw)
+                    *rcs,
+                    property_=property_,
+                    values=old_values,
+                    redraw=redraw,
+                    trace='first'
+                )
             )
     
     def set_fonts(self,
@@ -2461,7 +2486,7 @@ class Sheet(ttk.Frame):
                   fonts=None,
                   dialog:bool=False,
                   redraw:bool=True,
-                  trace:bool=True,
+                  trace:Optional[str]=None,
                   undo:bool=False):
         if dialog:
             style_topleft = self._cell_styles[min(r1, r2), min(c1, c2)]
@@ -2491,7 +2516,7 @@ class Sheet(ttk.Frame):
                     colors=None,
                     dialog:bool=False,
                     redraw:bool=True,
-                    trace:bool=True,
+                    trace:Optional[str]=None,
                     undo:bool=False):
         assert field in ('foreground', 'background'), field
         
@@ -2537,7 +2562,7 @@ class Sheet(ttk.Frame):
         else:
             i = rcs[axis][1] + 1
         
-        self.insert_cells(i, axis=axis, dialog=dialog, undo=undo, trace=False)
+        self.insert_cells(i, axis=axis, dialog=dialog, undo=undo)
     
     def _selection_delete_cells(self, undo:bool=False):
         r1, c1, r2, c2 = self._selection_rcs
@@ -2559,7 +2584,7 @@ class Sheet(ttk.Frame):
     
     def _selection_erase_values(self, undo:bool=False):
         rcs = self._selection_rcs
-        self.erase_values(*rcs, undo=undo, trace=False)
+        self.erase_values(*rcs, undo=undo)
     
     def _selection_copy_values(self):
         rcs = self._selection_rcs
@@ -2588,45 +2613,41 @@ class Sheet(ttk.Frame):
             # a larger shape
             if (n_rows_add := n_rows - n_rows_exist):
                 self.insert_cells(
-                    r_add, axis=0, N=n_rows_add, redraw=False, undo=True)
+                    r_add, axis=0, N=n_rows_add, redraw=False, undo=undo)
             if (n_cols_add := n_cols - n_cols_exist):
                 self.insert_cells(
-                    c_add, axis=1, N=n_cols_add, redraw=False, undo=True)
+                    c_add, axis=1, N=n_cols_add, redraw=False, undo=undo)
             
             # Set the values
             self.set_values(
-                r_end, c_end, r_start, c_start,
+                r_start, c_start, r_end, c_end,
                 values=df,
                 redraw=False,
-                undo=True
+                undo=undo
             )
             
-            seq["forward"].append(self.refresh)
-            seq["backward"].insert(0, self.refresh)
+            seq["forward"].append(lambda: self.refresh(trace='first'))
+            seq["backward"].insert(0, lambda: self.refresh(trace='first'))
         
-        self.refresh(trace=False)
+        self.refresh()
         
         return df
     
     def _selection_set_styles(self, property_:str, values=None, undo:bool=False):
         rcs = self._selection_rcs
-        self.set_styles(
-            *rcs, property_=property_, values=values, undo=undo, trace=False)
+        self.set_styles(*rcs, property_=property_, values=values, undo=undo)
     
     def _selection_set_fonts(self, dialog:bool=False, undo:bool=False):
         rcs = self._selection_rcs
-        return self.set_fonts(
-            *rcs, dialog=dialog, undo=undo, trace=False)
+        return self.set_fonts(*rcs, dialog=dialog, undo=undo)
     
     def _selection_set_foregroundcolors(self, dialog:bool=False, undo:bool=False):
         rcs = self._selection_rcs
-        return self.set_foregroundcolors(
-            *rcs, dialog=dialog, undo=undo, trace=False)
+        return self.set_foregroundcolors(*rcs, dialog=dialog, undo=undo)
     
     def _selection_set_backgroundcolors(self, dialog:bool=False, undo:bool=False):
         rcs = self._selection_rcs
-        return self.set_backgroundcolors(
-            *rcs, dialog=dialog, undo=undo, trace=False)
+        return self.set_backgroundcolors(*rcs, dialog=dialog, undo=undo)
     
     def _selection_resize_cells(
             self, axis:int, dialog:bool=False, undo:bool=False):
@@ -2638,7 +2659,7 @@ class Sheet(ttk.Frame):
         
         i1, i2 = rcs[axis]
         return self.resize_cells(
-            i1, axis=axis, N=i2-i1+1, dialog=dialog, undo=undo, trace=False)
+            i1, axis=axis, N=i2-i1+1, dialog=dialog, undo=undo)
 
 
 class Book(ttk.Frame):
@@ -2708,7 +2729,7 @@ class Book(ttk.Frame):
         self._entry = en = ttk.Entry(ib, style=self._entry_style, takefocus=0)
         self._entry.grid(row=0, column=1, sticky='nesw', padx=[12, 0])
         en.bind('<FocusIn>', lambda e: self.sheet._refresh_entry())
-        en.bind('<KeyPress>', lambda e: self.sheet._on_key_press_entry(e))
+        en.bind('<KeyPress>', lambda e: self.sheet._on_entry_key_press(e))
         
         ttk.Separator(self, takefocus=0).pack(fill='x')
         
@@ -2893,7 +2914,7 @@ class Book(ttk.Frame):
     def insert_sheet(self,
                      index:Optional[int]=None,
                      name:Optional[str]=None,
-                     **kwargs):
+                     **kwargs):#TODO dialog
         assert isinstance(index, (int, type(None))), index
         assert isinstance(name, (str, type(None))), name
         
@@ -3080,7 +3101,7 @@ if __name__ == '__main__':
     
     ss.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)
     ss.set_backgroundcolors(5, 3, 5, 3, colors='#2A7AD5', undo=True)
-    ss.resize_cells(5, axis=0, sizes=[80], trace=False, undo=True)
+    ss.resize_cells(5, axis=0, sizes=[80], trace=None, undo=True)
     
     def _set_value_method1():
         ss.set_values(4, 3, 4, 3, values='r4, c3 (method 1)')
