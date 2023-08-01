@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import ttkbootstrap as ttk
 from ttkbootstrap import colorutils
+from ttkbootstrap.icons import Icon
 from ttkbootstrap.dialogs import dialogs, colorchooser
 
 from .dnd import ButtonTriggerOrderlyContainer
@@ -296,6 +297,10 @@ class ColorChooserDialog(_DialogPositioning, colorchooser.ColorChooserDialog):
     pass
 
 
+class MessageDialog(_DialogPositioning, dialogs.MessageDialog):
+    pass
+
+
 class QueryDialog(_DialogPositioning, dialogs.QueryDialog):
     def create_body(self, master):
         super().create_body(master=master)
@@ -449,7 +454,7 @@ class Sheet(ttk.Frame):
                  shape:Union[Tuple[int, int], List[int]]=(10, 10),
                  cell_width:int=80,
                  cell_height:int=25,
-                 min_width:int=10,
+                 min_width:int=20,
                  min_height:int=10,
                  get_style:Optional[Callable[[...], Any]]=None,
                  autohide_scrollbar:bool=True,
@@ -1209,7 +1214,7 @@ class Sheet(ttk.Frame):
                 continue
             self._focus_in_cell(r, c)
     
-    def __on_leftbutton_to_select(self, event, expand:bool):
+    def __on_leftbutton_selection(self, event, expand:bool):#TODO autoscroll
         self._be_focus()
         x, y, canvas = (event.x, event.y, event.widget)
         for oid in canvas.find_overlapping(x, y, x, y):
@@ -1224,9 +1229,9 @@ class Sheet(ttk.Frame):
                 r1, c1 = rc2
             self._select_cells(r1, c1, r2, c2)
     
-    _on_leftbutton_press = lambda self, event: self.__on_leftbutton_to_select(
+    _on_leftbutton_press = lambda self, event: self.__on_leftbutton_selection(
         event, expand=False)
-    _on_leftbutton_motion = lambda self, event: self.__on_leftbutton_to_select(
+    _on_leftbutton_motion = lambda self, event: self.__on_leftbutton_selection(
         event, expand=True)
     
     def redraw_cornerheader(self, skip_exist=False):
@@ -2058,9 +2063,8 @@ class Sheet(ttk.Frame):
                      trace:Optional[str]=None,
                      undo:bool=False):
         assert axis in (0, 1), axis
-        assert i >= -1, i
         max_i = self.shape[axis] - 1
-        assert 0 <= i <= max_i + 1, (i, max_i)
+        assert -1 <= i <= max_i + 1, (i, max_i)
         assert N >= 1, N
         
         # Update the status of the resized rows or cols
@@ -2745,7 +2749,7 @@ class Book(ttk.Frame):
             sbfm,
             style=self._bold_button_style,
             text='  ＋',
-            command=self.insert_sheet,
+            command=lambda: self.insert_sheet(dialog=True),
             takefocus=0
         )
         self._sidebar_add.pack(anchor='e')
@@ -2754,12 +2758,12 @@ class Book(ttk.Frame):
         self._sidebar.set_dnd_end_callback(self._on_dnd_end)
         self._panedwindow.add(sbfm.container)
         self._rightclick_menu = tk.Menu(sb, tearoff=0)
-        
+        #
         def _show_sidebar(event=None):
             assert self._sidebar_hidden, self._sidebar_hidden
             pw.unbind('<Map>')
             self._toggle_sidebar()
-        
+        #
         pw.bind('<Map>', _show_sidebar)
         
         ## Sheet padding frame
@@ -2768,7 +2772,14 @@ class Book(ttk.Frame):
         
         # Build the first sheet
         kwargs["bootstyle_scrollbar"] = bootstyle_scrollbar
-        self._sheet_kw = kwargs.copy()
+        self._sheet_kw = {
+            "shape": (10, 10),
+            "cell_width": 80,
+            "cell_height": 25,
+            "min_width": 20,
+            "min_height": 10
+        }
+        self._sheet_kw.update(kwargs)
         self._sheet_var = tk.IntVar(self)
         self._sheet_var.trace_add('write', self._switch_sheet)
         self._sheet:Union[Sheet, None] = None
@@ -2914,14 +2925,130 @@ class Book(ttk.Frame):
     def insert_sheet(self,
                      index:Optional[int]=None,
                      name:Optional[str]=None,
-                     **kwargs):#TODO dialog
+                     dialog:bool=False,
+                     **kwargs):
         assert isinstance(index, (int, type(None))), index
         assert isinstance(name, (str, type(None))), name
         
-        sheet_kw = self._sheet_kw.copy()
-        sheet_kw.update(kwargs)
         sheets_props = self._sheets_props
         name = self._get_unique_name(name)
+        sheet_kw = self._sheet_kw.copy()
+        sheet_kw.update(kwargs)
+        
+        if dialog:
+            top = ttk.Toplevel(
+                transient=self,
+                title='Add New Sheet',
+                resizable=(False, False)
+            )
+            top.wm_withdraw()
+            
+            # Body
+            body = ttk.Frame(top, padding=12)
+            body.pack(fill='both', expand=1)
+            for c in range(3):
+                body.grid_rowconfigure(c, pad=6)
+            body.grid_columnconfigure(0, pad=20)
+            
+            ## Shape
+            ttk.Label(body, text='Sheet Shape (R x C)').grid(
+                row=0, column=0, sticky='w')
+            sb_rows = ttk.Spinbox(body, from_=1, to=100_000, increment=1, width=8)
+            sb_rows.grid(row=0, column=1)
+            sb_rows.set(sheet_kw["shape"][0])
+            ttk.Label(body, text='x').grid(row=0, column=2)
+            sb_cols = ttk.Spinbox(body, from_=1, to=100_000, increment=1, width=8)
+            sb_cols.grid(row=0, column=3)
+            sb_cols.set(sheet_kw["shape"][1])
+            
+            ## Default size
+            ttk.Label(body, text='Cell Size (W x H)').grid(
+                row=1, column=0, sticky='w')
+            sb_w = ttk.Spinbox(body, from_=1, to=200, increment=1, width=8)
+            sb_w.grid(row=1, column=1)
+            sb_w.set(sheet_kw["cell_width"])
+            ttk.Label(body, text=' x ').grid(row=1, column=2)
+            sb_h = ttk.Spinbox(body, from_=1, to=200, increment=1, width=8)
+            sb_h.grid(row=1, column=3)
+            sb_h.set(sheet_kw["cell_height"])
+            
+            ## Min size
+            ttk.Label(body, text='Minimal Cell Size (W x H)').grid(
+                row=2, column=0, sticky='w')
+            sb_minw = ttk.Spinbox(body, from_=1, to=200, increment=1, width=8)
+            sb_minw.grid(row=2, column=1)
+            sb_minw.set(sheet_kw["min_width"])
+            ttk.Label(body, text=' x ').grid(row=2, column=2)
+            sb_minh = ttk.Spinbox(body, from_=1, to=200, increment=1, width=8)
+            sb_minh.grid(row=2, column=3)
+            sb_minh.set(sheet_kw["min_height"])
+            #
+            submitted = False
+            def _on_submit(event=None):
+                # Check if the values are valid
+                for which, sb in [('number of rows', sb_rows),
+                                  ('number of columns', sb_cols),
+                                  ('cell width', sb_w),
+                                  ('cell height', sb_h),
+                                  ('minimal cell width', sb_minw),
+                                  ('minimal cell height', sb_minh)]:
+                    if not sb.get().isnumeric():
+                        error_dialog = MessageDialog(
+                            message=f'The value of "{which}" must be a positive '
+                                    'integer',
+                            title='Value Error',
+                            parent=top,
+                            buttons=["OK:primary"],
+                            icon=Icon.error,
+                            alert=True
+                        )
+                        error_dialog.show(self._center_window)
+                        return
+                nonlocal submitted
+                submitted = True
+                sheet_kw.update({
+                    "shape": (int(sb_rows.get()), int(sb_cols.get())),
+                    "cell_width": int(sb_w.get()),
+                    "cell_height": int(sb_h.get()),
+                    "min_width": int(sb_minw.get()),
+                    "min_height": int(sb_minh.get())
+                })
+                top.destroy()
+            #
+            for sb in [sb_rows, sb_cols, sb_w, sb_h, sb_minw, sb_minh]:
+                sb.bind('<Return>', _on_submit)
+                sb.bind('<Escape>', lambda e: top.destroy())
+            
+            # Separator
+            ttk.Separator(top, orient='horizontal').pack(fill='x')
+            
+            # Buttonbox
+            buttonbox = ttk.Frame(top, padding=[12, 18])
+            buttonbox.pack(fill='both', expand=1)
+            
+            ## Submit/Cancel buttons
+            ttk.Button(
+                buttonbox,
+                text='Submit',
+                bootstyle='primary',
+                command=_on_submit
+            ).pack(side='right')
+            ttk.Button(
+                buttonbox,
+                text='Cancel',
+                bootstyle='secondary',
+                command=top.destroy
+            ).pack(side='right', padx=[0, 12])
+            
+            sb_rows.focus_set()
+            sb_rows.select_range(0, 'end')
+            self._center_window(top)
+            top.lift()
+            top.wm_deiconify()
+            top.wait_window()  # don't continue until the window is destroyed
+            
+            if not submitted:
+                return self._sheets_props
         
         if index is None:
             index = len(sheets_props)
@@ -2949,7 +3076,7 @@ class Book(ttk.Frame):
             takefocus=0
         )
         switch.pack(side='left', fill='x', expand=1)
-        switch.bind(RIGHTCLICK, lambda e: self._pop_switch_menu(e, key))
+        switch.bind(RIGHTCLICK, lambda e: self._post_switch_menu(e, key))
         
         # Modify the sheet dict
         keys, props = (list(sheets_props.keys()), list(sheets_props.values()))
@@ -2995,7 +3122,7 @@ class Book(ttk.Frame):
         
         return menu
     
-    def _pop_switch_menu(self, event, key):
+    def _post_switch_menu(self, event, key):
         # Focus on the sheet that has been clicked
         self.after_idle(self._sheet_var.set, key)
         
