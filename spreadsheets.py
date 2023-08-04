@@ -38,7 +38,7 @@ MODIFIER_MASKS = {
     "Shift": int('0b1', base=2),
     "Lock": int('0b10', base=2),
     "Control": int('0b100', base=2),
-    "Mod1": int('0b1_000', 2),  # command (Mac)
+    "Mod1": int('0b1_000', base=2),  # command (Mac)
     "Mod2": int('0b10_000', base=2),   # option (Mac)
     "Mod3": int('0b100_000', base=2),
     "Mod4": int('0b1000_000', base=2),
@@ -1331,8 +1331,8 @@ class Sheet(ttk.Frame):
             )
     
     def redraw_headers(self,
-                       i1:Union[int, None]=None,
-                       i2:Union[int, None]=None,
+                       i1:Optional[int]=None,
+                       i2:Optional[int]=None,
                        *,
                        axis:int,
                        skip_exist=False):
@@ -1682,10 +1682,10 @@ class Sheet(ttk.Frame):
         self._resize_start = None
     
     def redraw_cells(self,
-                     r1:Union[int, None]=None,
-                     c1:Union[int, None]=None,
-                     r2:Union[int, None]=None,
-                     c2:Union[int, None]=None,
+                     r1:Optional[int]=None,
+                     c1:Optional[int]=None,
+                     r2:Optional[int]=None,
+                     c2:Optional[int]=None,
                      skip_exist=False):
         assert (r1 is not None) or (r2 is None), (r1, r2)
         assert (c1 is not None) or (c2 is None), (c1, c2)
@@ -1878,10 +1878,10 @@ class Sheet(ttk.Frame):
         self.focus_set()
     
     def _set_selection(self,
-                       r1:Union[int, None]=None,
-                       c1:Union[int, None]=None,
-                       r2:Union[int, None]=None,
-                       c2:Union[int, None]=None) -> tuple:
+                       r1:Optional[int]=None,
+                       c1:Optional[int]=None,
+                       r2:Optional[int]=None,
+                       c2:Optional[int]=None) -> tuple:
         assert (r1 is not None) or (r2 is None), (r1, r2)
         assert (c1 is not None) or (c2 is None), (c1, c2)
         
@@ -1896,10 +1896,10 @@ class Sheet(ttk.Frame):
         return self._selection_rcs
     
     def _select_cells(self,
-                      r1:Union[int, None]=None,
-                      c1:Union[int, None]=None,
-                      r2:Union[int, None]=None,
-                      c2:Union[int, None]=None,
+                      r1:Optional[int]=None,
+                      c1:Optional[int]=None,
+                      r2:Optional[int]=None,
+                      c2:Optional[int]=None,
                       trace:Optional[str]=None) -> tuple:
         assert trace in (None, 'first', 'last'), trace
         
@@ -2167,7 +2167,8 @@ class Sheet(ttk.Frame):
         return new_sizes
     
     def insert_cells(self,
-                     i:int,
+                     i:Optional[int]=None,
+                     *,
                      axis:int,
                      N:int=1,
                      df:Optional[pd.DataFrame]=None,
@@ -2180,6 +2181,7 @@ class Sheet(ttk.Frame):
         assert axis in (0, 1), axis
         old_df, old_shape = self.values, self.shape
         max_i = old_shape[axis] - 1
+        i = max_i + 1 if i is None else i
         assert 0 <= i <= max_i + 1, (i, max_i)
         
         if dialog:
@@ -2398,10 +2400,10 @@ class Sheet(ttk.Frame):
             )
     
     def set_values(self,
-                   r1:Union[int, None]=None,
-                   c1:Union[int, None]=None,
-                   r2:Union[int, None]=None,
-                   c2:Union[int, None]=None,
+                   r1:Optional[int]=None,
+                   c1:Optional[int]=None,
+                   r2:Optional[int]=None,
+                   c2:Optional[int]=None,
                    values:Union[pd.DataFrame, str]='',
                    redraw:bool=True,
                    trace:Optional[str]=None,
@@ -2430,10 +2432,10 @@ class Sheet(ttk.Frame):
             )
     
     def erase_values(self,
-                     r1:Union[int, None]=None,
-                     c1:Union[int, None]=None,
-                     r2:Union[int, None]=None,
-                     c2:Union[int, None]=None,
+                     r1:Optional[int]=None,
+                     c1:Optional[int]=None,
+                     r2:Optional[int]=None,
+                     c2:Optional[int]=None,
                      redraw:bool=True,
                      trace:Optional[str]=None,
                      undo:bool=False):
@@ -2441,10 +2443,10 @@ class Sheet(ttk.Frame):
             r1, c1, r2, c2, values='', redraw=redraw, undo=undo, trace=trace)
     
     def copy_values(self,
-                    r1:Union[int, None]=None,
-                    c1:Union[int, None]=None,
-                    r2:Union[int, None]=None,
-                    c2:Union[int, None]=None):
+                    r1:Optional[int]=None,
+                    c1:Optional[int]=None,
+                    r2:Optional[int]=None,
+                    c2:Optional[int]=None):
         r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
@@ -2454,10 +2456,10 @@ class Sheet(ttk.Frame):
         return values_to_copy
     
     def set_styles(self,
-                   r1:Union[int, None]=None,
-                   c1:Union[int, None]=None,
-                   r2:Union[int, None]=None,
-                   c2:Union[int, None]=None,
+                   r1:Optional[int]=None,
+                   c1:Optional[int]=None,
+                   r2:Optional[int]=None,
+                   c2:Optional[int]=None,
                    *,
                    property_:str,
                    values=None,
@@ -2515,10 +2517,10 @@ class Sheet(ttk.Frame):
             )
     
     def set_fonts(self,
-                  r1:Union[int, None]=None,
-                  c1:Union[int, None]=None,
-                  r2:Union[int, None]=None,
-                  c2:Union[int, None]=None,
+                  r1:Optional[int]=None,
+                  c1:Optional[int]=None,
+                  r2:Optional[int]=None,
+                  c2:Optional[int]=None,
                   fonts=None,
                   dialog:bool=False,
                   redraw:bool=True,
@@ -2544,10 +2546,10 @@ class Sheet(ttk.Frame):
         return fonts
     
     def _set_colors(self,
-                    r1:Union[int, None]=None,
-                    c1:Union[int, None]=None,
-                    r2:Union[int, None]=None,
-                    c2:Union[int, None]=None,
+                    r1:Optional[int]=None,
+                    c1:Optional[int]=None,
+                    r2:Optional[int]=None,
+                    c2:Optional[int]=None,
                     field:str='foreground',
                     colors=None,
                     dialog:bool=False,
@@ -2704,7 +2706,7 @@ class Book(ttk.Frame):
         return { ps["name"]: ps["sheet"] for ps in self._sheets_props.values() }
     
     @property
-    def sheet(self) -> Union[Sheet, None]:
+    def sheet(self) -> Optional[Sheet]:
         return self._sheet
     
     def __init__(self, master, bootstyle_scrollbar='round', **kwargs):
@@ -2714,7 +2716,7 @@ class Book(ttk.Frame):
         # Build toolbar
         self._toolbar = tb = ttk.Frame(self)
         self._toolbar.pack(fill='x', padx=9, pady=3)
-        self._sidebar_hidden = True
+        self._sidebar_hidden: bool = True
         self._sidebar_toggle = ttk.Button(
             tb,
             style=self._button_style,
@@ -2774,7 +2776,7 @@ class Book(ttk.Frame):
         self._panedwindow.pack(fill='both', expand=1)
         
         ## Sidebar
-        self._sidebar_width = 150
+        self._sidebar_width: int = 150
         self._sidebar_fm = sbfm = ScrolledFrame(
             pw, scroll_orient='vertical', hbootstyle=bootstyle_scrollbar)
         self._sidebar_add = ttk.Button(
@@ -2814,9 +2816,9 @@ class Book(ttk.Frame):
         self._sheet_kw.update(kwargs)
         self._sheet_var = tk.IntVar(self)
         self._sheet_var.trace_add('write', self._switch_sheet)
-        self._sheet:Union[Sheet, None] = None
-        self._sheets_props:Dict[int, list] = dict()
-        self._sheets_props:Dict[int, list] = self.insert_sheet(0)
+        self._sheet: Optional[Sheet] = None
+        self._sheets_props: Dict[int, list] = dict()
+        self._sheets_props: Dict[int, list] = self.insert_sheet(0)
         
         # Sizegrip
         ttk.Separator(self, takefocus=0).pack(fill='x')
