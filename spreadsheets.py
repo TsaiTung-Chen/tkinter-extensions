@@ -13,7 +13,7 @@ import random
 import tkinter as tk
 import tkinter.font
 from contextlib import contextmanager
-from typing import Any, Union, Optional, List, Tuple, Dict, Callable, Literal
+from typing import Union, Optional, List, Tuple, Dict, Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -27,13 +27,16 @@ from .scrolled_widgets import AutoHiddenScrollbar, ScrolledFrame
 
 platform = sys.platform
 
-COMMAND = 'Mod1' if platform == 'darwin' else 'Control'
-OPTION = 'Mod2' if platform == 'darwin' else 'Alt'
+if platform == 'darwin':
+    COMMAND = 'Mod1'
+    OPTION = 'Mod2'
+else:
+    COMMAND = 'Control'
+    OPTION = 'Alt'
 CONTROL = 'Control'
 SHIFT = 'Shift'
 LOCK = 'Lock'
 MODIFIERS = {COMMAND, OPTION, CONTROL, SHIFT, LOCK}
-
 MODIFIER_MASKS = {
     "Shift": int('0b1', base=2),
     "Lock": int('0b10', base=2),
@@ -52,6 +55,9 @@ MODIFIER_MASKS = {
 }
 
 RIGHTCLICK = '<ButtonPress-2>' if platform == 'darwin' else '<ButtonPress-3>'
+MOUSESCROLL: List[str] = ['<ButtonPress-4>', '<ButtonPress-5>'] \
+    if platform == 'linux' \
+    else ['<MouseWheel>']
 # =============================================================================
 # ---- Functions
 # =============================================================================
@@ -87,10 +93,7 @@ class DuplicateNameError(ValueError): pass
 
 
 class _DialogPositioning:
-    def show(self,
-             position:Union[
-                 tuple, list, Callable[[tk.BaseWidget, ...], Any], None]=None
-             ):
+    def show(self, position:Union[tuple, list, Callable, None]=None):
         # Edit: accept a positioning function argument
         
         self._result = None
@@ -320,16 +323,18 @@ class History:
     def forwardable(self) -> bool:
         return self.step < len(self._stack["forward"])
     
-    def __init__(self, callback:Optional[Callable[[...], Any]]=None):
-        self._callback: Optional[Callable[[...], Any]] = callback
-        self._sequence: Optional[Dict[str, List[Callable[[...], Any]]]] = None
+    def __init__(self, callback:Optional[Callable]=None):
+        assert callback is None or callable(callback), callback
+        
+        self._callback: Optional[Callable] = callback
+        self._sequence: Optional[Dict[str, List[Callable]]] = None
         self._stack = {"forward": list(), "backward": list()}
         self._step = 0
     
-    def reset(self):
-        self.__init__()
+    def reset(self, callback:Optional[Callable]=None):
+        self.__init__(callback=callback)
     
-    def add(self, forward:Callable[[...], Any], backward:Callable[[...], Any]):
+    def add(self, forward:Callable, backward:Callable):
         assert callable(forward) and callable(backward), (forward, backward)
         
         if self._sequence is None:
@@ -363,7 +368,7 @@ class History:
             backward=lambda: [ func() for func in sequences["backward"][::-1] ]
         )
     
-    def pop(self) -> Dict[str, List[Callable[[...], Any]]]:
+    def pop(self) -> Dict[str, List[Callable]]:
         assert self.step > 0, self.step
         
         self._step -= 1
@@ -398,24 +403,23 @@ class History:
         
         return self.step
     
-    def set_callback(self, func:Callable[[...], Any]):
+    def set_callback(self, func:Callable) -> Callable:
+        assert callable(func), func
         self._callback = func
+        return self._callback
     
-    def remove_callback(self) -> Callable[[...], Any]:
-        func = self._callback
+    def get_callback(self) -> Optional[Callable]:
+        return self._callback
+    
+    def remove_callback(self) -> Optional[Callable]:
+        callback = self.get_callback()
         self._callback = None
-        return func
+        return callback
 
 
 class Sheet(ttk.Frame):
     _valid_header_states = ('normal', 'hover', 'selected')
     _valid_cell_states = ('normal', 'readonly')
-    
-    @property
-    def MouseScroll(self) -> List[str]:
-        if self._windowingsystem == 'x11':  # Linux
-            return ['<ButtonPress-4>', '<ButtonPress-5>']
-        return ['<MouseWheel>']
 
     @property
     def canvas(self) -> tk.Canvas:  # cell canvas
@@ -456,7 +460,7 @@ class Sheet(ttk.Frame):
                  cell_height:int=25,
                  min_width:int=20,
                  min_height:int=10,
-                 get_style:Optional[Callable[[...], Any]]=None,
+                 get_style:Optional[Callable]=None,
                  autohide_scrollbar:bool=True,
                  mousewheel_sensitivity=1.,
                  bootstyle_scrollbar='round',
@@ -575,7 +579,7 @@ class Sheet(ttk.Frame):
         canvas.bind('<Configure>', self._on_canvas_configured)
         for widget in [canvas, rowcanvas, colcanvas, entry]:
             widget.configure(takefocus=0)
-            for scrollseq in self.MouseScroll:
+            for scrollseq in MOUSESCROLL:
                 widget.bind(scrollseq, self._on_mousewheel_scroll)
         
         for _canvas in [canvas, cornercanvas, rowcanvas, colcanvas]:
@@ -3074,11 +3078,10 @@ class Book(ttk.Frame):
                 command=top.destroy
             ).pack(side='right', padx=[0, 12])
             
-            sb_rows.focus_set()
-            sb_rows.select_range(0, 'end')
             self._center_window(top)
-            top.lift()
             top.wm_deiconify()
+            sb_rows.select_range(0, 'end')
+            sb_rows.focus_set()
             top.wait_window()  # don't continue until the window is destroyed
             
             if not submitted:
@@ -3167,17 +3170,31 @@ class Book(ttk.Frame):
         )
         menu.add_command(
             label='Delete Sheet',
-            command=lambda: self._delete_sheet(key)
+            command=lambda: self._delete_sheet(key, check=True)
         )
         
         menu.post(event.x_root, event.y_root)  # show the right click menu
         self.after_idle(self._reset_rightclick_menu)
     
-    def delete_sheet(self, name:str, destroy:bool=True) -> dict:
+    def delete_sheet(self, name:str, destroy:bool=True, check:bool=False) -> dict:
         key = self._get_key(name)
-        return self._delete_sheet(key, destroy=destroy)
+        return self._delete_sheet(key, destroy=destroy, check=check)
     
-    def _delete_sheet(self, key, destroy:bool=True):
+    def _delete_sheet(self, key, destroy:bool=True, check:bool=False):
+        if check:
+            dialog = MessageDialog(
+                message="This action can't be undone. "
+                        "Would you like to continue?",
+                title='Sheet Deletion',
+                parent=self,
+                buttons=['Cancel:secondary', 'OK:primary'],
+                icon=Icon.warning,
+                alert=True
+            )
+            dialog.show(self._center_window)
+            if dialog.result != 'OK':
+                return
+        
         sheets_props = self._sheets_props
         index = list(sheets_props).index(key)
         ps = sheets_props.pop(key)  # remove the sheet properties
