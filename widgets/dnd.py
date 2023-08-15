@@ -466,10 +466,10 @@ class OrderlyContainer(ttk.Canvas):
         return _unset_focus
 
 
-class ButtonTriggerOrderlyContainer(OrderlyContainer):
+class TriggerOrderlyContainer(OrderlyContainer):
     def bind_dnd_start(self, moved:tk.Widget):
         for child in moved.winfo_children():
-            if child.winfo_class() == 'TButton':
+            if getattr(child, '_dnd_trigger', None):
                 self._bind_dnd_start(moved=moved, trigger=child)
 
 
@@ -502,7 +502,7 @@ if __name__ == '__main__':
     window = ttk.Toplevel(title='Button Trigger Drag and Drop')
     window.lift()
     window.focus_set()
-    container = ButtonTriggerOrderlyContainer(window)
+    container = TriggerOrderlyContainer(window)
     container.pack(fill='both', expand=1)
     frames = list()
     for r in range(4):
@@ -510,10 +510,12 @@ if __name__ == '__main__':
         for c in range(3):
             dash = '----' * random.randint(1, 5)
             frame = ttk.Frame(container)
-            ttk.Button(frame,
-                       text='::',
-                       takefocus=True,
-                       bootstyle='success-link').pack(side='left')
+            bt = ttk.Button(frame,
+                            text='::',
+                            takefocus=True,
+                            bootstyle='success-link')
+            bt.pack(side='left')
+            bt._dnd_trigger = True
             ttk.Label(frame,
                       text=f'|<{dash} ({r}, {c}) {dash}>|',
                       bootstyle='success').pack(side='left')

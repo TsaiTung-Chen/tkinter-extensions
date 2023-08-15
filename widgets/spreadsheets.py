@@ -7,7 +7,6 @@ Created on Mon May 22 22:35:24 2023
 """
 
 import gc
-import sys
 import copy
 import random
 import tkinter as tk
@@ -22,70 +21,11 @@ from ttkbootstrap import colorutils
 from ttkbootstrap.icons import Icon
 from ttkbootstrap.dialogs import dialogs, colorchooser
 
-from .dnd import ButtonTriggerOrderlyContainer
-from .scrolled_widgets import AutoHiddenScrollbar, ScrolledFrame
-
-platform = sys.platform
-
-if platform == 'darwin':
-    COMMAND = 'Mod1'
-    OPTION = 'Mod2'
-else:
-    COMMAND = 'Control'
-    OPTION = 'Alt'
-CONTROL = 'Control'
-SHIFT = 'Shift'
-LOCK = 'Lock'
-MODIFIERS = {COMMAND, OPTION, CONTROL, SHIFT, LOCK}
-MODIFIER_MASKS = {
-    "Shift": int('0b1', base=2),
-    "Lock": int('0b10', base=2),
-    "Control": int('0b100', base=2),
-    "Mod1": int('0b1_000', base=2),  # command (Mac)
-    "Mod2": int('0b10_000', base=2),   # option (Mac)
-    "Mod3": int('0b100_000', base=2),
-    "Mod4": int('0b1000_000', base=2),
-    "Mod5": int('0b10000_000', base=2),
-    "Button1": int('0b100_000_000', base=2),
-    "Button2": int('0b1_000_000_000', base=2),
-    "Button3": int('0b10_000_000_000', base=2),
-    "Button4": int('0b100_000_000_000', base=2),
-    "Button5": int('0b1000_000_000_000', base=2),
-    "Alt": int('0b100_000_000_000_000_000', base=2)
-}
-
-RIGHTCLICK = '<ButtonPress-2>' if platform == 'darwin' else '<ButtonPress-3>'
-MOUSESCROLL: List[str] = ['<ButtonPress-4>', '<ButtonPress-5>'] \
-    if platform == 'linux' \
-    else ['<MouseWheel>']
-# =============================================================================
-# ---- Functions
-# =============================================================================
-def get_modifiers(state:int, platform_specific:bool=True) -> set:
-    modifiers = set()
-    _modifiers = MODIFIERS if platform_specific else MODIFIER_MASKS
-    for mod in _modifiers:
-        if state & MODIFIER_MASKS[mod]:
-            modifiers.add(mod)
-    
-    return modifiers
-
-
-def get_center_position(widget:tk.BaseWidget) -> Tuple[int, int]:
-    widget.update_idletasks()
-    width, height = widget.winfo_width(), widget.winfo_height()
-    x_root, y_root = widget.winfo_rootx(), widget.winfo_rooty()
-    
-    return (x_root + width//2, y_root + height//2)
-
-
-def center_window(to_center:tk.BaseWidget, center_of:tk.BaseWidget):
-    x_center, y_center = get_center_position(center_of)
-    width, height = to_center.winfo_reqwidth(), to_center.winfo_reqheight()
-    x, y = (x_center - width//2, y_center - height//2)
-    tk.Wm.wm_geometry(to_center, f'+{x}+{y}')
-
-
+from ..constants import (
+    RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK)
+from ..utils import get_modifiers, center_window
+from .dnd import TriggerOrderlyContainer
+from .scrolled import AutoHiddenScrollbar, ScrolledFrame
 # =============================================================================
 # ---- Classes
 # =============================================================================
@@ -2791,7 +2731,7 @@ class Book(ttk.Frame):
             takefocus=0
         )
         self._sidebar_add.pack(anchor='e')
-        self._sidebar = sb = ButtonTriggerOrderlyContainer(sbfm, cursor='arrow')
+        self._sidebar = sb = TriggerOrderlyContainer(sbfm, cursor='arrow')
         self._sidebar.pack(fill='both', expand=1)
         self._sidebar.set_dnd_end_callback(self._on_dnd_end)
         self._panedwindow.add(sbfm.container)
@@ -3098,12 +3038,14 @@ class Book(ttk.Frame):
         # Build a new sheet widget and sidebar button
         sheet = Sheet(self._sheet_pad_fm, **sheet_kw)
         frame = ttk.Frame(self._sidebar)
-        ttk.Button(
+        bt = ttk.Button(
             frame,
             style=self._button_style,
             text='::',
             takefocus=0
-        ).pack(side='left', padx=[3, 6])
+        )
+        bt.pack(side='left', padx=[3, 6])
+        bt._dnd_trigger = True
         switch = ttk.Radiobutton(
             frame,
             style=self._rdbutton_style,

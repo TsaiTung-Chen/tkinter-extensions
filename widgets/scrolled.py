@@ -10,10 +10,10 @@ from tkinter.font import nametofont
 
 import ttkbootstrap as ttk
 
-from .utils import (quit_if_all_closed,
-                    redirect_layout_managers,
-                    bind_recursively,
-                    unbind_recursively)
+from ..utils import (quit_if_all_closed,
+                     redirect_layout_managers,
+                     bind_recursively,
+                     unbind_recursively)
 
 DEFAULT_FONT = 'TkDefaultFont'
 MODIFIER_MASKS = {

@@ -7,7 +7,7 @@ Created on Mon Feb 27 19:10:52 2023
 
 import ttkbootstrap as ttk
 
-from .utils import redirect_layout_managers
+from ..utils import redirect_layout_managers
 # =============================================================================
 # ---- Widgets
 # =============================================================================
