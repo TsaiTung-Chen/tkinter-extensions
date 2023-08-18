@@ -85,7 +85,10 @@ def get_modifiers(state:int, platform_specific:bool=True) -> set:
 
 def get_center_position(widget:tk.BaseWidget) -> Tuple[int, int]:
     widget.update_idletasks()
-    width, height = widget.winfo_width(), widget.winfo_height()
+    if (width := widget.winfo_width()) == 1:
+        width = widget.winfo_reqwidth()
+    if (height := widget.winfo_height()) == 1:
+        height = widget.winfo_reqheight()
     x_root, y_root = widget.winfo_rootx(), widget.winfo_rooty()
     
     return (x_root + width//2, y_root + height//2)
@@ -93,7 +96,10 @@ def get_center_position(widget:tk.BaseWidget) -> Tuple[int, int]:
 
 def center_window(to_center:tk.BaseWidget, center_of:tk.BaseWidget):
     x_center, y_center = get_center_position(center_of)
-    width, height = to_center.winfo_width(), to_center.winfo_height()
+    if (width := to_center.winfo_width()) == 1:
+        width = to_center.winfo_reqwidth()
+    if (height := to_center.winfo_height()) == 1:
+        height = to_center.winfo_reqheight()
     x, y = (x_center - width//2, y_center - height//2)
     tk.Wm.wm_geometry(to_center, f'+{x}+{y}')
 

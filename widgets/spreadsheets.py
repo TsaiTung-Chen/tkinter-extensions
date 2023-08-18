@@ -402,7 +402,7 @@ class Sheet(ttk.Frame):
                  min_height:int=10,
                  get_style:Optional[Callable]=None,
                  autohide_scrollbar:bool=True,
-                 mousewheel_sensitivity=1.,
+                 mousewheel_sensitivity=2.,
                  bootstyle_scrollbar='round',
                  _reset:bool=False,
                  **kw):
@@ -574,7 +574,7 @@ class Sheet(ttk.Frame):
         """
         magnification = {"units": 10., "pages": 50., "pixels": 1.}[what]
         start, _ = self._view[axis]
-        start += round(number * magnification)
+        start += round(number * magnification)#???
         
         # Update widgets
         self.__update_content_and_scrollbar(axis, start)
@@ -2896,7 +2896,7 @@ class Book(ttk.Frame):
             while name in names_exist:
                 i += 1
                 name = prefix + f' ({i})'
-        assert name not in names_exist, names_exist.keys()
+        assert name not in names_exist, names_exist
         
         return name
     
