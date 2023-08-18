@@ -91,9 +91,16 @@ def get_center_position(widget:tk.BaseWidget) -> Tuple[int, int]:
     return (x_root + width//2, y_root + height//2)
 
 
-def center_window(to_center:tk.BaseWidget, center_of:tk.BaseWidget):
+def center_window(to_center:tk.BaseWidget,
+                  center_of:tk.BaseWidget,
+                  ms:int=0):
+    if ms >= 0:
+        return to_center.after(ms, center_window, to_center, center_of, -1)
+    
+    tk.Wm.wm_withdraw(to_center)
     x_center, y_center = get_center_position(center_of)
-    width, height = to_center.winfo_reqwidth(), to_center.winfo_reqheight()
+    width, height = to_center.winfo_width(), to_center.winfo_height()
     x, y = (x_center - width//2, y_center - height//2)
     tk.Wm.wm_geometry(to_center, f'+{x}+{y}')
+    tk.Wm.wm_deiconify(to_center)
 

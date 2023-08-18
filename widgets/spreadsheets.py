@@ -508,7 +508,7 @@ class Sheet(ttk.Frame):
         entry.bind('<KeyPress>', self._on_entry_key_press)
         
         self._selection_rcs: Tuple[int, int, int, int] = (-1, -1, -1, -1)
-        self._selection_rcs = self._select_cells(0, 0, 0, 0)
+        self._selection_rcs = self.select_cells(0, 0, 0, 0)
         
         # Add bindings
         self.bind('<<ThemeChanged>>', self._on_theme_changed)
@@ -798,7 +798,7 @@ class Sheet(ttk.Frame):
         self.focus_set()
     
     def _center_window(self, toplevel:tk.BaseWidget):
-        center_window(to_center=toplevel, center_of=self)
+        center_window(to_center=toplevel, center_of=self.winfo_toplevel())
     
     def _make_tags(self,
                    type_=None,
@@ -1076,7 +1076,7 @@ class Sheet(ttk.Frame):
             self.yview_scroll(number, 'units')
     
     def _on_select_all(self, event=None):
-        self._select_cells()
+        self.select_cells()
     
     def _on_copy(self, event=None):
         self._selection_copy_values()
@@ -1174,7 +1174,7 @@ class Sheet(ttk.Frame):
         else:
             r1, c1 = (r2, c2)
         
-        self._select_cells(r1, c1, r2, c2)
+        self.select_cells(r1, c1, r2, c2)
     
     def _on_leftbutton_press(self, event):
         self._focus()
@@ -1496,15 +1496,15 @@ class Sheet(ttk.Frame):
         if type_ == 'rowheader':
             axis_name, axis = ('Row', 0)
             if not ((r1 <= r <= r2) and (c1 == 0) and (c2 >= max_c)):
-                self._select_cells(r, 0, r, max_c)
+                self.select_cells(r, 0, r, max_c)
         elif type_ == 'colheader':
             axis_name, axis = ('Column', 1)
             if not ((c1 <= c <= c2) and (r1 == 0) and (r2 >= max_r)):
-                self._select_cells(0, c, max_r, c)
+                self.select_cells(0, c, max_r, c)
         else:
             axis_name, axis = ('Row', 0)
             if not ((r1 == c1 == 0) and (r1 >= max_r) and (c2 >= max_c)):
-                self._select_cells(0, 0, max_r, max_c)
+                self.select_cells(0, 0, max_r, max_c)
         
         # Setup the right click menu
         menu = self._rightclick_menu
@@ -1577,7 +1577,7 @@ class Sheet(ttk.Frame):
             rcs = (None, c, None, c)
             canvas.bind('<B1-Motion>', self._on_vhandle_leftbutton_motion)
             canvas.bind('<ButtonRelease-1>', self._on_handle_leftbutton_release)
-        self.after_idle(self._select_cells, *rcs)
+        self.after_idle(self.select_cells, *rcs)
         
         _i = i + 1
         self._resize_start = {
@@ -1748,7 +1748,7 @@ class Sheet(ttk.Frame):
         (r_low, r_high), (c_low, c_high) = sorted([r1, r2]), sorted([c1, c2])
         
         if not ((r_low <= r <= r_high) and (c_low <= c <= c_high)):
-            self._select_cells(r, c, r, c)
+            self.select_cells(r, c, r, c)
         
         menu = self._build_general_rightclick_menu()
         menu.post(event.x_root, event.y_root)
@@ -1839,12 +1839,12 @@ class Sheet(ttk.Frame):
         
         return self._selection_rcs
     
-    def _select_cells(self,
-                      r1:Optional[int]=None,
-                      c1:Optional[int]=None,
-                      r2:Optional[int]=None,
-                      c2:Optional[int]=None,
-                      trace:Optional[str]=None) -> tuple:
+    def select_cells(self,
+                     r1:Optional[int]=None,
+                     c1:Optional[int]=None,
+                     r2:Optional[int]=None,
+                     c2:Optional[int]=None,
+                     trace:Optional[str]=None) -> tuple:
         assert trace in (None, 'first', 'last'), trace
         
         self._focus_out_cell()
@@ -1907,7 +1907,7 @@ class Sheet(ttk.Frame):
         
         return self._selection_rcs
     
-    _reselect_cells = lambda self, *args, **kw: self._select_cells(
+    _reselect_cells = lambda self, *args, **kw: self.select_cells(
         *self._selection_rcs, *args, **kw)
     
     def _move_selections(
@@ -1928,7 +1928,7 @@ class Sheet(ttk.Frame):
             if not expand:  # single-cell selection
                 new_rc1 = new_rc2
             
-            return self._select_cells(*new_rc1, *new_rc2, trace='last')
+            return self.select_cells(*new_rc1, *new_rc2, trace='last')
         
         elif area == 'paragraph':
             # Move the last selection to the nearset nonempty cell in the same
@@ -1965,7 +1965,7 @@ class Sheet(ttk.Frame):
             if not expand:  # single-cell selection
                 new_rc1 = new_rc2
             
-            return self._select_cells(*new_rc1, *new_rc2, trace='last')
+            return self.select_cells(*new_rc1, *new_rc2, trace='last')
         
         # Move the last selection by 1 step
         step = -1 if direction in ('up', 'left') else +1
@@ -1974,7 +1974,7 @@ class Sheet(ttk.Frame):
         if not expand:  # single-cell selection
             new_rc1 = new_rc2
         
-        return self._select_cells(*new_rc1, *new_rc2, trace='last')
+        return self.select_cells(*new_rc1, *new_rc2, trace='last')
     
     def redraw(self,
                update_visible_rcs:bool=True,
@@ -2095,10 +2095,10 @@ class Sheet(ttk.Frame):
         # Redraw the deleted rows or cols
         if axis == 0:
             self.yview_scroll(0, 'units')
-            self._select_cells(r1=i, r2=i+N-1, trace=trace)
+            self.select_cells(r1=i, r2=i+N-1, trace=trace)
         else:
             self.xview_scroll(0, 'units')
-            self._select_cells(c1=i, c2=i+N-1, trace=trace)
+            self.select_cells(c1=i, c2=i+N-1, trace=trace)
         
         if undo:
             self._history.add(
@@ -2809,7 +2809,7 @@ class Book(ttk.Frame):
         self._focus_on_sheet()
     
     def _center_window(self, toplevel:tk.BaseWidget):
-        center_window(to_center=toplevel, center_of=self)
+        center_window(to_center=toplevel, center_of=self.winfo_toplevel())
     
     def _rearrange_sheets(self, *_):
         sheets_props = self._sheets_props.copy()
