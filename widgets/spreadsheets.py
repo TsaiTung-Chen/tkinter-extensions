@@ -574,7 +574,7 @@ class Sheet(ttk.Frame):
         """
         magnification = {"units": 10., "pages": 50., "pixels": 1.}[what]
         start, _ = self._view[axis]
-        start += round(number * magnification)#???
+        start += round(number * magnification)
         
         # Update widgets
         self.__update_content_and_scrollbar(axis, start)
@@ -2708,7 +2708,7 @@ class Book(ttk.Frame):
         C_label.pack(side='left')
         self._c_label = c_label = ttk.Label(label_fm, font=font)
         self._c_label.pack(side='left')
-        self._entry = en = ttk.Entry(ib, style=self._entry_style, takefocus=0)
+        self._entry = en = ttk.Entry(ib, style=self._entry_style)
         self._entry.grid(row=0, column=1, sticky='nesw', padx=[12, 0])
         en.bind('<FocusIn>', lambda e: self.sheet._refresh_entry())
         en.bind('<KeyPress>', lambda e: self.sheet._on_entry_key_press(e))
