@@ -1,9 +1,14 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Feb 27 19:10:52 2023
+Created on Mon May 22 22:35:24 2023
 
-@author: Jeff_Tsai
+@author: tungchentsai
+@source: https://github.com/TsaiTung-Chen/tk-utils
 """
+
+import tkinter as tk
+from typing import Optional
 
 import ttkbootstrap as ttk
 
@@ -15,33 +20,42 @@ class CollapsedFrame(ttk.Frame):
     def __init__(self,
                  master=None,
                  text='',
-                 labelwidget=None,
-                 orient='vertical',
-                 style=None,
-                 bootstyle=None,
+                 labelwidget:tk.BaseWidget=None,
+                 variable:Optional[tk.Variable]=None,
+                 onvalue=None,
+                 orient:str='vertical',
+                 style:Optional[str]=None,
+                 bootstyle:Optional[str]=None,
                  **kw):
+        _style = None if style is None else style.lower()
         assert orient in ('vertical', 'horizontal'), orient
-        assert (not style) or ('TButton' in style) or ('TFrame' in style), style
         assert text or labelwidget, (text, labelwidget)
+        assert isinstance(variable, (tk.Variable, type(None))), variable
         
         self._orient = orient
         bootstyle_button = bootstyle
         if bootstyle:
             bootstyle = ttk.Bootstyle.ttkstyle_widget_color(bootstyle)
         
-        if style and ('TButton' in style):
+        if style and ('frame' in _style):
+            style_button = None
+        else:
             style_button = style
             style = None
-        else:
-            style_button = None
         
-        self._labelwidget = labelwidget = labelwidget or ttk.Button(
+        self._onvalue = onvalue = onvalue or '__on__'
+        self._variable = variable = variable or tk.StringVar(
+            master, value=onvalue)
+        self._labelwidget = labelwidget = labelwidget or ttk.Checkbutton(
             master,
             text=text,
-            takefocus=False,
+            onvalue=onvalue,
+            offvalue=f'!{onvalue}',
+            variable=variable,
             style=style_button,
             bootstyle=bootstyle_button
         )
+        variable.trace_add('write', self.toggle)
         
         self._container = container = ttk.Labelframe(master,
                                                      labelwidget=labelwidget,
@@ -54,8 +68,8 @@ class CollapsedFrame(ttk.Frame):
         super().__init__(container, relief='flat', borderwidth=0)
         self.grid(sticky='nesw')
         
-        labelwidget.configure(command=self.toggle)
         redirect_layout_managers(self, container, orig_prefix='content_')
+        self._collapsed = False
     
     @property
     def container(self):
@@ -65,35 +79,62 @@ class CollapsedFrame(ttk.Frame):
     def labelwidget(self):
         return self._labelwidget
     
-    def toggle(self):
-        if self.content_grid_info():  # hide
-            if self._orient == 'vertical':
-                width = self.container.winfo_width()
-                height = self.labelwidget.winfo_height()
-            else:  # horizontal
-                width = self.labelwidget.winfo_width()
-                height = self.container.winfo_height()
-            self.container.grid_propagate(0)
-            self.content_grid_remove()
-            self.container.configure(width=width, height=height)
-        else:  # show
-            self.container.grid_propagate(1)
-            self.content_grid()
+    @property
+    def collapsed(self):
+        return self._collapsed
+    
+    @property
+    def variable(self):
+        return self._variable
+    
+    def collapse(self):
+        if self.collapsed:
+            return
+        
+        self._collapsed = True
+        self.update_idletasks()
+        if self._orient == 'vertical':
+            width = self.container.winfo_reqwidth()
+            height = self.labelwidget.winfo_reqheight() + 4
+        else:  # horizontal
+            width = self.labelwidget.winfo_reqwidth() + 4
+            height = self.container.winfo_reqheight()
+        self.container.grid_propagate(0)
+        self.content_grid_remove()
+        self.container.configure(width=width, height=height)
+    
+    def resume(self):
+        if not self.collapsed:
+            return
+        
+        self._collapsed = False
+        self.container.grid_propagate(1)
+        self.content_grid()
+    
+    def toggle(self, name=None, index=None, mode=None):
+        if self.variable.get() == self._onvalue:  # show
+            self.resume()
+        else:  # hide
+            self.collapse()
 
 
 # =============================================================================
 # ---- Main
 # =============================================================================
 if __name__ == '__main__':
-    root = ttk.Window(themename='cyborg', size=(200, 100))
+    root = ttk.Window(themename='cyborg')
     
-    collapsed = CollapsedFrame(root,
-                               text='Click me to collapse',
-                               orient='vertical',
-                               bootstyle='success-outline')
-    collapsed.grid(padx=6, pady=6)
-    ttk.Label(collapsed, text='Label 1').pack()
-    ttk.Label(collapsed, text='Label 2').pack()
+    for orient, labelanchor, sep in [('vertical', 'n', ' '),
+                                     ('horizontal', 'w', '\n')]:
+        text = sep.join(['Click', 'me', 'to', 'collapse'])
+        collapsed = CollapsedFrame(root,
+                                   text=text,
+                                   orient=orient,
+                                   labelanchor=labelanchor,
+                                   bootstyle='success-round-toggle')
+        collapsed.grid(sticky='w', padx=6, pady=6)
+        ttk.Label(collapsed, text='Label 1').pack()
+        ttk.Label(collapsed, text='Label 2').pack()
     
     root.mainloop()
 

@@ -4,6 +4,7 @@
 Created on Mon May 22 22:35:24 2023
 
 @author: tungchentsai
+@source: https://github.com/TsaiTung-Chen/tk-utils
 """
 
 import gc
@@ -3213,10 +3214,27 @@ class Book(ttk.Frame):
 # ---- Main
 # =============================================================================
 if __name__ == '__main__':
-    root = ttk.Window(themename='morph', position=(100, 100), size=(800, 500))
+    root = ttk.Window(title='Book (Root)',
+                      themename='morph',
+                      position=(100, 100),
+                      size=(800, 500))
     
-    """
-    ss = Sheet(root, bootstyle_scrollbar='light-round')
+    
+    book = Book(root)
+    book.pack(fill='both', expand=1)
+    
+    book.insert_sheet(1, name='index = 1')
+    book.insert_sheet(0, name='index = 0')
+    book.insert_sheet(1, name='index = 1')
+    book.insert_sheet(-1, name='index = -1')
+    
+    book.after(3000, lambda: root.style.theme_use('minty'))
+    book.after(5000, lambda: root.style.theme_use('cyborg'))
+    
+    
+    win = ttk.Toplevel(title='Sheet', position=(100, 100), size=(800, 500))
+    
+    ss = Sheet(win, bootstyle_scrollbar='light-round')
     ss.pack(fill='both', expand=1)
     
     ss.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)
@@ -3233,20 +3251,6 @@ if __name__ == '__main__':
     ss.after(1000, _set_value_method1)
     ss.after(2000, _set_value_method2)
     
-    """
-    
-    book = Book(root)
-    book.pack(fill='both', expand=1)
-    
-    book.insert_sheet(1, name='index = 1')
-    book.insert_sheet(0, name='index = 0')
-    book.insert_sheet(1, name='index = 1')
-    book.insert_sheet(-1, name='index = -1')
-    
-    book.after(3000, lambda: root.style.theme_use('minty'))
-    book.after(5000, lambda: root.style.theme_use('cyborg'))
-    
-    #"""
     
     root.mainloop()
 

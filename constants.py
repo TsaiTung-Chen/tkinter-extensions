@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Aug 15 20:07:34 2023
+Created on Sun Dec 11 19:18:31 2022
 
 @author: tungchentsai
+@source: https://github.com/TsaiTung-Chen/tk-utils
 """
 
 import sys
 
 PLATFORM = sys.platform
-
+LEFTCLICK = '<ButtonPress-1>'
 RIGHTCLICK = '<ButtonPress-2>' if PLATFORM == 'darwin' else '<ButtonPress-3>'
-MOUSESCROLL = ['<ButtonPress-4>', '<ButtonPress-5>'] if PLATFORM == 'linux' \
-    else ['<MouseWheel>']
+MOUSESCROLL = ['<ButtonPress-4>', '<ButtonPress-5>'] if PLATFORM == 'linux' else [
+    '<MouseWheel>']
 
 if PLATFORM == 'darwin':
     COMMAND = 'Mod1'
@@ -23,7 +24,6 @@ else:
 CONTROL = 'Control'
 SHIFT = 'Shift'
 LOCK = 'Lock'
-
 MODIFIERS = {COMMAND, OPTION, CONTROL, SHIFT, LOCK}
 MODIFIER_MASKS = {
     "Shift": int('0b1', base=2),
@@ -41,4 +41,11 @@ MODIFIER_MASKS = {
     "Button5": int('0b1000_000_000_000', base=2),
     "Alt": int('0b100_000_000_000_000_000', base=2)
 }
+
+BUILTIN_WIDGETS = [
+    'TButton', 'TCheckbutton', 'TCombobox', 'TEntry', 'TFrame', 'TLabel',
+    'TLabelFrame', 'TMenubutton', 'TNotebook', 'TPandedwindow',
+    'TProgressbar', 'TRadiobutton', 'TScale', 'TScrollbar', 'TSeparator',
+    'TSizegrip', 'Treeview'
+]
 

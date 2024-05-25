@@ -1,33 +1,42 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sat Feb  4 17:14:42 2023
+Created on Mon May 22 22:35:24 2023
 
-@author: Jeff_Tsai
+@author: tungchentsai
+@source: https://github.com/TsaiTung-Chen/tk-utils
 """
 
+import time
+from typing import Optional
 import tkinter as tk
 from tkinter.font import nametofont
 
 import ttkbootstrap as ttk
 
-from ..utils import (quit_if_all_closed,
-                     redirect_layout_managers,
-                     bind_recursively,
-                     unbind_recursively)
-
-DEFAULT_FONT = 'TkDefaultFont'
-MODIFIER_MASKS = {
-    "Shift": int('0b1', base=2)
-}
+from ..constants import MODIFIER_MASKS
+from ..utils import (bind_recursively,
+                     unbind_recursively,
+                     quit_if_all_closed,
+                     redirect_layout_managers)
 # =============================================================================
 # ---- Views
 # =============================================================================
 class _GeneralView:
-    def __init__(self, widget, orient):
+    def __init__(self, widget, orient, sensitivity:float=1.):
         assert orient in ('x', 'y'), orient
         self._widget = widget
         self._orient = orient
+        self.sensitivity = sensitivity
         self.start = 0  # pixel location
+    
+    @property
+    def sensitivity(self):
+        return self._sensitivity
+    
+    @sensitivity.setter
+    def sensitivity(self, value:float):
+        self._sensitivity = float(value)
     
     @property
     def stop(self):  # pixel location
@@ -39,11 +48,11 @@ class _GeneralView:
     def step(self):
         style = ttk.Style.get_instance()
         font_name = style.lookup(self._widget.winfo_class(), 'font')
-        font = nametofont(font_name or DEFAULT_FONT)
+        font = nametofont(font_name or 'TkDefaultFont')
         linespace = font.metrics()["linespace"]
         if self._orient == 'y':
-            return linespace  # 1-linespace height
-        return linespace * 2  # 2-linespace width
+            return self._sensitivity * linespace * 2  # 2-linespace height
+        return self._sensitivity * linespace * 4  # 4-linespace width
     
     def view(self, *args):
         """Update the vertical position of the inner widget within the outer
@@ -109,11 +118,13 @@ class _GeneralView:
             self._widget.content_place(x=-start)
             if self._widget._set_xscrollbar:
                 self._widget._set_xscrollbar(first, last)
-            return
+            return self._widget.update_idletasks()
+        
         # Y orientation
         self._widget.content_place(y=-start)
         if self._widget._set_yscrollbar:
             self._widget._set_yscrollbar(first, last)
+        self._widget.update_idletasks()
     
     def _to_fraction(self, *pixels, complete=None):
         complete = complete or self._get_complete_size()
@@ -145,10 +156,12 @@ class GeneralXYView_Mixin:
     """This class is a workaround to mimic the `tkinter.XView` behavior.
     
     This class is designed to be used with multiple inheritance and must be 
-    the 1st parent class. This means that it will automatically call the 2nd 
-    parent class' __ini__ function
+    the 2nd parent class. This means that the 1st parent class must call this 
+    class' `__init__` function. After that this class will automatically call 
+    the 3rd parent class' `__init__` function
     """
-    def __init__(self, *args, mousewheel_sens=2., **kwargs):
+    
+    def __init__(self, *args, **kwargs):
         # Init the 2nd parent class
         self._set_xscrollbar = None
         self._set_yscrollbar = None
@@ -158,10 +171,23 @@ class GeneralXYView_Mixin:
         # Init x and y GeneralViews
         self._xview = _GeneralView(widget=self, orient='x')
         self._yview = _GeneralView(widget=self, orient='y')
+    
+    def get_scrolling_sensitivity(self, x:bool=True, y:bool=True):
+        assert x or y, (x, y)
+        if x and y:
+            return [self._xview.sensitivity, self._yview.sensitivity]
+        elif x:
+            return self._xview.sensitivity
+        return self._yview.sensitivity
+    
+    def set_scrolling_sensitivity(
+            self, x:Optional[float]=None, y:Optional[float]=None):
+        assert not (x is None and y is None), (x, y)
         
-        assert hasattr(self, 'tk'), "Please init the base widget first"
-        self._mousewheel_sens = mousewheel_sens
-        self._os = self.tk.call('tk', 'windowingsystem')
+        if x is not None:
+            self._xview.sensitivity = x
+        if y is not None:
+            self._yview.sensitivity = y
     
     def xview(self, *args, **kwargs):
         return self._xview.view(*args, **kwargs)
@@ -190,25 +216,6 @@ class GeneralXYView_Mixin:
         self._set_yscrollbar = kwargs.pop("yscrollcommand", self._set_yscrollbar)
         return kwargs
     
-    def _mousewheel_scroll(self, event):
-        """Callback for when the mouse wheel is scrolled.
-        Modified from: `ttkbootstrap.scrolled.ScrolledFrame._on_mousewheel`
-        """
-        if event.num == 4:  # Linux
-            delta = 10.
-        elif event.num == 5:  # Linux
-            delta = -10.
-        elif self._os == "win32":  # Windows
-            delta = event.delta / 120.
-        else:  # Mac
-            delta = event.delta
-        number = -round(delta * self._mousewheel_sens)
-        
-        if ((event.state & MODIFIER_MASKS["Shift"]) == MODIFIER_MASKS["Shift"]):
-            self.xview_scroll(number, 'units')
-        else:
-            self.yview_scroll(number, 'units')
-    
     def _refresh(self):
         self.xview_scroll(0, 'unit')
         self.yview_scroll(0, 'unit')
@@ -218,9 +225,15 @@ class GeneralXYView_Mixin:
 # ---- Widgets
 # =============================================================================
 class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
-    def __init__(self, master=None, autohide=True, command=None, **kwargs):
+    def __init__(self,
+                 master=None,
+                 autohide=True,
+                 autohide_ms:int=300,
+                 command=None,
+                 **kwargs):
         super().__init__(master, command=command, **kwargs)
-        self._autohide = autohide
+        self.autohide = autohide
+        self._autohide_ms = autohide_ms
         self._manager = None
         self._last_func = dict()
     
@@ -233,77 +246,78 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
         return [ float(v) for v in self.get() ] == [0., 1.]
     
     def set(self, first, last):
-        if self.hidden and (not self.all_visible):
+        if self.autohide and self.hidden and (not self.all_visible):
             self.show()
         
         super().set(first, last)
         
-        if (not self.hidden) and self.all_visible:
-            self.hide(after_ms=1000)
+        if self.autohide and (not self.hidden) and self.all_visible:
+            self.hide(after_ms=self._autohide_ms)
     
-    def show(self, after_ms:int=0):
-        assert self.hidden and self._manager, (self.hidden, self._manager)
+    def show(self, after_ms:int=0, autohide=None):
+        assert self._manager, self._manager
         
-        self._cancel_last_action()
-        self._last_func = {
-            "name": 'show',
-            "id": self.after(after_ms, getattr(self, self._manager))
-        }
+        if autohide is not None:
+            self.autohide = autohide
+        
+        id_ = time.time()
+        self._last_func = {"name": 'show', "id": id_}
+        
+        if after_ms > 0:
+            self.after(after_ms, self._show, id_)
+        else:
+            self._show(id_)
     
-    def hide(self, after_ms:int=0):
+    def hide(self, after_ms:int=0, autohide=None):
+        if autohide is not None:
+            self.autohide = autohide
+        
         self._manager = manager = self._manager or self.winfo_manager()
         if not manager:
             return
         
         assert manager == 'grid', (self, manager)
-        self._cancel_last_action()
-        self._last_func = {
-            "name": 'hide',
-            "id": self.after(after_ms, self.grid_remove)
-        }
-    
-    def _cancel_last_action(self):
-        if self._last_func:
-            self.after_cancel(self._last_func["id"])
-            self._last_func = None
-
-
-class _ContainerFrame(ttk.Frame):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, relief='flat', borderwidth=0, **kwargs)
-        self._os = self.tk.call('tk', 'windowingsystem')
-    
-    def rebind_mousewheel(self, func):
-        self.unbind_mousewheel()
-        self.bind_mousewheel(func)
-    
-    def bind_mousewheel(self, func):
-        if self._os == 'x11':  # Linux
-            seqs = ['<ButtonPress-4>', '<ButtonPress-5>']
+        
+        id_ = time.time()
+        
+        self._last_func = {"name": 'hide', "id": id_}
+        if after_ms > 0:
+            self.after(after_ms, self._hide, id_)
         else:
-            seqs = ['<MouseWheel>']
-        funcs = [func] * len(seqs)
-        bind_recursively(self, seqs, funcs, add='+')
+            self._hide(id_)
     
-    def unbind_mousewheel(self):
-        unbind_recursively(self)
+    def _show(self, id_):
+        if self._last_func.get("id", None) == id_:
+            self.grid()
+    
+    def _hide(self, id_):
+        if self._last_func.get("id", None) == id_:
+            self.grid_remove()
 
 
 class _Scrolled_Mixin:
+    """This class is designed to be used with multiple inheritance and must be 
+    the 1st parent class. This means that it will automatically call the 2nd 
+    parent class' `__init__` function
+    """
+    mousewheel_sensitivity = 1.
+    
     def __init__(self,
                  master=None,
-                 scroll_orient='both',
+                 scroll_orient:Optional[str]='both',
                  autohide=True,
                  hbootstyle='round',
                  vbootstyle='round',
                  builtin_method=False,
                  **kwargs):
-        assert scroll_orient in ('vertical', 'horizontal', 'both'), scroll_orient
+        valid_orients = ('vertical', 'horizontal', 'both', None)
+        assert scroll_orient in valid_orients, (valid_orients, scroll_orient)
         self._scroll_orient = scroll_orient
         self._builtin_method = builtin_method
         
         # Outer frame (container)
-        self._container = container = _ContainerFrame(master=master)
+        self._container = container = ttk.Frame(
+            master=master, relief='flat', borderwidth=0)
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
         
@@ -323,7 +337,7 @@ class _Scrolled_Mixin:
         
         # Scrollbars
         hbar, vbar = None, None
-        pad = 2
+        pad = (1, 2)
         if scroll_orient in ('horizontal', 'both'):
             self._hbar = hbar = AutoHiddenScrollbar(
                 master=container,
@@ -332,9 +346,8 @@ class _Scrolled_Mixin:
                 bootstyle=hbootstyle,
                 orient='horizontal',
             )
-            hbar.grid(row=1, column=0, sticky='ew')
+            hbar.grid(row=1, column=0, sticky='ew', pady=pad)
             self.configure(xscrollcommand=hbar.set)
-            container.grid_rowconfigure(1, minsize=hbar.winfo_reqheight()+pad)
         elif not builtin_method:
             self.place(relwidth=1.)
         
@@ -346,19 +359,19 @@ class _Scrolled_Mixin:
                 bootstyle=vbootstyle,
                 orient='vertical',
             )
-            vbar.grid(row=0, column=1, sticky='ns')
+            vbar.grid(row=0, column=1, sticky='ns', padx=pad)
             self.configure(yscrollcommand=vbar.set)
-            container.grid_columnconfigure(1, minsize=vbar.winfo_reqwidth()+pad)
         elif not builtin_method:
             self.place(relheight=1.)
         
         redirect_layout_managers(self, container, orig_prefix='content_')
         
         if not builtin_method:
-            cropper.bind('<Configure>', self._on_configure)
-            container.bind('<Map>', self._on_map)
-            self.bind('<<MapChild>>', self._on_map_child)
-        self.bind('<Destroy>', lambda e: container.destroy())
+            cropper.bind('<Configure>', self._on_configure, add='+')
+        container.bind('<Map>', self._on_map, add='+')
+        container.bind('<<MapChild>>', self._on_map_child, add='+')
+        self.bind('<<MapChild>>', self._on_map_child, add='+')
+        self._os = self.tk.call('tk', 'windowingsystem')
     
     @property
     def container(self): return self._container  # outer frame
@@ -384,26 +397,57 @@ class _Scrolled_Mixin:
         if self.vbar:
             self.vbar.hide(after_ms)
     
+    def rebind_mousewheel(self):
+        self.unbind_mousewheel()
+        self.bind_mousewheel()
+    
+    def bind_mousewheel(self):
+        if self._os == 'x11':  # Linux
+            seqs = ['<ButtonPress-4>', '<ButtonPress-5>']
+        else:
+            seqs = ['<MouseWheel>']
+        funcs = [self._mousewheel_scroll] * len(seqs)
+        bind_recursively(self, seqs, funcs, add='+', key='scroll')
+    
+    def unbind_mousewheel(self):
+        unbind_recursively(self, key='scroll')
+    
     def _on_configure(self, event=None):
         self._refresh()
     
     def _on_map(self, event=None):
-        self.container.rebind_mousewheel(self._mousewheel_scroll)
+        self.rebind_mousewheel()
         
-        if self._scroll_orient == 'vertical':
-            self.cropper.configure(width=self.winfo_reqwidth())
-        if self._scroll_orient == 'horizontal':
-            self.cropper.configure(height=self.winfo_reqheight())
+        if not self._builtin_method:
+            if self._scroll_orient in ('vertical', None):
+                self.cropper.configure(width=self.winfo_reqwidth())
+            if self._scroll_orient in ('horizontal', None):
+                self.cropper.configure(height=self.winfo_reqheight())
     
     def _on_map_child(self, event=None):
-        if not self.container.winfo_ismapped():
-            return
-        self.container.rebind_mousewheel(self._mousewheel_scroll)
+        if self.container.winfo_ismapped():
+            self._on_map(event)
+    
+    def _mousewheel_scroll(self, event):
+        """Callback for when the mouse wheel is scrolled.
+        Modified from: `ttkbootstrap.scrolled.ScrolledFrame._on_mousewheel`
+        """
+        if event.num == 4:  # Linux
+            delta = 10.
+        elif event.num == 5:  # Linux
+            delta = -10.
+        elif self._os == "win32":  # Windows
+            delta = event.delta / 120.
+        else:  # Mac
+            delta = event.delta
+        number = -round(delta * self.mousewheel_sensitivity)
         
-        if self._scroll_orient == 'vertical':
-            self.cropper.configure(width=self.winfo_reqwidth())
-        if self._scroll_orient == 'horizontal':
-            self.cropper.configure(height=self.winfo_reqheight())
+        if ((event.state & MODIFIER_MASKS["Shift"]) == MODIFIER_MASKS["Shift"]):
+            if self._builtin_method:
+                number *= 20
+            self.xview_scroll(number, 'units')
+        else:
+            self.yview_scroll(number, 'units')
 
 
 # =============================================================================
@@ -424,19 +468,34 @@ def ScrolledWidget(master=None,
         <.3 vertical scrollbar >
     """
     assert issubclass(widget, tk.BaseWidget), widget
-    class _ScrolledWidget(GeneralXYView_Mixin, _Scrolled_Mixin, widget): pass
+    class _ScrolledWidget(_Scrolled_Mixin, GeneralXYView_Mixin, widget): pass
     return _ScrolledWidget(master=master,
                            scroll_orient=scroll_orient,
                            autohide=autohide,
                            hbootstyle=hbootstyle,
-                           vbootstyle=hbootstyle,
+                           vbootstyle=vbootstyle,
                            builtin_method=False,
                            **kwargs)
 
 
 class ScrolledText(_Scrolled_Mixin, ttk.Text):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, readonly=False, **kwargs):
         super().__init__(*args, builtin_method=True, **kwargs)
+        if readonly:
+            self.bind('<KeyPress>', self._prevent_modification, add='+')
+        self.bind('<Control-a>', self._select_all, add='+')
+        self.bind('<Control-A>', self._select_all, add='+')
+    
+    def _prevent_modification(self, event):
+        control_mask = MODIFIER_MASKS["Control"]
+        if (event.keysym.lower() in ('c', 'a')) and (
+                (event.state & control_mask) == control_mask):
+            return
+        return 'break'
+    
+    def _select_all(self, event=None):
+        self.event_generate('<<SelectAll>>')
+        return 'break'
 
 
 class ScrolledTreeview(_Scrolled_Mixin, ttk.Treeview):
@@ -444,12 +503,34 @@ class ScrolledTreeview(_Scrolled_Mixin, ttk.Treeview):
         super().__init__(*args, builtin_method=True, **kwargs)
 
 
-class ScrolledFrame(GeneralXYView_Mixin, _Scrolled_Mixin, ttk.Frame):
-    pass
+def ScrolledFrame(master=None,
+                  scroll_orient='both',
+                  autohide=True,
+                  hbootstyle='round',
+                  vbootstyle='round',
+                  **kwargs):
+    return ScrolledWidget(master=master,
+                          widget=ttk.Frame,
+                          scroll_orient=scroll_orient,
+                          autohide=autohide,
+                          hbootstyle=hbootstyle,
+                          vbootstyle=vbootstyle,
+                          **kwargs)
 
 
-class ScrolledLabelframe(GeneralXYView_Mixin, _Scrolled_Mixin, ttk.Labelframe):
-    pass
+def ScrolledLabelframe(master=None,
+                       scroll_orient='both',
+                       autohide=True,
+                       hbootstyle='round',
+                       vbootstyle='round',
+                       **kwargs):
+    return ScrolledWidget(master=master,
+                          widget=ttk.Labelframe,
+                          scroll_orient=scroll_orient,
+                          autohide=autohide,
+                          hbootstyle=hbootstyle,
+                          vbootstyle=vbootstyle,
+                          **kwargs)
 
 
 # =============================================================================
@@ -475,7 +556,7 @@ if __name__ == '__main__':
     
     win3 = ttk.Toplevel(title='ScrolledCanvas', width=1500, height=1000)
     win3.lift()
-    sc = ScrolledWidget(win3, widget=ttk.Canvas)
+    sc = ScrolledWidget(win3, widget=ttk.Canvas, vbootstyle='round-light')
     sc.pack(fill='both', expand=1)
     sc.create_polygon((10, 100), (600, 300), (900, 600), (300, 600), (300, 600),
                       outline='red', stipple='gray25', smooth=1)

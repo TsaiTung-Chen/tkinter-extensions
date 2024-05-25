@@ -1,19 +1,19 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Thu Jan 19 14:26:58 2023
+Created on Mon May 22 22:35:24 2023
 
-@author: Jeff_Tsai
+@author: tungchentsai
+@source: https://github.com/TsaiTung-Chen/tk-utils
 """
 
 import tkinter as tk
 import tkinter.dnd
 from typing import Union, Optional, List, Tuple, Callable
-
-import ttkbootstrap as ttk
 # =============================================================================
 # ---- Classes
 # =============================================================================
-class OrderlyContainer(ttk.Canvas):
+class OrderlyContainer(tk.Canvas):
     """This container allows a drag-and-drop feature which is very useful when 
     one would like to reorder some widgets in the container. This can be 
     achieved intuitively by drag-and-drop with the mouse cursor
@@ -22,6 +22,7 @@ class OrderlyContainer(ttk.Canvas):
     def __init__(self, *args, dnd_group_id:int=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._dnd_group_id = dnd_group_id
+        self._dnd_widgets = list()
         self._dnd_start_callback = None
         self._dnd_commit_callback = None
         self._dnd_end_callback = None
@@ -34,7 +35,7 @@ class OrderlyContainer(ttk.Canvas):
                 widgets:list,
                 orient:Optional[str]=None,
                 sticky:Optional[str]=None,
-                expand:Union[Tuple[bool], List[bool], bool]=False,
+                expand:Union[Tuple, List, bool, int]=False,
                 padding:Union[Tuple[int], List[int], int]=0,
                 ipadding:Union[Tuple[int], List[int], int]=0):
         """Use this function to put widgets `widgets` onto the container 
@@ -49,7 +50,7 @@ class OrderlyContainer(ttk.Canvas):
         Other arguments work like the arguments in the grid layout manager.
         """
         assert isinstance(widgets, list), widgets
-        assert isinstance(expand, (tuple, list, bool)), expand
+        assert isinstance(expand, (tuple, list, bool, int)), expand
         assert isinstance(padding, (tuple, list, int)), padding
         assert isinstance(ipadding, (tuple, list, int)), ipadding
         assert orient in ['horizontal', 'vertical', None], orient
@@ -61,7 +62,7 @@ class OrderlyContainer(ttk.Canvas):
                 widgets = [ [w] for w in widgets ]
         nrows, ncols = len(widgets), len(widgets[0])
         
-        two_dimensional = list()
+        pairs = list()
         for arg in [expand, padding, ipadding]:
             if isinstance(arg, (tuple, list)):
                 arg = tuple(arg)
@@ -71,8 +72,8 @@ class OrderlyContainer(ttk.Canvas):
                     assert len(arg) == 2, arg
             else:
                 arg = (arg,) * 2
-            two_dimensional.append(arg)
-        expand, (padx, pady), (ipadx, ipady) = two_dimensional
+            pairs.append(arg)
+        expand, (padx, pady), (ipadx, ipady) = pairs
         params = {"expand": expand,
                   "padding": (padx, pady),
                   "ipadding": (ipadx, ipady),
@@ -81,15 +82,17 @@ class OrderlyContainer(ttk.Canvas):
         
         # Calculate canvas size and place widgets onto the canvas
         widgets_flat = [ w for row in widgets for w in row ]
-        widths, heights = list(), list()
-        for widget in widgets_flat:
-            widget._id = self.create_window(0, 0, anchor='nw', window=widget)
+        widget_ids = [ self.create_window(0, 0, anchor='nw', window=widget)
+                       for widget in widgets_flat ]
         self.update_idletasks()
-        for widget in widgets_flat:
-            widths.append(widget.winfo_reqwidth())
-            heights.append(widget.winfo_reqheight())
-        width_cell, height_cell = max(widths), max(heights)
+        widths, heights = list(), list()
+        for widget, id_ in zip(widgets_flat, widget_ids):
+            widget._id = id_
+            widths.append(widget.winfo_reqwidth() + 1)
+            heights.append(widget.winfo_reqheight() + 1)
+        width_cell = max(widths)
         width_canvas = ncols*width_cell + 2*padx + 2*(ncols - 1)*ipadx
+        height_cell = max(heights)
         height_canvas = nrows*height_cell + 2*pady + 2*(nrows - 1)*ipady
         self.configure(width=width_canvas, height=height_canvas)
         params.update({
@@ -98,17 +101,15 @@ class OrderlyContainer(ttk.Canvas):
         })
         
         # Calculate place_info and update widgets' position and size
-        widget_ids = list()
         place_info_list = list()
         i = 0
         for r, row in enumerate(widgets):
             for c, widget in enumerate(row):
-                info = self._calculate_place_info(
-                    r, c, widths[i], heights[i], **params)
-                self._put(widget, info, width_canvas, height_canvas)
-                self._resize(widget, info, width_canvas, height_canvas)
-                widget_ids.append(widget._id)
-                place_info_list.append(info)
+                place_info_list.append(
+                    self._calculate_place_info(r, c,
+                                               widths[i], heights[i],
+                                               **params)
+                )
                 i += 1
         
         # Setup widget's dnd functions
@@ -121,42 +122,52 @@ class OrderlyContainer(ttk.Canvas):
             widget.dnd_end = self._get_dnd_end(widget)
             widget._dnd_group_id = self._dnd_group_id
         
-        self.bind('<Configure>', self._update_widgets)
+        self._dnd_binding = self.bind('<Configure>', self._update_widgets)
         self._dnd_place_info = place_info_list
         self._dnd_widgets = widgets_flat
         self._dnd_ids = dict(zip(widget_ids, widgets_flat))
         self._dnd_grid_size = params["grid_size"]
         self._dnd_handler = None
         self._dnd = dict()
+        self._update_widgets()
     
-    def bind_dnd_start(self, moved:tk.Widget):
+    def bind_dnd_start(self, moved:tk.BaseWidget):
         """Overwrite this method to customize the trigger widget
         """
         self._bind_dnd_start(trigger=moved, moved=moved)
     
-    def _bind_dnd_start(self, *, trigger:tk.Widget, moved:tk.Widget):
+    def _bind_dnd_start(self, *, trigger:tk.BaseWidget, moved:tk.BaseWidget):
         trigger.configure(cursor='hand2')
         trigger.bind('<ButtonPress-1>', self._get_dnd_start(moved))
     
     def set_dnd_start_callback(self, func:Callable):
+        """`func` will be executed when `dnd_start` runs. `func` should 
+        accept `source` and `event` arguments
+        """
         assert callable(func), func
         self._dnd_start_callback = func
     
-    def remove_dnd_start_callback(self, func:Callable):
+    def remove_dnd_start_callback(self):
         self._dnd_start_callback = None
     
     def set_dnd_commit_callback(self, func:Callable):
+        """`func` will be executed when `dnd_commit` runs. `func` should 
+        accept `source` and `event` arguments
+        """
         assert callable(func), func
         self._dnd_commit_callback = func
     
-    def remove_dnd_commit_callback(self, func:Callable):
+    def remove_dnd_commit_callback(self):
         self._dnd_commit_callback = None
     
     def set_dnd_end_callback(self, func:Callable):
+        """`func` will be executed when `dnd_end` runs. `func` should 
+        accept `target` and `event` arguments
+        """
         assert callable(func), func
         self._dnd_end_callback = func
     
-    def remove_dnd_end_callback(self, func:Callable):
+    def remove_dnd_end_callback(self):
         self._dnd_end_callback = None
     
     def _calculate_place_info(self,
@@ -202,7 +213,7 @@ class OrderlyContainer(ttk.Canvas):
                         f"rel{xy}": n/N + 1./N,
                         xy: (xy_cell - n*L)//N + (dimension_cell - L)//N
                     })
-                    return 's' if xy == 'x' else 'e'  # higher bound
+                    return 'e' if xy == 'x' else 's'  # higher bound
                 # (False, False) => center
                 place_info.update({
                     f"rel{xy}": n/N + 1./(2.*N),
@@ -222,7 +233,7 @@ class OrderlyContainer(ttk.Canvas):
             if _sticky == (True, False):
                 place_info[xy] = xy_cell // N
                 return 'w' if xy == 'x' else 'n'  # lower bound
-            elif _sticky == (False, True):
+            if _sticky == (False, True):
                 place_info[xy] = xy_cell//N + dimension_cell//N
                 return 'e' if xy == 'x' else 's'  # higher bound
             # (False, False) => center
@@ -292,6 +303,7 @@ class OrderlyContainer(ttk.Canvas):
             canvas_x, canvas_y = self.winfo_rootx(), self.winfo_rooty()
             
             self._dnd = {
+                "widgets": self._dnd_widgets.copy(),
                 "event": None,
                 "source": source,
                 "target": None,
@@ -467,7 +479,7 @@ class OrderlyContainer(ttk.Canvas):
 
 
 class TriggerOrderlyContainer(OrderlyContainer):
-    def bind_dnd_start(self, moved:tk.Widget):
+    def bind_dnd_start(self, moved:tk.BaseWidget):
         for child in moved.winfo_children():
             if getattr(child, '_dnd_trigger', None):
                 self._bind_dnd_start(moved=moved, trigger=child)
@@ -478,6 +490,7 @@ class TriggerOrderlyContainer(OrderlyContainer):
 # =============================================================================
 if __name__ == '__main__':
     import random
+    import ttkbootstrap as ttk
     
     root = ttk.Window(title='Drag and Drop', themename='cyborg')
     
@@ -495,13 +508,13 @@ if __name__ == '__main__':
             buttons[-1].append(button)
     container.dnd_put(buttons,
                       sticky='nse',
-                      expand=(False, True),
+                      expand=True,
                       padding=10,
                       ipadding=6)
     
-    window = ttk.Toplevel(title='Button Trigger Drag and Drop')
+    window = ttk.Toplevel(title='Button Trigger Drag and Drop', topmost=True)
     window.lift()
-    window.focus_set()
+    window.after(300, window.focus_set)
     container = TriggerOrderlyContainer(window)
     container.pack(fill='both', expand=1)
     frames = list()
@@ -510,12 +523,13 @@ if __name__ == '__main__':
         for c in range(3):
             dash = '----' * random.randint(1, 5)
             frame = ttk.Frame(container)
-            bt = ttk.Button(frame,
-                            text='::',
-                            takefocus=True,
-                            bootstyle='success-link')
-            bt.pack(side='left')
-            bt._dnd_trigger = True
+            trigger = ttk.Button(frame,
+                                 text='::',
+                                 takefocus=True,
+                                 cursor='hand2',
+                                 bootstyle='success-link')
+            trigger.pack(side='left')
+            trigger._dnd_trigger = True
             ttk.Label(frame,
                       text=f'|<{dash} ({r}, {c}) {dash}>|',
                       bootstyle='success').pack(side='left')
@@ -525,8 +539,8 @@ if __name__ == '__main__':
                       expand=(False, True),
                       padding=10,
                       ipadding=6)
-    
     window.place_window_center()
+    
     root.place_window_center()
     root.mainloop()
 
