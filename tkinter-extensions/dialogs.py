@@ -4,7 +4,6 @@
 Created on Sun Dec 11 19:18:31 2022
 
 @author: tungchentsai
-@source: https://github.com/TsaiTung-Chen/tk-utils
 """
 
 from typing import Union, Callable, Optional
