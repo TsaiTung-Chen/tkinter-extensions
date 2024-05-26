@@ -16,7 +16,6 @@ import ttkbootstrap as ttk
 from ..constants import MODIFIER_MASKS
 from ..utils import (bind_recursively,
                      unbind_recursively,
-                     quit_if_all_closed,
                      redirect_layout_managers)
 # =============================================================================
 # ---- Views
@@ -536,6 +535,9 @@ def ScrolledLabelframe(master=None,
 # %% Main
 # =============================================================================
 if __name__ == '__main__':
+    from ..utils import quit_if_all_closed
+    
+    
     root = ttk.Window(themename='cyborg')
     root.withdraw()
     

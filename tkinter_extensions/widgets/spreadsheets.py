@@ -3220,7 +3220,7 @@ if __name__ == '__main__':
                       size=(800, 500))
     
     
-    book = Book(root)
+    book = Book(root, bootstyle_scrollbar='round-light')
     book.pack(fill='both', expand=1)
     
     book.insert_sheet(1, name='index = 1')

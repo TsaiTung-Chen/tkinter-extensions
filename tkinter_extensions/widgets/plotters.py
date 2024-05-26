@@ -506,7 +506,8 @@ class BasePlotter(UndockedFrame):
 if __name__ == '__main__':
     import numpy as np
     
-    root = ttk.Window(title='Embedding in Ttk', themename='cyborg')
+    root = ttk.Window(
+        title='Embedding in Ttk', themename='cyborg', size=[500, 500])
     
     t = np.arange(0, 3, .01)
     x = 2 * np.sin(2 * np.pi * 1 * t)
