@@ -6,13 +6,13 @@ Created on Mon May 22 22:35:24 2023
 @author: tungchentsai
 """
 
-import os
-import json
+from importlib.metadata import version
+
 from . import widgets
 
 
-with open(os.path.join(os.path.dirname(__file__), 'metadata.json')) as f:
-    metadata = json.load(f)
+__version__ = version('tkinter_extensions')
 
-vars().update(metadata)
+
+del version
 

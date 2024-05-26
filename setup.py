@@ -6,12 +6,8 @@ Created on Sun May 26 01:05:17 2024
 @author: tungchentsai
 """
 
-import json
 from setuptools import setup, find_packages
 
-
-with open(r"./tkinter_extensions/metadata.json") as json_file:
-    metadata = json.load(json_file)
 
 with open(r"./README.md") as file:
     long_description = file.read()
@@ -20,21 +16,25 @@ with open(r"./LICENSE") as file:
     license = file.read()
 
 
-if __name__ == "__main__":
-    setup(name=metadata["__name__"],
-          version=metadata["__version__"],
-          author=metadata["__author__"],
-          author_email=metadata["__author_email__"],
-          description=metadata["__description__"],
-          long_description=long_description,
-          long_description_content_type='text/markdown',
-          classifiers=metadata["__classifiers__"],
-          url=metadata["__url__"],
-          packages=find_packages(include=['tkinter_extensions',
-                                          'tkinter_extensions.*']),
-          install_requires=metadata["__install_requires__"],
-          python_requires=metadata["__python_requires__"],
-          package_data={"": [r"*.json"]},
-          license=license
-    )
+setup(
+    name="tkinter-extensions",
+    version="0.0.1",
+    author="Tung-Chen Tsai",
+    author_email="tungchentsai1753@gmail.com",
+    description="Some tkinter extensions that allow you to build GUI apps with modern UI/UX design concepts.",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    license=license,
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent"
+    ],
+    url="https://github.com/TsaiTung-Chen/tkinter-extensions",
+    packages=find_packages(include=['tkinter_extensions',
+                                    'tkinter_extensions.*']),
+    install_requires=["matplotlib==3.8.*", "ttkbootstrap", "pandas"],
+    python_requires=">=3.9",
+    package_data={"": ["*.json"]}
+)
 
