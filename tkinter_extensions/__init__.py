@@ -8,6 +8,7 @@ Created on Mon May 22 22:35:24 2023
 
 import os
 import json
+from . import widgets
 
 
 with open(os.path.join(os.path.dirname(__file__), 'metadata.json')) as f:

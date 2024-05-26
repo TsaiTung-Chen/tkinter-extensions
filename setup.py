@@ -10,7 +10,7 @@ import json
 from setuptools import setup, find_packages
 
 
-with open(r"./tkinter-extensions/metadata.json") as json_file:
+with open(r"./tkinter_extensions/metadata.json") as json_file:
     metadata = json.load(json_file)
 
 with open(r"./README.md") as file:
@@ -30,7 +30,8 @@ if __name__ == "__main__":
           long_description_content_type='text/markdown',
           classifiers=metadata["__classifiers__"],
           url=metadata["__url__"],
-          packages=find_packages(include=['tkinter-extensions*']),
+          packages=find_packages(include=['tkinter_extensions',
+                                          'tkinter_extensions.*']),
           install_requires=metadata["__install_requires__"],
           python_requires=metadata["__python_requires__"],
           package_data={"": [r"*.json"]},

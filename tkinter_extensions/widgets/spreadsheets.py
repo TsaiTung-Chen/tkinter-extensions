@@ -3031,9 +3031,10 @@ class Book(ttk.Frame):
             index = len(sheets_props)
         
         # Generate a unique key
-        key = random.randint(-1e10, 1e+10)
+        generate_key = lambda: random.randint(int(-1e10), int(1e10))
+        key = generate_key()
         while key in sheets_props:
-            key = random.randint(-1e10, 1e+10)
+            key = generate_key()
         
         # Build a new sheet widget and sidebar button
         sheet = Sheet(self._sheet_pad_fm, **sheet_kw)
