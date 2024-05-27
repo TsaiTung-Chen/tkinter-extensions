@@ -8,7 +8,7 @@ Created on Mon May 22 22:35:24 2023
 
 from importlib.metadata import version
 
-from . import widgets
+from . import constants, dialogs, widgets
 
 
 __version__ = version('tkinter_extensions')
