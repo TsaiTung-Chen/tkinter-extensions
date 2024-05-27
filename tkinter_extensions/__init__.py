@@ -13,6 +13,5 @@ from . import constants, dialogs, widgets
 
 __version__ = version('tkinter_extensions')
 
-
-del version
+__all__ = ['__version__', 'constants', 'dialogs', 'widgets']
 

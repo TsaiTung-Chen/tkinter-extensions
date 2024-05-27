@@ -19,235 +19,17 @@ import pandas as pd
 import ttkbootstrap as ttk
 from ttkbootstrap import colorutils
 from ttkbootstrap.icons import Icon
-from ttkbootstrap.dialogs import dialogs, colorchooser
 
 from ..constants import (
     RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK)
 from ..utils import get_modifiers, center_window
+from .. import dialogs
 from .dnd import TriggerOrderlyContainer
 from .scrolled import AutoHiddenScrollbar, ScrolledFrame
 # =============================================================================
 # ---- Classes
 # =============================================================================
 class DuplicateNameError(ValueError): pass
-
-
-class _DialogPositioning:
-    def show(self, position:Union[tuple, list, Callable, None]=None):
-        # Edit: accept a positioning function argument
-        
-        self._result = None
-        self.build()
-        
-        if position is None:
-            self._locate()
-        else:
-            try:
-                #EDIT
-                if callable(position):
-                    position(self._toplevel)
-                else:
-                    x, y = position
-                    self._toplevel.geometry(f'+{x}+{y}')
-            except:
-                self._locate()
-        
-        self._toplevel.deiconify()
-        if self._alert:
-            self._toplevel.bell()
-        
-        if self._initial_focus:
-            self._initial_focus.focus_force()
-        
-        self._toplevel.grab_set()
-        self._toplevel.wait_window()
-
-
-class FontDialog(_DialogPositioning, dialogs.FontDialog):
-    from ttkbootstrap.localization import MessageCatalog as _MessageCatalog
-    
-    def __init__(self,
-                 title="Font Selector",
-                 parent=None,
-                 default:Optional[tk.font.Font]=None):
-        # Edit: set the default font as `default`
-        
-        #EDIT
-        assert isinstance(default, (tk.font.Font, type(None))), default
-        
-        title = self._MessageCatalog.translate(title)
-        super().__init__(parent=parent, title=title)
-        
-        #EDIT
-        if default is None:
-            default = tk.font.nametofont('TkDefaultFont')
-        
-        self._style = ttk.Style()
-        self._default:tk.font.Font = default  #EDIT
-        self._actual = self._default.actual()
-        self._size = ttk.Variable(value=self._actual["size"])
-        self._family = ttk.Variable(value=self._actual["family"])
-        self._slant = ttk.Variable(value=self._actual["slant"])
-        self._weight = ttk.Variable(value=self._actual["weight"])
-        self._overstrike = ttk.Variable(value=self._actual["overstrike"])
-        self._underline = ttk.Variable(value=self._actual["underline"])
-        self._preview_font = tk.font.Font()
-        self._slant.trace_add("write", self._update_font_preview)
-        self._weight.trace_add("write", self._update_font_preview)
-        self._overstrike.trace_add("write", self._update_font_preview)
-        self._underline.trace_add("write", self._update_font_preview)
-        
-        _headingfont = tk.font.nametofont("TkHeadingFont")
-        _headingfont.configure(weight="bold")
-        
-        self._update_font_preview()
-        self._families = set([self._family.get()])
-        for f in tk.font.families():
-            if all([f, not f.startswith("@"), "emoji" not in f.lower()]):
-                self._families.add(f)
-        self._families = sorted(self._families)  #EDIT
-    
-    def create_body(self, master):
-        # Edit: use natural window size
-        
-        #EDIT: width = utility.scale_size(master, 600)
-        #EDIT: height = utility.scale_size(master, 500)
-        #EDIT: self._toplevel.geometry(f"{width}x{height}")
-        
-        family_size_frame = ttk.Frame(master, padding=10)
-        family_size_frame.pack(fill='x', anchor='n')
-        self._initial_focus = self._font_families_selector(family_size_frame)
-        self._font_size_selector(family_size_frame)
-        self._font_options_selectors(master, padding=10)
-        self._font_preview(master, padding=10)
-    
-    def _font_options_selectors(self, master, padding: int):
-        # Edit: don't change the values of the tk variables
-        
-        container = ttk.Frame(master, padding=padding)
-        container.pack(fill='x', padx=2, pady=2, anchor='n')
-
-        weight_lframe = ttk.Labelframe(
-            container, text=self._MessageCatalog.translate("Weight"), padding=5
-        )
-        weight_lframe.pack(side='left', fill='x', expand=1)
-        opt_normal = ttk.Radiobutton(
-            master=weight_lframe,
-            text=self._MessageCatalog.translate("normal"),
-            value="normal",
-            variable=self._weight,
-        )
-        #EDIT: opt_normal.invoke()
-        opt_normal.pack(side='left', padx=5, pady=5)
-        opt_bold = ttk.Radiobutton(
-            master=weight_lframe,
-            text=self._MessageCatalog.translate("bold"),
-            value="bold",
-            variable=self._weight,
-        )
-        opt_bold.pack(side='left', padx=5, pady=5)
-
-        slant_lframe = ttk.Labelframe(
-            container, text=self._MessageCatalog.translate("Slant"), padding=5
-        )
-        slant_lframe.pack(side='left', fill='x', padx=10, expand=1)
-        opt_roman = ttk.Radiobutton(
-            master=slant_lframe,
-            text=self._MessageCatalog.translate("roman"),
-            value="roman",
-            variable=self._slant,
-        )
-        #EDIT: opt_roman.invoke()
-        opt_roman.pack(side='left', padx=5, pady=5)
-        opt_italic = ttk.Radiobutton(
-            master=slant_lframe,
-            text=self._MessageCatalog.translate("italic"),
-            value="italic",
-            variable=self._slant,
-        )
-        opt_italic.pack(side='left', padx=5, pady=5)
-
-        effects_lframe = ttk.Labelframe(
-            container, text=self._MessageCatalog.translate("Effects"), padding=5
-        )
-        effects_lframe.pack(side='left', padx=(2, 0), fill='x', expand=1)
-        opt_underline = ttk.Checkbutton(
-            master=effects_lframe,
-            text=self._MessageCatalog.translate("underline"),
-            variable=self._underline,
-        )
-        opt_underline.pack(side='left', padx=5, pady=5)
-        opt_overstrike = ttk.Checkbutton(
-            master=effects_lframe,
-            text=self._MessageCatalog.translate("overstrike"),
-            variable=self._overstrike,
-        )
-        opt_overstrike.pack(side='left', padx=5, pady=5)
-    
-    def _font_preview(self, master, padding:int):
-        # Edit: don't turn off `pack_propagate` and set a small width
-        
-        container = ttk.Frame(master, padding=padding)
-        container.pack(fill='both', expand=1, anchor='n')
-
-        header = ttk.Label(
-            container,
-            text=self._MessageCatalog.translate('Preview'),
-            font='TkHeadingFont',
-        )
-        header.pack(fill='x', pady=2, anchor='n')
-
-        content = self._MessageCatalog.translate(
-            'The quick brown fox jumps over the lazy dog.'
-        )
-        self._preview_text = ttk.Text(
-            master=container,
-            height=3,
-            width=1,   #EDIT: prevent the width from becoming too large
-            font=self._preview_font,
-            highlightbackground=self._style.colors.primary
-        )
-        self._preview_text.insert('end', content)
-        self._preview_text.pack(fill='both', expand=1)
-        #EDIT: container.pack_propagate(False)
-    
-    def _update_font_preview(self, *_):
-        # Edit: configure the weight of text and update `self._result` when 
-        # submitted
-        
-        self._preview_font.config(
-            family=self._family.get(),
-            size=self._size.get(),
-            slant=self._slant.get(),
-            weight=self._weight.get(),   #EDIT
-            overstrike=self._overstrike.get(),
-            underline=self._underline.get()
-        )
-        try:
-            self._preview_text.configure(font=self._preview_font)
-        except:
-            pass
-        #EDIT: self._result = self._preview_font
-    
-    def _on_submit(self):
-        # Edit: update `self._result` when submitted
-        
-        self._result = self._preview_font  #EDIT
-        return super()._on_submit()
-
-
-class ColorChooserDialog(_DialogPositioning, colorchooser.ColorChooserDialog):
-    pass
-
-
-class MessageDialog(_DialogPositioning, dialogs.MessageDialog):
-    pass
-
-
-class QueryDialog(_DialogPositioning, dialogs.QueryDialog):
-    def create_body(self, master):
-        super().create_body(master=master)
-        self._initial_focus.select_range(0, 'end')
 
 
 class History:
@@ -978,27 +760,6 @@ class Sheet(ttk.Frame):
         # Change text alignments
         menu_align = tk.Menu(menu, tearoff=0)
         menu_align.add_command(
-            label='↑ Top',
-            command=lambda: self._selection_set_styles(
-                "aligny", 'n', undo=True)
-        )
-        menu_align.add_command(
-            label='↓ Bottom',
-            command=lambda: self._selection_set_styles(
-                "aligny", 's', undo=True)
-        )
-        menu_align.add_command(
-            label='⎯ Center',
-            command=lambda: self._selection_set_styles(
-                "aligny", 'center', undo=True)
-        )
-        menu_align.add_command(
-            label='⤬ Reset',
-            command=lambda: self._selection_set_styles(
-                "aligny", None, undo=True)
-        )
-        menu_align.add_separator()
-        menu_align.add_command(
             label='← Left',
             command=lambda: self._selection_set_styles(
                 "alignx", 'w', undo=True)
@@ -1017,6 +778,27 @@ class Sheet(ttk.Frame):
             label='⤬ Reset',
             command=lambda: self._selection_set_styles(
                 "alignx", None, undo=True)
+        )
+        menu_align.add_separator()
+        menu_align.add_command(
+            label='↑ Top',
+            command=lambda: self._selection_set_styles(
+                "aligny", 'n', undo=True)
+        )
+        menu_align.add_command(
+            label='↓ Bottom',
+            command=lambda: self._selection_set_styles(
+                "aligny", 's', undo=True)
+        )
+        menu_align.add_command(
+            label='⎯ Center',
+            command=lambda: self._selection_set_styles(
+                "aligny", 'center', undo=True)
+        )
+        menu_align.add_command(
+            label='⤬ Reset',
+            command=lambda: self._selection_set_styles(
+                "aligny", None, undo=True)
         )
         menu.add_cascade(label='Align', menu=menu_align)
         
@@ -2051,7 +1833,7 @@ class Sheet(ttk.Frame):
         
         if dialog:
             dimension = ('height', 'width')[axis]
-            dialog = QueryDialog(
+            dialog = dialogs.PositionedQueryDialog(
                 parent=self,
                 prompt=f'Enter the new {dimension}:',
                 initialvalue=old_sizes[0],
@@ -2131,7 +1913,7 @@ class Sheet(ttk.Frame):
         if dialog:
             # Ask for number of rows/cols to insert
             axis_name = ('rows', 'columns')[axis]
-            dialog = QueryDialog(
+            dialog = dialogs.PositionedQueryDialog(
                 parent=self,
                 title='Rename Sheet',
                 prompt=f"Enter the number of {axis_name} to insert:",
@@ -2473,7 +2255,8 @@ class Sheet(ttk.Frame):
         if dialog:
             style_topleft = self._cell_styles[min(r1, r2), min(c1, c2)]
             font_topleft = style_topleft.get("font")
-            dialog = FontDialog(parent=self, default=font_topleft)
+            dialog = dialogs.PositionedFontDialog(
+                parent=self, default=font_topleft)
             dialog.show(position=self._center_window)
             if (fonts := dialog.result) is None:
                 return
@@ -2505,7 +2288,8 @@ class Sheet(ttk.Frame):
         if dialog:
             style_topleft = self._cell_styles[min(r1, r2), min(c1, c2)]
             color_topleft = style_topleft.get(field)
-            dialog = ColorChooserDialog(parent=self, initialcolor=color_topleft)
+            dialog = dialogs.PositionedColorChooserDialog(
+                parent=self, initialcolor=color_topleft)
             dialog.show(position=self._center_window)
             if (colors := dialog.result) is None:
                 return
@@ -2971,7 +2755,7 @@ class Book(ttk.Frame):
                                   ('minimal cell width', sb_minw),
                                   ('minimal cell height', sb_minh)]:
                     if not sb.get().isnumeric():
-                        error_dialog = MessageDialog(
+                        error_dialog = dialogs.PositionedMessageDialog(
                             message=f'The value of "{which}" must be a positive '
                                     'integer',
                             title='Value Error',
@@ -3083,7 +2867,7 @@ class Book(ttk.Frame):
             sticky='we',
             expand=(True, False),
             padding=[6, 3],
-            ipadding=4
+            ipadding=1
         )
         self._sidebar_fm._on_map_child()
     
@@ -3125,7 +2909,7 @@ class Book(ttk.Frame):
     
     def _delete_sheet(self, key, destroy:bool=True, check:bool=False):
         if check:
-            dialog = MessageDialog(
+            dialog = dialogs.PositionedMessageDialog(
                 message="This action can't be undone. "
                         "Would you like to continue?",
                 title='Sheet Deletion',
@@ -3189,7 +2973,7 @@ class Book(ttk.Frame):
             self, key, _prompt='Enter a new name for this sheet:'):
         # Ask for new name
         old_name = self._sheets_props[key]["name"]
-        dialog = QueryDialog(
+        dialog = dialogs.PositionedQueryDialog(
             parent=self,
             title='Rename Sheet',
             prompt=_prompt,
