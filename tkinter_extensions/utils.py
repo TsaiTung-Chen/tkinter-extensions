@@ -7,7 +7,7 @@ Created on Sun Dec 11 19:18:31 2022
 """
 
 from functools import wraps
-from typing import Tuple, Union
+from typing import Tuple, Union, Callable
 import tkinter as tk
 from tkinter.font import Font
 from tkinter import Pack, Grid, Place
@@ -16,8 +16,8 @@ from PIL.ImageTk import PhotoImage
 
 import numpy as np
 import ttkbootstrap as ttk
+from ttkbootstrap import colorutils
 from ttkbootstrap.utility import scale_size
-from ttkbootstrap.colorutils import contrast_color as ttk_contrast_color
 
 from .constants import BUILTIN_WIDGETS, MODIFIERS, MODIFIER_MASKS
 # =============================================================================
@@ -252,7 +252,7 @@ def is_color(color:str):
 
 
 def contrast_color(color:str):
-    return ttk_contrast_color(ImageColor.getrgb(color), model='rgb')
+    return colorutils.contrast_color(ImageColor.getrgb(color), model='rgb')
 
 
 def recolor_black(image:Image.Image,
@@ -337,4 +337,17 @@ def create_color_image(color,
     if photoimage:
         return PhotoImage(image, master=master)
     return image
+
+
+def modify_hsl(color, func: Callable, inmodel:str='hex', outmodel:str='hex'
+               ) -> Union[Tuple[int, int, int], str]:
+    h, s, l = colorutils.color_to_hsl(color, model=inmodel)
+    h, s, l = func(h, s, l)
+    
+    if outmodel == 'rgb':
+        return colorutils.color_to_rgb((h, s, l), mode='hsl')
+    elif outmodel == 'hex':
+        return colorutils.color_to_hex((h, s, l), model='hsl')
+    else:
+        return (h, s, l)
 

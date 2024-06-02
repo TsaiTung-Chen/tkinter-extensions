@@ -17,12 +17,11 @@ from typing import Union, Optional, List, Tuple, Dict, Callable, Literal
 import numpy as np
 import pandas as pd
 import ttkbootstrap as ttk
-from ttkbootstrap import colorutils
 from ttkbootstrap.icons import Icon
 
 from ..constants import (
     RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK)
-from ..utils import get_modifiers, center_window
+from ..utils import get_modifiers, center_window, modify_hsl
 from .. import dialogs
 from .dnd import TriggerOrderlyContainer
 from .scrolled import AutoHiddenScrollbar, ScrolledFrame
@@ -235,14 +234,17 @@ class Sheet(ttk.Frame):
         self._cover.lift()
         self._mousewheel_sensitivity = mousewheel_sensitivity
         
-        # Create an invisible background which makes this sheet become the focus 
-        # if being clicked
+        # Create an invisible background (lowest item) which makes this sheet
+        # become the focus if it is clicked
         for _canvas in [canvas, rowcanvas, colcanvas]:
-            _canvas.create_rectangle(1, 1, 1, 1, width=0, tag='invisible-bg')
+            oid = _canvas.create_rectangle(
+                1, 1, 1, 1, width=0, tags='invisible-bg')
+            _canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
             _canvas.tag_bind('invisible-bg', '<Button-1>', self._focus)
         
         # Create the selection frame
-        canvas.create_rectangle(1, 1, 1, 1, fill='', tags='selection-frame')
+        oid = canvas.create_rectangle(1, 1, 1, 1, fill='', tags='selection-frame')
+        canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         
         # Init the backend states
         self._get_style = get_style
@@ -292,7 +294,7 @@ class Sheet(ttk.Frame):
         self._selection_rcs: Tuple[int, int, int, int] = (-1, -1, -1, -1)
         self._selection_rcs = self.select_cells(0, 0, 0, 0)
         
-        # Add bindings
+        # Bindings
         self.bind('<<ThemeChanged>>', self._on_theme_changed)
         self.bind('<KeyPress>', self._on_key_press)
         self.bind('<<SelectAll>>', self._on_select_all)
@@ -429,7 +431,7 @@ class Sheet(ttk.Frame):
         # Draw new items
         self.redraw(
             update_visible_rcs=False,
-            skip_exist=True,
+            skip_exist=True,   # reduce operating time
             trace=None
         )
         
@@ -454,15 +456,28 @@ class Sheet(ttk.Frame):
         selection = ttk.Frame(self, bootstyle='primary')
         selection_style = selection["style"]
         
+        # The ttkbootstrap styles of the header button above usually use the 
+        # same color in both the button background and border. So we slightly 
+        # modify the lightness of the border color to distinguish between them
+        lighter_or_darker1 = lambda h, s, l: (h, s, l+10 if l < 50 else l-10)
+        lighter_or_darker2 = lambda h, s, l: (h, s, l+15 if l < 50 else l-15)
+        lighter_or_darker3 = lambda h, s, l: (h, s, l+30 if l < 50 else l-30)
+        
         # Generate a dictionary to store the default styles
-        self._default_styles = default_styles = {
+        self._default_styles = {
             "header": {
                 "background": {
                     "normal": style.lookup(header_style, "background"),
                     "hover": style.lookup(
                         header_style, "background", ('hover', '!disabled')),
-                    "selected": style.lookup(
-                        header_style, "background", ('selected', '!disabled'))
+                    "selected": modify_hsl(
+                        style.lookup(
+                            header_style,
+                            "background",
+                            ('selected', '!disabled')
+                        ),
+                        func=lighter_or_darker3
+                    ),
                 },
                 "foreground": {
                     "normal": style.lookup(header_style, "foreground"),
@@ -472,11 +487,30 @@ class Sheet(ttk.Frame):
                         header_style, "foreground", ('selected', '!disabled'))
                 },
                 "bordercolor": {
-                    "normal": style.lookup(header_style, "bordercolor"),
+                    "normal": modify_hsl(
+                        style.lookup(header_style, "bordercolor"),
+                        func=lighter_or_darker2
+                    ),
                     "hover": style.lookup(
-                        header_style, "bordercolor", ('hover', '!disabled')),
-                    "selected": style.lookup(
-                        header_style, "bordercolor", ('selected', '!disabled'))
+                        header_style,
+                        "bordercolor",
+                        ('hover', '!disabled')
+                    ),
+                    "selected": modify_hsl(
+                        style.lookup(
+                            header_style,
+                            "bordercolor",
+                            ('selected', '!disabled')
+                        ),
+                        func=lighter_or_darker1
+                    )
+                },
+                "handle": {
+                    "width": 1
+                },
+                "separator": {
+                    "color": style.lookup(header_style, "bordercolor"),
+                    "width": 2
                 },
                 "font": 'TkDefaultFont',
                 "cursor": {
@@ -508,16 +542,6 @@ class Sheet(ttk.Frame):
                 "width": 2
             }
         }
-        
-        # The ttkbootstrap styles of the header button above usually use the 
-        # same color in both the button background and border. So we slightly 
-        # modify the lightness of the border color to distinguish between them
-        header_style = default_styles["header"]
-        bdcolors = header_style["bordercolor"]
-        for state, bdcolor in bdcolors.items():
-            h, s, l = colorutils.color_to_hsl(bdcolor, model='hex')
-            l += 20 if l < 50 else -20  # lightness must be in [0, 100]
-            bdcolors[state] = colorutils.color_to_hex((h, s, l), model='hsl')
         
         # Release the resources
         header.destroy()
@@ -567,6 +591,7 @@ class Sheet(ttk.Frame):
         canvas = self.canvas
         lines = text.split('\n')
         oid = canvas.create_text(*self._canvas_size, text=text, font=font)
+        canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         x1, y1, x2, y2 = canvas.bbox(oid)
         canvas.delete(oid)
         longest_line = sorted(lines, key=lambda t: len(t))[-1]
@@ -583,6 +608,7 @@ class Sheet(ttk.Frame):
         center_window(to_center=toplevel, center_of=self.winfo_toplevel())
     
     def _make_tags(self,
+                   oid=None,
                    type_=None,
                    subtype=None,
                    row=None,
@@ -591,10 +617,8 @@ class Sheet(ttk.Frame):
                    *,
                    withkey:bool=True,
                    to_tuple:bool=False) -> Union[dict, tuple]:
-        params = locals()
-        params["type"] = type_
-        
         tagdict = {
+            "oid": f'oid={oid}',
             "type": f'type={type_}',
             "subtype": f'subtype={subtype}',
             "row": f'row={row}',
@@ -611,10 +635,7 @@ class Sheet(ttk.Frame):
         }
         
         if not withkey:
-            tagdict = { k: (None if (v := _v.split('=', 1)[1]) == 'None' else v)
-                        for k, _v in tagdict.items() }
-            tagdict["row"] = row if (row := tagdict["row"]) is None else int(row)
-            tagdict["col"] = col if (col := tagdict["col"]) is None else int(col)
+            tagdict = self._parse_raw_tagdict(tagdict)
         
         others = tuple(others)
         
@@ -625,6 +646,7 @@ class Sheet(ttk.Frame):
         return tagdict
     
     def _make_tag(self, key:str, *args, **kwargs) -> str:
+        assert "to_tuple" not in kwargs, kwargs.keys()
         return self._make_tags(*args, **kwargs)[key]
     
     def _get_tags(self,
@@ -638,14 +660,18 @@ class Sheet(ttk.Frame):
         canvas = canvas or self.canvas
         
         others = tuple()
-        tagdict = {
-            "type": None, "subtype": None,
-            "row": None, "col": None, "row:col": None,
-            "type:row": None, "type:col": None,
-            "type:subtype": None,
-            "type:subtype:row": None, "type:subtype:col": None,
-            "type:subtype:row:col": None
-        }
+        tagdict = dict.fromkeys(
+            [
+                "oid",
+                "type", "subtype",
+                "row", "col", "row:col",
+                "type:row", "type:col",
+                "type:subtype",
+                "type:subtype:row", "type:subtype:col",
+                "type:subtype:row:col"
+            ],
+            None
+        )
         
         tags = canvas.gettags(oid)
         for tag in tags:
@@ -660,10 +686,7 @@ class Sheet(ttk.Frame):
             others += (tag,)
         
         if not withkey:
-            tagdict = { k: (None if (v := _v.split('=', 1)[1]) == 'None' else v)
-                        for k, _v in tagdict.items() }
-            tagdict["row"] = row if (row := tagdict["row"]) is None else int(row)
-            tagdict["col"] = col if (col := tagdict["col"]) is None else int(col)
+            tagdict = self._parse_raw_tagdict(tagdict)
         
         if to_tuple:
             return tuple(tagdict.values()) + others
@@ -672,7 +695,22 @@ class Sheet(ttk.Frame):
         return tagdict
     
     def _get_tag(self, key:str, *args, **kwargs) -> str:
+        assert "to_tuple" not in kwargs, kwargs.keys()
         return self._get_tags(*args, **kwargs)[key]
+    
+    def _parse_raw_tagdict(self, raw_tagdict:dict) -> dict:
+        tagdict = {
+            k: None if v is None or (_v := v.split('=', 1)[1]) == 'None'
+                    else _v
+            for k, v in raw_tagdict.items()
+        }
+        
+        if (oid := tagdict["oid"]) is not None:
+            tagdict["oid"] = int(oid)
+        tagdict["row"] = row if (row := tagdict["row"]) is None else int(row)
+        tagdict["col"] = col if (col := tagdict["col"]) is None else int(col)
+        
+        return tagdict
     
     def _get_rc(self,
                 oid_or_tagdict:Union[int, dict, str],
@@ -685,11 +723,9 @@ class Sheet(ttk.Frame):
         else:
             tagdict = self._get_tags(oid_or_tagdict, canvas=canvas)
         
-        rc = { k: tagdict[k] for k in ["row", "col"] }
-        
         if to_tuple:
-            return tuple(rc.values())
-        return rc
+            return (tagdict["row"], tagdict["col"])
+        return {"row": tagdict["row"], "col": tagdict["col"]}
     
     def _get_rcs(self, tag:str) -> dict:
         return dict(zip(
@@ -1006,40 +1042,80 @@ class Sheet(ttk.Frame):
         
         style = self._default_styles["header"]
         background, bordercolor = style["background"], style["bordercolor"]
+        handle = style["handle"]
+        separator = style["separator"]
+        dw_sep = np.ceil(separator["width"] / 2) - 1
         canvas = self.cornercanvas
         canvas.configure(width=x2 - x1 + 1, height=y2 - y1 + 1)
         self.rowcanvas.configure(width=width)
         self.colcanvas.configure(height=height)
         
         tag = self._make_tag("type", type_=type_)
-        if skip_exist and canvas.find_withtag(tag):
-            return
+        if skip_exist:
+            for oid in canvas.find_withtag(tag):
+                subtype = self._get_tag("subtype", oid, canvas=canvas)
+                if subtype in ('background', 'hhandle', 'vhandle'):
+                    return
         
         # Delete the existing components
         canvas.delete(tag)
         
         # Draw components for the cornerheader
-        kw = {"type_": type_, 
-              "row": -1, "col": -1,
-              "others": ('temp',),
-              "to_tuple": True}
-        # Background
+        kw = {
+            "type_": type_, 
+            "row": -1, "col": -1,
+            "others": ('temp',),
+            "to_tuple": True
+        }
+        
+        ## Background
         tags = self._make_tags(subtype='background', **kw)
-        canvas.create_rectangle(
+        oid = canvas.create_rectangle(
             x1, y1, x2, y2,
             fill=background["normal"],
             outline=bordercolor["normal"],
             tags=tags
         )
+        canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         
-        # Handles
+        ## Handles (invisible)
         tags = self._make_tags(subtype='hhandle', **kw)
-        canvas.create_line(x1, y2, x2, y2, width=3, fill='', tags=tags)
+        oid_hh = canvas.create_line(
+            x1, y2, x2, y2, width=handle["width"], fill='', tags=tags)
+        canvas.addtag_withtag(self._make_tag("oid", oid=oid_hh), oid_hh)
         
         tags = self._make_tags(subtype='vhandle', **kw)
-        canvas.create_line(x2, y1, x2, y2, width=3, fill='', tags=tags)
+        oid_vh = canvas.create_line(
+            x2, y1, x2, y2, width=handle["width"], fill='', tags=tags)
+        canvas.addtag_withtag(self._make_tag("oid", oid=oid_vh), oid_vh)
         
-        # Add bindings
+        ## Separators (always redrawn)
+        kw.pop("col")
+        tags = self._make_tags(subtype='separator', **kw)
+        oid = canvas.create_line(
+            x1 + 1, y2 - dw_sep, x2 + 1, y2 - dw_sep,
+            width=separator["width"],
+            fill=separator["color"],
+            tags=tags
+        )
+        canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
+        
+        kw.pop("row")
+        kw["col"] = -1
+        tags = self._make_tags(subtype='separator', **kw)
+        oid = canvas.create_line(
+            x2 - dw_sep, y1 + 1, x2 - dw_sep, y2 + 1,
+            width=separator["width"],
+            fill=separator["color"],
+            tags=tags
+        )
+        canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
+        
+        ## Handles > separators > background
+        canvas.tag_raise(oid_hh)
+        canvas.tag_raise(oid_vh)
+        
+        # Bindings
         tag_cornerheader = self._make_tag("type", type_=type_)
         canvas.tag_bind(tag_cornerheader, '<Enter>', self._on_header_enter)
         canvas.tag_bind(tag_cornerheader, '<Leave>', self._on_header_leave)
@@ -1049,7 +1125,6 @@ class Sheet(ttk.Frame):
         for handle in ['hhandle', 'vhandle']:
             tag_cornerhandle = self._make_tag(
                 "type:subtype", type_=type_, subtype=handle)
-            canvas.tag_raise(tag_cornerhandle)  # topmost
             canvas.tag_bind(
                 tag_cornerhandle,
                 '<ButtonPress-1>',
@@ -1078,6 +1153,13 @@ class Sheet(ttk.Frame):
         max_i = self.shape[axis] - 1
         assert 0 <= i1 <= i2 <= max_i, (i1, i2, max_i)
         
+        style = self._default_styles["header"]
+        background, foreground = style["background"], style["foreground"]
+        bordercolor, font = style["bordercolor"], style["font"]
+        w_hand = style["handle"]["width"]
+        separator = style["separator"]
+        dw_sep = np.ceil(separator["width"] / 2) - 1
+        
         (gx1_vis, gx2_vis), (gy1_vis, gy2_vis) = self._visible_xys
         heights, widths = self._cell_sizes
         if axis == 0:
@@ -1098,6 +1180,7 @@ class Sheet(ttk.Frame):
                 )
                 for r, (y1, y2) in enumerate(zip(y1s[i1:i2+1], y2s[i1:i2+1]), i1)
             )
+            xys_sep = (x2 - dw_sep, 0, x2 - dw_sep, y2s[i2])
             canvas = self.rowcanvas
         else:
             type_, prefix, handle = ('colheader', 'C', 'vhandle')
@@ -1117,11 +1200,8 @@ class Sheet(ttk.Frame):
                 )
                 for c, (x1, x2) in enumerate(zip(x1s[i1:i2+1], x2s[i1:i2+1]), i1)
             )
+            xys_sep = (0, y2 - dw_sep, x2s[i2], y2 - dw_sep)
             canvas = self.colcanvas
-        
-        style = self._default_styles["header"]
-        background, foreground = style["background"], style["foreground"]
-        bordercolor, font = style["bordercolor"], style["font"]
         
         # Draw components for each header
         for i, kw, (x1, y1, x2, y2), xys_handle in coords_gen:
@@ -1130,42 +1210,70 @@ class Sheet(ttk.Frame):
             if skip_exist and canvas.find_withtag(tag):
                 continue
             
-            # Delete the existing components
+            ## Delete the existing components
             canvas.delete(tag)
             
-            # Create new components
             kw["to_tuple"] = True
-            # Background
+            
+            ## Create new components
+            ### Background
             tags = self._make_tags(subtype='background', **kw)
-            canvas.create_rectangle(
+            oid = canvas.create_rectangle(
                 x1, y1, x2, y2,
                 fill=background["normal"],
                 outline=bordercolor["normal"],
                 tags=tags
             )
+            canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
             
-            # Text
+            ### Text
             tags = self._make_tags(subtype='text', **kw)
             text = self._fit_size(
                 f'{prefix}{i}', font, width=x2 - x1, height=y2 - y1)
-            canvas.create_text(
+            oid = canvas.create_text(
                 (x1 + x2)/2., (y1 + y2)/2.,
                 text=text,
                 font=font,
                 fill=foreground["normal"],
                 tags=tags
             )
+            canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
             
-            # Handle
+            ### Handle (invisible)
             tags = self._make_tags(subtype=handle, **kw)
-            canvas.create_line(*xys_handle, width=3, fill='', tags=tags)
+            oid = canvas.create_line(
+                *xys_handle, width=w_hand, fill='', tags=tags)
+            canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         
-        # Stacking order: CornerHeader > Row/ColHeaderHandle > Row/ColHeader
-        tag_header = self._make_tag("type", type_=type_)
+        # Separator (always redrawn)
+        try:
+            kw.pop("to_tuple")
+        except KeyError:
+            pass
+        kw.pop("row" if axis == 0 else "col")
+        tag = self._make_tag("type:subtype", subtype='separator', **kw)
+        canvas.delete(tag)
+        tags = self._make_tags(subtype='separator', to_tuple=True, **kw)
+        oid_sep = canvas.create_line(
+            *xys_sep,
+            width=separator["width"],
+            fill=separator["color"],
+            tags=tags
+        )
+        canvas.addtag_withtag(self._make_tag("oid", oid=oid_sep), oid_sep)
+        
+        # Stacking order: CornerHeader > Row/ColSeparator > Row/ColHeaderHandle
+        # > Row/ColHeader
+        tag_bg = self._make_tag("type:subtype", type_=type_, subtype='background')
+        tag_text = self._make_tag("type:subtype", type_=type_, subtype='text')
         tag_handle = self._make_tag("type:subtype", type_=type_, subtype=handle)
-        canvas.tag_raise(tag_handle)
+        canvas.tag_raise(tag_bg)
+        canvas.tag_raise(tag_text)
+        canvas.tag_raise(tag_handle)  # second from the front
+        canvas.tag_raise(oid_sep)  # frontmost
         
-        # Add bindings
+        # Bindings
+        tag_header = self._make_tag("type", type_=type_)
         canvas.tag_bind(tag_header, '<Enter>', self._on_header_enter)
         canvas.tag_bind(tag_header, '<Leave>', self._on_header_leave)
         canvas.tag_bind(tag_header, RIGHTCLICK, self._on_header_rightbutton_press)
@@ -1197,57 +1305,65 @@ class Sheet(ttk.Frame):
             
             canvas = self.cornercanvas
             tag = self._make_tag("type", type_=type_)
-            tag_background = self._make_tag(
+            tag_bg = self._make_tag(
                 "type:subtype", type_=type_, subtype='background')
             tag_text = None
         else:
             if type_ == 'rowheader':
-                key = "row"
-                i, i1, i2 = (tagdict[key], r1, r2)
+                col_or_row = "row"
+                i, i1, i2 = (tagdict[col_or_row], r1, r2)
                 canvas = self.rowcanvas
             else:
-                key = "col"
-                i, i1, i2 = (tagdict[key], c1, c2)
+                col_or_row = "col"
+                i, i1, i2 = (tagdict[col_or_row], c1, c2)
                 canvas = self.colcanvas
             
             if skip_selected and (i1 <= i <= i2):
                 return 'selected'
             
-            kw = {"type_": type_, key: i}
-            tag = self._make_tag(f"type:{key}", **kw)
-            tag_background = self._make_tag(
-                f"type:subtype:{key}", subtype='background', **kw)
+            kw = {"type_": type_, col_or_row: i}
+            tag = self._make_tag(f"type:{col_or_row}", **kw)
+            tag_bg = self._make_tag(
+                f"type:subtype:{col_or_row}", subtype='background', **kw)
             tag_text = self._make_tag(
-                f"type:subtype:{key}", subtype='text', **kw)
+                f"type:subtype:{col_or_row}", subtype='text', **kw)
         
         if not canvas.find_withtag(tag):  # items have not been created yet
             return
         
         style = self._default_styles["header"]
         
-        # Set background color and border color
-        oid, = canvas.find_withtag(tag_background)
+        # Update the background color and border color
         canvas.itemconfigure(
-            oid,
+            tag_bg,
             fill=style["background"][state],
             outline=style["bordercolor"][state]
         )
         
-        # Set text color
-        if tag_text is not None:
-            oid, = canvas.find_withtag(tag_text)
-            canvas.itemconfigure(oid, fill=style["foreground"][state])
+        if type_ != 'cornerheader':
+            # Update the stacking order
+            ## Front to back: separator > handlers > texts > backgrounds
+            ## > invisible-bg
+            if state in ('selected', 'hover'):
+                tag_all_text = self._make_tag(
+                    "type:subtype", type_=type_, subtype='text')
+                canvas.tag_lower(tag_bg, tag_all_text)  # frontmost background
+            else:
+                canvas.tag_lower(tag_bg, 'selected')  # lower than the selected
+            
+            # Update the text color
+            canvas.itemconfigure(tag_text, fill=style["foreground"][state])
         
         return state
     
     def __on_header_enter_leave(self, event, enter_or_leave:str):
-        assert enter_or_leave in ('enter', 'leave'), enter_or_leave
+        state = {"enter": 'hover', "leave": 'normal'}[enter_or_leave]
         
-        state = 'hover' if enter_or_leave == 'enter' else 'normal'
-        
+        # Set header state
         canvas = event.widget
         tagdict = self._get_tags('current', canvas=canvas)
-        self._set_header_state(tagdict, state=state, skip_selected=True)
+        if tagdict["subtype"] != 'separator':
+            self._set_header_state(tagdict, state=state, skip_selected=True)
         
         # Set mouse cursor style
         cursor_styles = self._default_styles["header"]["cursor"]
@@ -1259,6 +1375,8 @@ class Sheet(ttk.Frame):
         canvas.configure(cursor=cursor)
         
         self._hover = tagdict if enter_or_leave == 'enter' else None
+        #TODO if enter_or_leave == 'enter':#???
+            #print(tagdict)
     
     _on_header_enter = lambda self, event: self.__on_header_enter_leave(
         event, 'enter')
@@ -1464,21 +1582,23 @@ class Sheet(ttk.Frame):
                 if skip_exist and canvas.find_withtag(tag):
                     continue
                 
-                # Delete the existing components
+                ## Delete the existing components
                 canvas.delete(tag)
                 
-                # Create new components
                 kw["to_tuple"] = True
-                # Background
+                
+                ## Create new components
+                ### Background
                 tags = self._make_tags(type_=type_, subtype='background', **kw)
-                canvas.create_rectangle(
+                oid = canvas.create_rectangle(
                     x1, y1, x2, y2,
                     fill=cell_style["background"],
                     outline=cell_style["bordercolor"],
                     tags=tags
                 )
+                canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
                 
-                # Text
+                ## Text
                 if not (text := values.iat[r, c]):
                     continue
                 tags = self._make_tags(type_=type_, subtype='text', **kw)
@@ -1506,7 +1626,7 @@ class Sheet(ttk.Frame):
                     width=x2 - x1 - padx,
                     height=y2 - y1 - pady
                 )
-                canvas.create_text(
+                oid = canvas.create_text(
                     *xy,
                     anchor=anchor,
                     text=text_fit,
@@ -1515,8 +1635,9 @@ class Sheet(ttk.Frame):
                     fill=cell_style["foreground"],
                     tags=tags
                 )
+                canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         
-        # Add Bindings
+        # Bindings
         tag_cell = self._make_tag("type", type_=type_)
         canvas.tag_bind(tag_cell, RIGHTCLICK, self._on_cell_rightbutton_press)
         
@@ -1619,6 +1740,17 @@ class Sheet(ttk.Frame):
         
         self._selection_rcs:Tuple[int, int, int, int] = (r1, c1, r2, c2)
         
+        # Update tags
+        for canvas in (self.cornercanvas, self.rowcanvas, self.colcanvas):
+            canvas.dtag('selected', 'selected')
+        if (sorted([r1, r2]) == [0, max_r]) and (sorted([c1, c2]) == [0, max_c]):
+            tag = self._make_tag("type", type_='cornerheader')
+            self.cornercanvas.addtag_withtag('selected', tag)
+        for type_, canvas in [('rowheader', self.rowcanvas),
+                              ('colheader', self.colcanvas)]:
+            tag = self._make_tag("type", type_=type_)
+            canvas.addtag_withtag('selected', tag)
+        
         return self._selection_rcs
     
     def select_cells(self,
@@ -1716,7 +1848,7 @@ class Sheet(ttk.Frame):
             # Move the last selection to the nearset nonempty cell in the same
             # paragraph or next paragraph
             
-            # Slice the cell value array to an 1-D DataFrame
+            ## Slice the cell value array to an 1-D DataFrame
             slices = [old_r2, old_c2]  # [row index, col index]
             if direction in ('up', 'left'):
                 lim_rc = [0, 0]
@@ -1770,16 +1902,17 @@ class Sheet(ttk.Frame):
         self.redraw_cells(skip_exist=skip_exist)
         self._reselect_cells(trace=trace)
     
-    def refresh(self, scrollbar:Optional[str]='both', trace:Optional[str]=None):
-        assert scrollbar in (None, 'x', 'y', 'both'), scrollbar
+    def refresh(self, scrollbar:str='both', trace:Optional[str]=None):
+        assert scrollbar in ('x', 'y', 'both'), scrollbar
         
         self._canvases_delete('temp')
-        self.redraw(trace=trace)
         
         if scrollbar in ('x', 'both'):
             self.xview_scroll(0, 'units')
         if scrollbar in ('y', 'both'):
             self.yview_scroll(0, 'units')
+        
+        self._reselect_cells(trace=trace)
     
     def _canvases_delete(self, tag:str):
         self.cornercanvas.delete(tag)
