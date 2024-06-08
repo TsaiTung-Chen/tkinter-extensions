@@ -21,6 +21,7 @@ from matplotlib.backends._backend_tk import NavigationToolbar2Tk, ToolTip
 
 from ..utils import create_image_pair, unbind, quit_if_all_closed, defer
 from .undocked import UndockedFrame
+from ._matplotlib import RC
 # =============================================================================
 # ---- Functions
 # =============================================================================
@@ -498,6 +499,9 @@ class BasePlotter(UndockedFrame):
     
     def autoscale(self, *args, **kwargs):
         autoscale(*args, **kwargs)
+    
+    def refresh(self, *args, **kw):
+        pass
 
 
 # =============================================================================
@@ -507,11 +511,14 @@ if __name__ == '__main__':
     import numpy as np
     
     root = ttk.Window(
-        title='Embedding in Ttk', themename='cyborg', size=[500, 500])
+        title='Embedding in Ttk', themename='cyborg', size=[600, 600])
     
     t = np.arange(0, 3, .01)
     x = 2 * np.sin(2 * np.pi * 1 * t)
+    
+    plt.rcParams.update(RC["dark"])
     fig = plt.Figure(figsize=(5, 4), dpi=100)
+    fig.suptitle('Sine wave')
     ax = fig.subplots()
     line, = ax.plot(t, x, label='f = 1 Hz')
     ax.set_xlabel("time [s]")
@@ -537,6 +544,21 @@ if __name__ == '__main__':
                        orient='horizontal',
                        command=_update_frequency)
     slider.pack(side='bottom', pady=10)
+    
+    # Switch theme
+    def _change_to_light_theme():
+        style = root.style
+        if style.theme_use() == 'morph':
+            new_rc = RC["dark"]
+            new_theme = 'cyborg'
+        else:
+            new_rc = RC["light"]
+            new_theme = 'morph'
+        plt.rcParams.update(new_rc)
+        style.theme_use(new_theme)
+    
+    bt = ttk.Button(root, text='Switch theme', command=_change_to_light_theme)
+    bt.pack(side='bottom', pady=10)
     
     root.mainloop()
 
