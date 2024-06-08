@@ -1780,16 +1780,17 @@ class Sheet(ttk.Frame):
         r_low, r_high = sorted([r1, r2])
         c_low, c_high = sorted([c1, c2])
         
-        # Update selection frames' styles
+        # Update selection frame's styles
         selection_style = self._default_styles["selection"]
         color, w = selection_style["color"], selection_style["width"]
         self.canvas.itemconfigure('selection-frame', outline=color, width=w)
         
-        # Relocate the selection frames
+        # Relocate the selection frame
         gy2s, gx2s = self._gy2s_gx2s
-        x1, x2 = self._canvasx([gx2s[c_low] + 1, gx2s[c_high+1]])
-        y1, y2 = self._canvasy([gy2s[r_low] + 1, gy2s[r_high+1]])
-        self.canvas.coords('selection-frame', x1-w+1, y1-w+1, x2+w-1, y2+w-1)
+        x1, x2 = self._canvasx([gx2s[c_low], gx2s[c_high+1]])
+        y1, y2 = self._canvasy([gy2s[r_low], gy2s[r_high+1]])
+        dw = int(w % 2 == 0)
+        self.canvas.coords('selection-frame', x1, y1, x2+dw, y2+dw)
         
         # Relocate the viewing window to trace the first selected cell (r1, c1) 
         # or the last selected cell (r2, c2)
