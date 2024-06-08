@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import ttkbootstrap as ttk
 from ttkbootstrap.icons import Icon
+from ttkbootstrap.colorutils import color_to_hsl
 
 from ..constants import (
     RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK)
@@ -461,13 +462,14 @@ class Sheet(ttk.Frame):
         # modify the lightness of the border color to distinguish between them
         lighter_or_darker1 = lambda h, s, l: (h, s, l+10 if l < 50 else l-10)
         lighter_or_darker2 = lambda h, s, l: (h, s, l+15 if l < 50 else l-15)
-        lighter_or_darker3 = lambda h, s, l: (h, s, l+30 if l < 50 else l-30)
+        header_bg = style.lookup(header_style, "background")
+        _, _, header_bg_l = color_to_hsl(header_bg)
         
         # Generate a dictionary to store the default styles
         self._default_styles = {
             "header": {
                 "background": {
-                    "normal": style.lookup(header_style, "background"),
+                    "normal": header_bg,
                     "hover": style.lookup(
                         header_style, "background", ('hover', '!disabled')),
                     "selected": modify_hsl(
@@ -476,7 +478,7 @@ class Sheet(ttk.Frame):
                             "background",
                             ('selected', '!disabled')
                         ),
-                        func=lighter_or_darker3
+                        func=lambda h, s, l: (h, s, min(l+header_bg_l, 200) / 2)
                     ),
                 },
                 "foreground": {
@@ -1285,10 +1287,9 @@ class Sheet(ttk.Frame):
     
     def _set_header_state(self,
                           tagdict:dict,
-                          state:Literal[_valid_header_states],
-                          skip_selected:bool=False):
+                          state:Literal[_valid_header_states]):
         assert isinstance(tagdict, dict), tagdict
-        assert state in self._valid_header_states, state
+        assert state is None or state in self._valid_header_states, state
         
         type_ = tagdict["type"]
         assert type_ in ('cornerheader', 'rowheader', 'colheader'), type_
@@ -1297,12 +1298,6 @@ class Sheet(ttk.Frame):
         (r1, r2), (c1, c2) = sorted([r1, r2]), sorted([c1, c2])
         
         if type_ == 'cornerheader':
-            if skip_selected and (
-                (r1 == c1 == 0) and
-                (r2 >= self.shape[0] - 1) and
-                (c2 >= self.shape[1] - 1)):
-                return 'selected'
-            
             canvas = self.cornercanvas
             tag = self._make_tag("type", type_=type_)
             tag_bg = self._make_tag(
@@ -1311,17 +1306,12 @@ class Sheet(ttk.Frame):
         else:
             if type_ == 'rowheader':
                 col_or_row = "row"
-                i, i1, i2 = (tagdict[col_or_row], r1, r2)
                 canvas = self.rowcanvas
             else:
                 col_or_row = "col"
-                i, i1, i2 = (tagdict[col_or_row], c1, c2)
                 canvas = self.colcanvas
             
-            if skip_selected and (i1 <= i <= i2):
-                return 'selected'
-            
-            kw = {"type_": type_, col_or_row: i}
+            kw = {"type_": type_, col_or_row: tagdict[col_or_row]}
             tag = self._make_tag(f"type:{col_or_row}", **kw)
             tag_bg = self._make_tag(
                 f"type:subtype:{col_or_row}", subtype='background', **kw)
@@ -1349,7 +1339,10 @@ class Sheet(ttk.Frame):
                     "type:subtype", type_=type_, subtype='text')
                 canvas.tag_lower(tag_bg, tag_all_text)  # frontmost background
             else:
-                canvas.tag_lower(tag_bg, 'selected')  # lower than the selected
+                try:
+                    canvas.tag_lower(tag_bg, 'selected')  # lower than the selected
+                except tk.TclError:  # selected not in the view => cant't find them
+                    pass
             
             # Update the text color
             canvas.itemconfigure(tag_text, fill=style["foreground"][state])
@@ -1357,13 +1350,17 @@ class Sheet(ttk.Frame):
         return state
     
     def __on_header_enter_leave(self, event, enter_or_leave:str):
-        state = {"enter": 'hover', "leave": 'normal'}[enter_or_leave]
-        
         # Set header state
         canvas = event.widget
         tagdict = self._get_tags('current', canvas=canvas)
         if tagdict["subtype"] != 'separator':
-            self._set_header_state(tagdict, state=state, skip_selected=True)
+            if enter_or_leave == 'enter':  # hover on
+                state = 'hover'
+            elif 'selected' in tagdict["others"]:  # hover off, selected
+                state = 'selected'
+            else:  # hover off, not selected
+                state = 'normal'
+            self._set_header_state(tagdict, state=state)
         
         # Set mouse cursor style
         cursor_styles = self._default_styles["header"]["cursor"]
@@ -1375,8 +1372,6 @@ class Sheet(ttk.Frame):
         canvas.configure(cursor=cursor)
         
         self._hover = tagdict if enter_or_leave == 'enter' else None
-        #TODO if enter_or_leave == 'enter':#???
-            #print(tagdict)
     
     _on_header_enter = lambda self, event: self.__on_header_enter_leave(
         event, 'enter')
@@ -1740,18 +1735,36 @@ class Sheet(ttk.Frame):
         
         self._selection_rcs:Tuple[int, int, int, int] = (r1, c1, r2, c2)
         
-        # Update tags
-        for canvas in (self.cornercanvas, self.rowcanvas, self.colcanvas):
-            canvas.dtag('selected', 'selected')
-        if (sorted([r1, r2]) == [0, max_r]) and (sorted([c1, c2]) == [0, max_c]):
-            tag = self._make_tag("type", type_='cornerheader')
-            self.cornercanvas.addtag_withtag('selected', tag)
-        for type_, canvas in [('rowheader', self.rowcanvas),
-                              ('colheader', self.colcanvas)]:
-            tag = self._make_tag("type", type_=type_)
-            canvas.addtag_withtag('selected', tag)
-        
         return self._selection_rcs
+    
+    def _update_selection_tag(self) -> tuple:
+        # Update the headers' tag
+        r1, c1, r2, c2 = self._selection_rcs
+        r_low, r_high = sorted([r1, r2])
+        c_low, c_high = sorted([c1, c2])
+        max_r, max_c = [ s - 1 for s in self.shape ]
+        cornercanvas = self.cornercanvas
+        rowcanvas, colcanvas = self.rowcanvas, self.colcanvas
+        
+        for canvas in (cornercanvas, rowcanvas, colcanvas):
+            canvas.dtag('selected', 'selected')
+        
+        if (r_low, r_high) == (0, max_r) and (c_low, c_high) == (0, max_c):
+            tag = self._make_tag("type", type_='cornerheader')
+            cornercanvas.addtag_withtag('selected', tag)
+        
+        (r1_vis, r2_vis), (c1_vis, c2_vis) = self._visible_rcs
+        rows_on = set(range(r_low, r_high+1)) & set(range(r1_vis, r2_vis+1))
+        cols_on = set(range(c_low, c_high+1)) & set(range(c1_vis, c2_vis+1))
+        
+        for r in rows_on:
+            tag = self._make_tag("type:row", type_='rowheader', row=r)
+            rowcanvas.addtag_withtag('selected', tag)
+        for c in cols_on:
+            tag = self._make_tag("type:col", type_='colheader', col=c)
+            colcanvas.addtag_withtag('selected', tag)
+        
+        return (rows_on, cols_on)
     
     def select_cells(self,
                      r1:Optional[int]=None,
@@ -1792,27 +1805,30 @@ class Sheet(ttk.Frame):
                 self.yview_scroll(dy, 'pixels')
         
         # Set each header's state
+        rows_on, cols_on = self._update_selection_tag()
         (r1_vis, r2_vis), (c1_vis, c2_vis) = self._visible_rcs
         max_r, max_c = [ s - 1 for s in self.shape ]
-        rows_on = set(range(r_low, r_high+1)) & set(range(r1_vis, r2_vis+1))
-        cols_on = set(range(c_low, c_high+1)) & set(range(c1_vis, c2_vis+1))
+        
+        ## Rowheaders
         for r in range(r1_vis, r2_vis+1):
             tagdict = self._make_tags(type_='rowheader', row=r, withkey=False)
             self._set_header_state(
                 tagdict, state='selected' if r in rows_on else 'normal'
             )
+        
+        ## Colheaders
         for c in range(c1_vis, c2_vis+1):
             tagdict = self._make_tags(type_='colheader', col=c, withkey=False)
             self._set_header_state(
                 tagdict, state='selected' if c in cols_on else 'normal'
             )
-        if ((r_low == 0) and (r_high == max_r) and
-            (c_low == 0) and (c_high == max_c)):
-            corner_state = 'selected'
-        else:
-            corner_state = 'normal'
+        
+        ## Cornerheader
+        state = 'selected' if ((r_low, r_high) == (0, max_r) and
+                               (c_low, c_high) == (0, max_c)) \
+                           else 'normal'
         tagdict = self._make_tags(type_='cornerheader', withkey=False)
-        self._set_header_state(tagdict, state=corner_state)
+        self._set_header_state(tagdict, state=state)
         
         # Update focus indices and focus value
         self._focus_row.set(r_low)
