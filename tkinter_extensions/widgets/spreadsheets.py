@@ -430,7 +430,7 @@ class Sheet(ttk.Frame):
                 canvas.delete(tag)
         
         # Draw new items
-        self.redraw(
+        self.draw(
             update_visible_rcs=False,
             skip_exist=True,   # reduce operating time
             trace=None
@@ -1037,7 +1037,7 @@ class Sheet(ttk.Frame):
         assert event.widget == self.canvas, event.widget
         self._focus_in_cell()
     
-    def redraw_cornerheader(self, skip_exist=False):
+    def draw_cornerheader(self, skip_exist=False):
         type_ = 'cornerheader'
         x1, y1, x2, y2 = (0, 0, self._cell_sizes[1][0], self._cell_sizes[0][0])
         width, height = (x2 - x1 + 1, y2 - y1 + 1)
@@ -1133,7 +1133,7 @@ class Sheet(ttk.Frame):
                 getattr(self, f"_on_{handle}_leftbutton_press")
             )
     
-    def redraw_headers(self,
+    def draw_headers(self,
                        i1:Optional[int]=None,
                        i2:Optional[int]=None,
                        *,
@@ -1520,7 +1520,7 @@ class Sheet(ttk.Frame):
         event.widget.bind('<ButtonRelease-1>', start["b1release"])
         self._resize_start = None
     
-    def redraw_cells(self,
+    def draw_cells(self,
                      r1:Optional[int]=None,
                      c1:Optional[int]=None,
                      r2:Optional[int]=None,
@@ -1702,9 +1702,9 @@ class Sheet(ttk.Frame):
             rcs = (r, c, r, c)
             if (not discard) and (new_value := self._entry.get()) != old_value:
                 # Apply the new value
-                self.set_values(*rcs, values=new_value, redraw=False)
-                self.redraw_cells(*rcs)
-                 # put redraw here to avoid recursive function calls
+                self.set_values(*rcs, values=new_value, draw=False)
+                self.draw_cells(*rcs)
+                 # put draw here to avoid recursive function calls
                 self._history.add(
                     forward=lambda: self.set_values(
                         *rcs, values=new_value, trace='first'),
@@ -1737,8 +1737,8 @@ class Sheet(ttk.Frame):
         
         return self._selection_rcs
     
-    def _update_selection_tag(self) -> tuple:
-        # Update the headers' tag
+    def _update_selection_tags(self) -> tuple:
+        # Update the headers' tags
         r1, c1, r2, c2 = self._selection_rcs
         r_low, r_high = sorted([r1, r2])
         c_low, c_high = sorted([c1, c2])
@@ -1806,7 +1806,7 @@ class Sheet(ttk.Frame):
                 self.yview_scroll(dy, 'pixels')
         
         # Set each header's state
-        rows_on, cols_on = self._update_selection_tag()
+        rows_on, cols_on = self._update_selection_tags()
         (r1_vis, r2_vis), (c1_vis, c2_vis) = self._visible_rcs
         max_r, max_c = [ s - 1 for s in self.shape ]
         
@@ -1907,16 +1907,16 @@ class Sheet(ttk.Frame):
         
         return self.select_cells(*new_rc1, *new_rc2, trace='last')
     
-    def redraw(self,
+    def draw(self,
                update_visible_rcs:bool=True,
                skip_exist:bool=False,
                trace:Optional[str]=None):
         if update_visible_rcs:
             self._update_visible_and_p2s()
-        self.redraw_cornerheader(skip_exist=skip_exist)
-        self.redraw_headers(axis=0, skip_exist=skip_exist)
-        self.redraw_headers(axis=1, skip_exist=skip_exist)
-        self.redraw_cells(skip_exist=skip_exist)
+        self.draw_cornerheader(skip_exist=skip_exist)
+        self.draw_headers(axis=0, skip_exist=skip_exist)
+        self.draw_headers(axis=1, skip_exist=skip_exist)
+        self.draw_cells(skip_exist=skip_exist)
         self._reselect_cells(trace=trace)
     
     def refresh(self, scrollbar:str='both', trace:Optional[str]=None):
@@ -2051,7 +2051,7 @@ class Sheet(ttk.Frame):
                      sizes:Optional[np.ndarray]=None,
                      styles=None,
                      dialog:bool=False,
-                     redraw:bool=True,
+                     draw:bool=True,
                      trace:Optional[str]=None,
                      undo:bool=False):
         assert axis in (0, 1), axis
@@ -2139,7 +2139,7 @@ class Sheet(ttk.Frame):
         self._set_selection(**selection_kw)
         
         # Redraw
-        if redraw:
+        if draw:
             self.refresh(scrollbar=scrollbar, trace=trace)
         
         if undo:
@@ -2152,18 +2152,18 @@ class Sheet(ttk.Frame):
                     sizes=None if sizes is None else copy.copy(sizes),
                     styles=None if styles is None else np.array(
                         [ [ d.copy() for d in dicts] for dicts in styles ]),
-                    redraw=redraw,
+                    draw=draw,
                     trace='first'
                 ),
                 backward=lambda: self.delete_cells(
-                    i, axis=axis, N=N, redraw=redraw, trace='first')
+                    i, axis=axis, N=N, draw=draw, trace='first')
             )
     
     def delete_cells(self,
                      i:int,
                      axis:int,
                      N:int=1,
-                     redraw:bool=True,
+                     draw:bool=True,
                      trace:Optional[str]=None,
                      undo:bool=False):
         assert axis in (0, 1), axis
@@ -2208,13 +2208,13 @@ class Sheet(ttk.Frame):
             self.reset(history=False)
             deleted_sizes = all_sizes
             was_reset = True
-        elif redraw:
+        elif draw:
             self.refresh(trace=trace)
         
         if undo:
             self._history.add(
                 forward=lambda: self.delete_cells(
-                    i, axis=axis, N=N, redraw=redraw, trace='first'),
+                    i, axis=axis, N=N, draw=draw, trace='first'),
                 backward=lambda: self._undo_delete_cells(
                     i,
                     axis=axis,
@@ -2223,7 +2223,7 @@ class Sheet(ttk.Frame):
                     sizes=deleted_sizes,
                     styles=deleted_styles,
                     was_reset=was_reset,
-                    redraw=redraw,
+                    draw=draw,
                     trace='first'
                 )
             )
@@ -2236,7 +2236,7 @@ class Sheet(ttk.Frame):
                            sizes:Union[np.ndarray, List[np.ndarray]],
                            styles:np.ndarray,
                            was_reset:bool,
-                           redraw:bool=True,
+                           draw:bool=True,
                            trace:Optional[str]=None):
         assert isinstance(df, pd.DataFrame), df
         assert isinstance(styles, np.ndarray), styles
@@ -2259,7 +2259,7 @@ class Sheet(ttk.Frame):
             
             self._set_selection()
             
-            if redraw:
+            if draw:
                 self.refresh(trace=trace)
                 self.xview_moveto(0.)
                 self.yview_moveto(0.)
@@ -2271,7 +2271,7 @@ class Sheet(ttk.Frame):
                 df=df,
                 sizes=sizes,
                 styles=styles,
-                redraw=redraw,
+                draw=draw,
                 trace=trace
             )
     
@@ -2281,7 +2281,7 @@ class Sheet(ttk.Frame):
                    r2:Optional[int]=None,
                    c2:Optional[int]=None,
                    values:Union[pd.DataFrame, str]='',
-                   redraw:bool=True,
+                   draw:bool=True,
                    trace:Optional[str]=None,
                    undo:bool=False):
         assert isinstance(values, (pd.DataFrame, str)), type(values)
@@ -2295,16 +2295,16 @@ class Sheet(ttk.Frame):
         old_values = self.values.iloc[idc].copy()
         self.values.iloc[idc] = df.copy()
         
-        if redraw:
-            self.redraw_cells(*rcs)
+        if draw:
+            self.draw_cells(*rcs)
             self._reselect_cells(trace=trace)
         
         if undo:
             self._history.add(
                 forward=lambda: self.set_values(
-                    *rcs, values=df.copy(), redraw=redraw, trace='first'),
+                    *rcs, values=df.copy(), draw=draw, trace='first'),
                 backward=lambda: self.set_values(
-                    *rcs, values=old_values, redraw=redraw, trace='first')
+                    *rcs, values=old_values, draw=draw, trace='first')
             )
     
     def erase_values(self,
@@ -2312,11 +2312,11 @@ class Sheet(ttk.Frame):
                      c1:Optional[int]=None,
                      r2:Optional[int]=None,
                      c2:Optional[int]=None,
-                     redraw:bool=True,
+                     draw:bool=True,
                      trace:Optional[str]=None,
                      undo:bool=False):
         self.set_values(
-            r1, c1, r2, c2, values='', redraw=redraw, undo=undo, trace=trace)
+            r1, c1, r2, c2, values='', draw=draw, undo=undo, trace=trace)
     
     def copy_values(self,
                     r1:Optional[int]=None,
@@ -2339,7 +2339,7 @@ class Sheet(ttk.Frame):
                    *,
                    property_:str,
                    values=None,
-                   redraw:bool=True,
+                   draw:bool=True,
                    trace:Optional[str]=None,
                    undo:bool=False):
         r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
@@ -2351,27 +2351,31 @@ class Sheet(ttk.Frame):
             values = np.full(styles.shape, values, dtype=object)
         assert values.shape == styles.shape, (values.shape, styles.shape)
         
+        # Get the old values
         old_values = np.array(
             [ [ d.get(property_) for d in dicts ] for dicts in styles ])
         if property_ == 'font':
+            # Save old fonts' names for future undoing
             for r, row in enumerate(old_values):
                 for c, font in enumerate(row):
                     if isinstance(font, tk.font.Font):
                         old_values[r, c] = font.name
             
+            # Get new Fonts with the new font styles
             for r, row in enumerate(values):
                 for c, font in enumerate(row):
                     if isinstance(font, str):
                         values[r, c] = tk.font.nametofont(font)
         
+        # Update the style collection with the new values
         for style, value in zip(styles.flat, values.flat):
             if value is None:
                 style.pop(property_, None)
             else:
                 style[property_] = value
         
-        if redraw:
-            self.redraw_cells(r1, c1, r2, c2)
+        if draw:
+            self.draw_cells(r1, c1, r2, c2)
             self._reselect_cells(trace=trace)
         
         if undo:
@@ -2380,14 +2384,14 @@ class Sheet(ttk.Frame):
                     *rcs,
                     property_=property_,
                     values=values,
-                    redraw=redraw,
+                    draw=draw,
                     trace='first'
                 ),
                 backward=lambda: self.set_styles(
                     *rcs,
                     property_=property_,
                     values=old_values,
-                    redraw=redraw,
+                    draw=draw,
                     trace='first'
                 )
             )
@@ -2399,7 +2403,7 @@ class Sheet(ttk.Frame):
                   c2:Optional[int]=None,
                   fonts=None,
                   dialog:bool=False,
-                  redraw:bool=True,
+                  draw:bool=True,
                   trace:Optional[str]=None,
                   undo:bool=False):
         if dialog:
@@ -2415,7 +2419,7 @@ class Sheet(ttk.Frame):
             r1, c1, r2, c2,
             property_='font',
             values=fonts,
-            redraw=redraw,
+            draw=draw,
             undo=undo,
             trace=trace
         )
@@ -2430,7 +2434,7 @@ class Sheet(ttk.Frame):
                     field:str='foreground',
                     colors=None,
                     dialog:bool=False,
-                    redraw:bool=True,
+                    draw:bool=True,
                     trace:Optional[str]=None,
                     undo:bool=False):
         assert field in ('foreground', 'background'), field
@@ -2449,7 +2453,7 @@ class Sheet(ttk.Frame):
             r1, c1, r2, c2,
             property_=field,
             values=colors,
-            redraw=redraw,
+            draw=draw,
             undo=undo,
             trace=trace
         )
@@ -2529,16 +2533,16 @@ class Sheet(ttk.Frame):
             # a larger shape
             if (n_rows_add := n_rows - n_rows_exist):
                 self.insert_cells(
-                    r_add, axis=0, N=n_rows_add, redraw=False, undo=undo)
+                    r_add, axis=0, N=n_rows_add, draw=False, undo=undo)
             if (n_cols_add := n_cols - n_cols_exist):
                 self.insert_cells(
-                    c_add, axis=1, N=n_cols_add, redraw=False, undo=undo)
+                    c_add, axis=1, N=n_cols_add, draw=False, undo=undo)
             
             # Set the values
             self.set_values(
                 r_start, c_start, r_end, c_end,
                 values=df,
-                redraw=False,
+                draw=False,
                 undo=undo
             )
             
@@ -3180,7 +3184,7 @@ if __name__ == '__main__':
     
     def _set_value_method2():
         ss.values.iat[5, 3] = 'R5, C3 (method 2)'
-        ss.redraw_cells(5, 3, 5, 3)
+        ss.draw_cells(5, 3, 5, 3)
     
     ss.after(1000, _set_value_method1)
     ss.after(2000, _set_value_method2)
