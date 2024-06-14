@@ -5,6 +5,8 @@ Created on Mon May 22 22:35:24 2023
 
 @author: tungchentsai
 """
+
+import tkinter as tk
 from typing import Optional
 
 import ttkbootstrap as ttk
@@ -21,6 +23,73 @@ from .spreadsheets import Sheet, Book
 # =============================================================================
 # ---- Classes
 # =============================================================================
+class ErrorCatchingWindow(ttk.Window):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._fix_combobox_scrollbar_issue()
+        self._error_message = tk.StringVar(self, name='err_msg')
+    
+    def report_callback_exception(self, exc, val, tb):
+        from traceback import format_exc
+        
+        super().report_callback_exception(exc, val, tb)
+        self._error_message.set(format_exc())
+    
+    def _fix_combobox_scrollbar_issue(self):
+        builder = self.style._get_builder()
+        builder.create_scrollbar_style()
+
+
+class OptionMenu(ttk.OptionMenu):
+    def __init__(self,
+                 master,
+                 variable,
+                 values=(),
+                 default=None,
+                 command=None,
+                 direction='below',
+                 takefocus=0,
+                 style=None,
+                 **kwargs):
+        super().__init__(master,
+                         variable,
+                         default,
+                         *values,
+                         style=style,
+                         direction=direction,
+                         command=command)
+        self.configure(takefocus=takefocus, **kwargs)
+    
+    def set_command(self, command=None):
+        assert command is None or callable(command), command
+        
+        self._callback = command
+        menu = self["menu"]
+        max_idx = menu.index('end')
+        if max_idx is not None:
+            for i in range(max_idx + 1):
+                menu.entryconfigure(i, command=command)
+
+
+class Combobox(ttk.Combobox):
+    def configure_listbox(self, **kw):
+        popdown = self.tk.eval(f'ttk::combobox::PopdownWindow {self}')
+        listbox = f'{popdown}.f.l'
+        return self.tk.call(listbox, 'configure', *self._options(kw))
+    
+    def itemconfigure(self, index, **kw):
+        popdown = self.tk.eval(f'ttk::combobox::PopdownWindow {self}')
+        listbox = f'{popdown}.f.l'
+        values = self["values"]
+        try:
+            self.tk.call(listbox, 'itemconfigure', len(values) - 1)
+        except tk.TclError:
+            for i, value in enumerate(values):
+                self.tk.call(listbox, 'insert', i, value)
+        
+        return self.tk.call(listbox, 'itemconfigure', index, *self._options(kw))
+
+
 class ColorButton(ttk.Button):
     @property
     def background(self) -> str:
@@ -87,7 +156,7 @@ __all__ = [
     'OrderlyContainer', 'TriggerOrderlyContainer', 'CollapsedFrame',
     'ScrolledWidget', 'ScrolledFrame', 'ScrolledLabelframe', 'ScrolledText',
     'ScrolledTreeview', 'UndockedFrame', 'BasePlotter', 'Sheet', 'Book',
-    'ColorButton'
+    'ErrorCatchingWindow', 'OptionMenu', 'Combobox', 'ColorButton'
 ]
 
 
