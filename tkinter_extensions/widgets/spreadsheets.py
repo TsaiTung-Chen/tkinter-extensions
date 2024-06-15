@@ -11,6 +11,7 @@ import copy
 import random
 import tkinter as tk
 import tkinter.font
+from weakref import WeakMethod
 from contextlib import contextmanager
 from typing import Union, Optional, List, Tuple, Dict, Callable, Literal
 
@@ -26,6 +27,7 @@ from ..utils import get_modifiers, center_window, modify_hsl
 from .. import dialogs
 from .dnd import TriggerOrderlyContainer
 from .scrolled import AutoHiddenScrollbar, ScrolledFrame
+from ._others import OptionMenu
 # =============================================================================
 # ---- Classes
 # =============================================================================
@@ -60,7 +62,7 @@ class History:
         assert callable(forward) and callable(backward), (forward, backward)
         
         if self._sequence is None:
-            self._stack.update(
+            self._stack.update(#TODO: max number of stack
                 forward=self._stack["forward"][:self.step] + [forward],
                 backward=self._stack["backward"][:self.step] + [backward]
             )
@@ -142,7 +144,8 @@ class History:
 class Sheet(ttk.Frame):
     _valid_header_states = ('normal', 'hover', 'selected')
     _valid_cell_states = ('normal', 'readonly')
-
+    _valid_scales = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0)
+    
     @property
     def canvas(self) -> tk.Canvas:  # cell canvas
         return self._canvas
@@ -184,7 +187,7 @@ class Sheet(ttk.Frame):
                  min_height:int=10,
                  get_style:Optional[Callable]=None,
                  autohide_scrollbar:bool=True,
-                 mousewheel_sensitivity=2.,
+                 mousewheel_sensitivity:float=2.,
                  bootstyle_scrollbar='round',
                  _reset:bool=False,
                  **kw):
@@ -198,7 +201,14 @@ class Sheet(ttk.Frame):
         
         assert len(shape) == 2 and all( s > 0 for s in shape ), shape
         assert cell_width >= 1 and cell_height >= 1, (cell_width, cell_height)
+        assert min_width >= 1 and min_height >= 1, (min_width, min_height)
         assert get_style is None or callable(get_style), get_style
+        assert mousewheel_sensitivity >= 0, mousewheel_sensitivity
+        
+        shape = tuple( int(s) for s in shape )
+        cell_width, cell_height = int(cell_width), int(cell_height)
+        min_width, min_height = int(min_width), int(min_height)
+        mousewheel_sensitivity = float(mousewheel_sensitivity)
         
         # Stacking order: CornerCanvas > ColCanvas > RowCanvas > CoverFrame
         # > Entry > CellCanvas
@@ -239,32 +249,46 @@ class Sheet(ttk.Frame):
         # become the focus if it is clicked
         for _canvas in [canvas, rowcanvas, colcanvas]:
             oid = _canvas.create_rectangle(
-                1, 1, 1, 1, width=0, tags='invisible-bg')
+                0, 0, 0, 0, width=0, tags='invisible-bg')
             _canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
             _canvas.tag_bind('invisible-bg', '<Button-1>', self._focus)
         
         # Create the selection frame
-        oid = canvas.create_rectangle(1, 1, 1, 1, fill='', tags='selection-frame')
+        oid = canvas.create_rectangle(0, 0, 0, 0, fill='', tags='selection-frame')
         canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         
         # Init the backend states
-        self._get_style = get_style
-        self._default_styles = self._update_default_styles()
-        self._default_cell_shape = shape
-        self._default_cell_sizes = (cell_height, cell_width) = (
-            int(cell_height), int(cell_width)
-        )
-        self._min_sizes = [int(min_height), int(min_width)]
+        wref_scale = WeakMethod(self._zoom)
+        apply_scale = lambda *_: wref_scale()(self._scale.get())
+        
+        self._history = History()
+        self._resize_start: Optional[dict] = None
+        self._hover: Optional[Dict[str, str]] = None
+        self._mouse_selection_id: Optional[str] = None
+        self._focus_old_value: Optional[str] = None
+        self._focus_row = tk.IntVar(self)
+        self._focus_col = tk.IntVar(self)
+        self._focus_value = tk.StringVar(self)
+        self._prev_scale: float = 1.0
+        self._scale = tk.DoubleVar(self, value=1.0)
+        self._scale.trace_add('write', apply_scale)
         
         self._values = pd.DataFrame(np.full(shape, '', dtype=object))
         self._cell_sizes = [
-            np.full(shape[0] + 1, cell_height),
-            np.full(shape[1] + 1, cell_width)
+            np.full(shape[0] + 1, cell_height, dtype=float),
+            np.full(shape[1] + 1, cell_width, dtype=float)
         ]
         self._cell_styles = np.array(
             [ [ dict() for c in range(shape[1]) ] for r in range(shape[0]) ],
             dtype=object
-        )
+        )  # an array of dictionaries
+        
+        self._get_style = get_style
+        self._default_styles = self._update_default_styles()
+        self._default_cell_shape = shape
+        self._default_cell_sizes = (cell_height, cell_width) = (
+            cell_height, cell_width)
+        self._min_sizes = (min_height, min_width)
         
         self.update_idletasks()
         self._canvas_size = (canvas.winfo_width(), canvas.winfo_height())
@@ -275,17 +299,8 @@ class Sheet(ttk.Frame):
         self._visible_rcs: List[Tuple[int, int]] = visible_rcs
         self._gy2s_gx2s: Tuple[np.ndarray, np.ndarray] = gyx2s
         
-        self._history = History()
-        self._resize_start: Optional[dict] = None
-        self._hover: Optional[Dict[str, str]] = None
-        self._mouse_selection_id: Optional[str] = None
-        self._focus_old_value: Optional[str] = None
-        self._focus_row = tk.IntVar(self)
-        self._focus_col = tk.IntVar(self)
-        self._focus_value = tk.StringVar(self)
-        
         # Create a right-click menu and a entry widget
-        self._rightclick_menu = tk.Menu(self, tearoff=0)
+        self._rightclick_menu = tk.Menu(self, tearoff=0)  #TODO: create when needed
         self._entry = entry = tk.Entry(
             self, textvariable=self._focus_value, takefocus=0)
         entry.place(x=0, y=0)
@@ -441,8 +456,20 @@ class Sheet(ttk.Frame):
         (self.hbar, self.vbar)[axis].set(first, last)
     
     def _update_default_styles(self) -> dict:
+        def _scale_fonts(_default_styles:dict):
+            scale = self._scale.get()
+            for font in self._collect_fonts(_default_styles):
+                font._unscaled_size = font.actual('size')
+                font.configure(size=int(font._unscaled_size * scale))
+        #
+        
         if self._get_style:
-            self._default_styles = dict(self._get_style())
+            self._default_styles = default_styles = dict(self._get_style())
+            assert isinstance(default_styles["header"]["font"], tk.font.Font)
+            assert isinstance(default_styles["cell"]["font"], tk.font.Font)
+            
+            _scale_fonts(default_styles)
+            
             return self._default_styles
         
         style = ttk.Style.get_instance()
@@ -514,7 +541,7 @@ class Sheet(ttk.Frame):
                     "color": style.lookup(header_style, "bordercolor"),
                     "width": 2
                 },
-                "font": 'TkDefaultFont',
+                "font": tk.font.nametofont('TkDefaultFont').copy(),
                 "cursor": {
                     "default": 'arrow',
                     "hhandle": 'sb_v_double_arrow',
@@ -534,7 +561,7 @@ class Sheet(ttk.Frame):
                     "normal": style.lookup(cell_style, "bordercolor"),
                     "focus": style.lookup(selection_style, "background")
                 },
-                "font": 'TkDefaultFont',
+                "font": tk.font.nametofont('TkDefaultFont').copy(),
                 "alignx": 'w',   # w, e, or center
                 "aligny": 'n',   # n, s, or center
                 "padding": (3, 2)  # (padx, pady)
@@ -544,6 +571,8 @@ class Sheet(ttk.Frame):
                 "width": 2
             }
         }
+        
+        _scale_fonts(self._default_styles)
         
         # Release the resources
         header.destroy()
@@ -577,6 +606,16 @@ class Sheet(ttk.Frame):
         self._visible_rcs = [tuple(r12), tuple(c12)]  # [(r1, r2), (c1, c2)]
         
         return self._gy2s_gx2s, self._visible_xys, self._visible_rcs
+    
+    def _collect_fonts(self, dictionary:dict) -> list:
+        fonts = []
+        for value in dictionary.values():
+            if isinstance(value, tk.font.Font):
+                fonts.append(value)
+            elif isinstance(value, dict):
+                fonts.extend(self._collect_fonts(value))
+        
+        return fonts
     
     def _canvasx(self, xs:Union[np.ndarray, list]):
         header_width = self._cell_sizes[1][0]
@@ -916,6 +955,11 @@ class Sheet(ttk.Frame):
             self.redo()
             return 'break'
         
+        elif keysym in ('minus', 'equal') and COMMAND in modifiers:
+            direction = 'down' if keysym == 'minus' else 'up'
+            self._zoom_with_next_scale_level(direction)
+            return 'break'
+        
         elif keysym in ('Return', 'Tab'):
             if keysym == 'Return':
                 direction = 'up' if SHIFT in modifiers else 'down'
@@ -932,17 +976,17 @@ class Sheet(ttk.Frame):
         keysym, char = event.keysym, event.char
         modifiers = get_modifiers(event.state)
         
-        if self._on_entry_key_press(event):
+        if self._on_entry_key_press(event):  # same as entry events
             return 'break'
         
-        elif keysym in ('Up', 'Down', 'Left', 'Right'):
+        elif keysym in ('Up', 'Down', 'Left', 'Right'):  # move selection
             direction = keysym.lower()
             area = 'paragraph' if COMMAND in modifiers else None
             expand = SHIFT in modifiers
             self._move_selections(direction, area=area, expand=expand)
             return 'break'
         
-        elif keysym in ('Home', 'End', 'Prior', 'Next'):
+        elif keysym in ('Home', 'End', 'Prior', 'Next'):  # move selection
             direction = {
                 "Home": 'left',
                 "End": 'right',
@@ -958,9 +1002,9 @@ class Sheet(ttk.Frame):
             return 'break'
         
         elif (MODIFIERS.isdisjoint(modifiers) and keysym == 'BackSpace') or (
-                not modifiers.difference({SHIFT, LOCK}) and char):
+                not modifiers - {SHIFT, LOCK} and char):
             # Normal typing
-            self._focus_in_cell()
+            self._focus_in_cell()  #FIXME: Chinese keyboard input
             self._entry.delete(0, 'end')
             self._entry.insert('end', char)
             return 'break'
@@ -1040,15 +1084,15 @@ class Sheet(ttk.Frame):
     def draw_cornerheader(self, skip_exist=False):
         type_ = 'cornerheader'
         x1, y1, x2, y2 = (0, 0, self._cell_sizes[1][0], self._cell_sizes[0][0])
-        width, height = (x2 - x1 + 1, y2 - y1 + 1)
+        width, height = (x2 - x1, y2 - y1)
         
         style = self._default_styles["header"]
         background, bordercolor = style["background"], style["bordercolor"]
         handle = style["handle"]
         separator = style["separator"]
-        dw_sep = np.ceil(separator["width"] / 2) - 1
+        dw_sep = separator["width"] // 2
         canvas = self.cornercanvas
-        canvas.configure(width=x2 - x1 + 1, height=y2 - y1 + 1)
+        canvas.configure(width=x2 - x1, height=y2 - y1)
         self.rowcanvas.configure(width=width)
         self.colcanvas.configure(height=height)
         
@@ -1092,21 +1136,23 @@ class Sheet(ttk.Frame):
         canvas.addtag_withtag(self._make_tag("oid", oid=oid_vh), oid_vh)
         
         ## Separators (always redrawn)
+        ### Horizontal
         kw.pop("col")
         tags = self._make_tags(subtype='separator', **kw)
         oid = canvas.create_line(
-            x1 + 1, y2 - dw_sep, x2 + 1, y2 - dw_sep,
+            x1, y2-dw_sep, x2, y2-dw_sep,
             width=separator["width"],
             fill=separator["color"],
             tags=tags
         )
         canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         
+        ### Vertical
         kw.pop("row")
         kw["col"] = -1
         tags = self._make_tags(subtype='separator', **kw)
         oid = canvas.create_line(
-            x2 - dw_sep, y1 + 1, x2 - dw_sep, y2 + 1,
+            x2-dw_sep, y1, x2-dw_sep, y2,
             width=separator["width"],
             fill=separator["color"],
             tags=tags
@@ -1160,7 +1206,7 @@ class Sheet(ttk.Frame):
         bordercolor, font = style["bordercolor"], style["font"]
         w_hand = style["handle"]["width"]
         separator = style["separator"]
-        dw_sep = np.ceil(separator["width"] / 2) - 1
+        dw_sep = separator["width"] // 2
         
         (gx1_vis, gx2_vis), (gy1_vis, gy2_vis) = self._visible_xys
         heights, widths = self._cell_sizes
@@ -1177,12 +1223,12 @@ class Sheet(ttk.Frame):
                      "col": -1,
                      "others": ('yscroll', 'temp')
                  },
-                 (x1, y1, x2, y2),
-                 (x1, y2, x2, y2)
+                 (x1, y1, x2, y2),  # rectangle
+                 (x1, y2, x2, y2)  # horizontal
                 )
                 for r, (y1, y2) in enumerate(zip(y1s[i1:i2+1], y2s[i1:i2+1]), i1)
             )
-            xys_sep = (x2 - dw_sep, 0, x2 - dw_sep, y2s[i2])
+            xys_sep = (x2-dw_sep, y1s[i1], x2-dw_sep, y2s[i2])  # vertical
             canvas = self.rowcanvas
         else:
             type_, prefix, handle = ('colheader', 'C', 'vhandle')
@@ -1197,12 +1243,12 @@ class Sheet(ttk.Frame):
                      "col": c,
                      "others": ('xscroll', 'temp')
                  },
-                 (x1, y1, x2, y2),
-                 (x2, y1, x2, y2)
+                 (x1, y1, x2, y2),  # rectangle
+                 (x2, y1, x2, y2)  # vertical
                 )
                 for c, (x1, x2) in enumerate(zip(x1s[i1:i2+1], x2s[i1:i2+1]), i1)
             )
-            xys_sep = (0, y2 - dw_sep, x2s[i2], y2 - dw_sep)
+            xys_sep = (x1s[i1], y2-dw_sep, x2s[i2], y2-dw_sep)  # horizontal
             canvas = self.colcanvas
         
         # Draw components for each header
@@ -1233,7 +1279,7 @@ class Sheet(ttk.Frame):
             text = self._fit_size(
                 f'{prefix}{i}', font, width=x2 - x1, height=y2 - y1)
             oid = canvas.create_text(
-                (x1 + x2)/2., (y1 + y2)/2.,
+                (x1 + x2) // 2, (y1 + y2) // 2,
                 text=text,
                 font=font,
                 fill=foreground["normal"],
@@ -1598,23 +1644,21 @@ class Sheet(ttk.Frame):
                     continue
                 tags = self._make_tags(type_=type_, subtype='text', **kw)
                 padx, pady = cell_style["padding"]
-                anchor, xy = (list(), list())
-                for a, d, p1, p2 in zip(
-                        [cell_style["alignx"], cell_style["aligny"]],
-                        ['we', 'ns'],
-                        [x1, y1],
-                        [x2, y2]):
+                pad = {"n": pady, "w": padx, "s": -pady, "e": -padx}
+                anchor = [cell_style["alignx"], cell_style["aligny"]]
+                xy = []
+                for i, (a, p1, p2) in enumerate(zip(anchor, [x1, y1], [x2, y2])):
                     if a in ('n', 'w'):
-                        anchor.append(d[0])
-                        xy.append(p1 + (pady if 'n' in a else padx) + 1)
+                        xy.append(p1 + pad[a] + 1)
                     elif a in ('s', 'e'):
-                        anchor.append(d[1])
-                        xy.append(p2 - (pady if 's' in a else padx))
+                        xy.append(p2 + pad[a])
                     else:
-                        xy.append((p1 + p2) / 2.)
+                        anchor[i] = ''
+                        xy.append((p1 + p2) // 2)
                 justify = 'left' if 'w' in anchor else (
                     'right' if 'e' in anchor else 'center')
-                anchor = ''.join(anchor[::-1]) if anchor else 'center'
+                anchor = 'center' if anchor[0] == anchor[1] \
+                                  else ''.join(anchor)[::-1]
                 text_fit = self._fit_size(
                     text,
                     cell_style["font"],
@@ -1956,10 +2000,64 @@ class Sheet(ttk.Frame):
     def reset(self, history:bool=True):
         for child in self.winfo_children():
             child.destroy()
-        _history:History = self._history
+        _history: History = self._history
         self.__init__(_reset=True, **self._init_configs)
-        if not history:
+        if not history:  # don't reset (clean up) the history records
             self._history = _history
+    
+    def zoom(self, scale:float=1.):
+        self._scale.set(scale)
+    
+    def _zoom(self, scale:float=1.):
+        """
+        Zoom in when `scale` > 1.0 or zoom out when `scale` < 1.0.
+        """
+        
+        assert scale in self._valid_scales, [self._valid_scales, scale]
+        
+        # Update scale state
+        scale = float(scale)
+        ratio = scale / self._prev_scale
+        self._prev_scale = scale
+        
+        # Update cell sizes
+        self._cell_sizes = [ (sizes * ratio) for sizes in self._cell_sizes ]
+        self._update_content_size()
+        
+        # Update text sizes
+        ## Default fonts
+        for font in self._collect_fonts(self._default_styles):
+            font.configure(size=int(font._unscaled_size * scale))
+        
+        ## Cell fonts
+        for row_styles in self._cell_styles:
+            for style in row_styles:
+                if font := style.get("font"):
+                    font.configure(size=int(font._unscaled_size * scale))
+        
+        # Refresh canvases
+        self.refresh()
+    
+    def _zoom_with_next_scale_level(self, direction:str='up'):
+        """
+        If `direction` is 'up', zoom in with next scaling factor. If `direction`
+        is 'down', zoom out with next scaling factor.
+        """
+        assert direction in ('up', 'down'), direction
+        
+        current_idx = self._valid_scales.index(self._scale.get())
+        max_idx = len(self._valid_scales) - 1
+        
+        if direction == 'up':
+            if current_idx == max_idx:
+                return print('Already reached the highest scaling factor!')
+            next_idx = current_idx + 1
+        else:
+            if current_idx == 0:
+                return print('Already reached the lowest scaling factor!')
+            next_idx = current_idx - 1
+        
+        self.zoom(self._valid_scales[next_idx])
     
     def resize_cells(self,
                      i:int,
@@ -1974,36 +2072,36 @@ class Sheet(ttk.Frame):
         assert -1 <= i <= max_i + 1, (i, max_i)
         assert N >= 1, N
         
-        # Update the status of the resized rows or cols
-        (r1_vis, r2_vis), (c1_vis, c2_vis) = self._visible_rcs
         _idc = np.arange(i+1, i+N+1)
-        key = ("row", "col")[axis]
-        min_size = self._min_sizes[axis]
         old_sizes = self._cell_sizes[axis][_idc]
         
-        if dialog:
+        # Check for the new sizes
+        if dialog:  # ask for new size
             dimension = ('height', 'width')[axis]
-            dialog = dialogs.PositionedQueryDialog(
+            size = dialogs.PositionedQuerybox.get_integer(
                 parent=self,
                 prompt=f'Enter the new {dimension}:',
-                initialvalue=old_sizes[0],
-                datatype=int
+                initialvalue=int(old_sizes[0]),
+                position=self._center_window
             )
-            dialog.show(position=self._center_window)
-            if not isinstance(size := dialog.result, int):
+            if not isinstance(size, int):  # cancelled
                 return
             new_sizes = sizes = np.full(N, size)
         elif sizes is None:  # reset the rows or cols sizes
             new_sizes = np.full(N, self._default_cell_sizes[axis])
-        else:
+        else:  # new size
             assert np.shape(sizes) == (N,), (sizes, N)
             new_sizes = np.asarray(sizes)
         
+        # Update the status of the resized rows or cols
+        key = ("row", "col")[axis]
+        min_size = self._min_sizes[axis]
         deltas = np.maximum(new_sizes - old_sizes, min_size - old_sizes)
         self._cell_sizes[axis][_idc] += deltas
         self._update_content_size()
         
         # Move the bottom rows or right cols
+        (r1_vis, r2_vis), (c1_vis, c2_vis) = self._visible_rcs
         if axis == 0:
             header_canvas = self.rowcanvas
             i2 = r2_vis
@@ -2063,18 +2161,16 @@ class Sheet(ttk.Frame):
         if dialog:
             # Ask for number of rows/cols to insert
             axis_name = ('rows', 'columns')[axis]
-            dialog = dialogs.PositionedQueryDialog(
+            N = dialogs.PositionedQuerybox.get_integer(
                 parent=self,
                 title='Rename Sheet',
-                prompt=f"Enter the number of {axis_name} to insert:",
-                datatype=int,
+                prompt=f'Enter the number of {axis_name} to insert:',
                 initialvalue=1,
                 minvalue=1,
-                maxvalue=100000
+                maxvalue=100000,
+                position=self._center_window
             )
-            dialog.show(position=self._center_window)
-            
-            if not isinstance(N := dialog.result, int):
+            if not isinstance(N, int):
                 return
         else:
             N = int(N)
@@ -2345,27 +2441,22 @@ class Sheet(ttk.Frame):
         r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
-        styles = self._cell_styles[idc]
+        styles = self._cell_styles[idc]  # an sub array of dictionaries
         
-        if not isinstance(values, np.ndarray):
+        if not isinstance(values, np.ndarray):  # broadcast
             values = np.full(styles.shape, values, dtype=object)
         assert values.shape == styles.shape, (values.shape, styles.shape)
         
-        # Get the old values
-        old_values = np.array(
-            [ [ d.get(property_) for d in dicts ] for dicts in styles ])
+        # Scale fonts
         if property_ == 'font':
-            # Save old fonts' names for future undoing
-            for r, row in enumerate(old_values):
-                for c, font in enumerate(row):
-                    if isinstance(font, tk.font.Font):
-                        old_values[r, c] = font.name
-            
-            # Get new Fonts with the new font styles
-            for r, row in enumerate(values):
-                for c, font in enumerate(row):
-                    if isinstance(font, str):
-                        values[r, c] = tk.font.nametofont(font)
+            scale = self._scale.get()
+            for font in values.flat:
+                if font is not None:
+                    font.configure(size=int(font._unscaled_size * scale))
+        
+        # Get the old values
+        old_values = np.array([ [ d.get(property_) for d in dicts ]
+                              for dicts in styles ])
         
         # Update the style collection with the new values
         for style, value in zip(styles.flat, values.flat):
@@ -2407,13 +2498,21 @@ class Sheet(ttk.Frame):
                   trace:Optional[str]=None,
                   undo:bool=False):
         if dialog:
+            default_font = self._default_styles["cell"]["font"]
             style_topleft = self._cell_styles[min(r1, r2), min(c1, c2)]
-            font_topleft = style_topleft.get("font")
-            dialog = dialogs.PositionedFontDialog(
-                parent=self, default=font_topleft)
-            dialog.show(position=self._center_window)
-            if (fonts := dialog.result) is None:
+            font_topleft = style_topleft.get("font", default_font)
+            scale = self._scale.get()
+            font = dialogs.PositionedQuerybox.get_font(
+                parent=self,
+                default=font_topleft,
+                scale=scale,
+                position=self._center_window
+            )
+            if font is None:
                 return
+            font._unscaled_size = font.actual('size') / scale
+            fonts = font_topleft if font_topleft.actual() == font.actual() \
+                    else font
         
         self.set_styles(
             r1, c1, r2, c2,
@@ -2440,14 +2539,17 @@ class Sheet(ttk.Frame):
         assert field in ('foreground', 'background'), field
         
         if dialog:
+            default_color = self._default_styles["cell"][field]["normal"]
             style_topleft = self._cell_styles[min(r1, r2), min(c1, c2)]
-            color_topleft = style_topleft.get(field)
-            dialog = dialogs.PositionedColorChooserDialog(
-                parent=self, initialcolor=color_topleft)
-            dialog.show(position=self._center_window)
-            if (colors := dialog.result) is None:
+            color_topleft = style_topleft.get(field, default_color)
+            color = dialogs.PositionedQuerybox.get_color(
+                parent=self,
+                initialcolor=color_topleft,
+                position=self._center_window
+            )
+            if color is None:
                 return
-            colors = colors.hex
+            colors = color.hex
         
         self.set_styles(
             r1, c1, r2, c2,
@@ -2585,10 +2687,16 @@ class Sheet(ttk.Frame):
 class Book(ttk.Frame):
     @property
     def sheets(self) -> Dict[str, Sheet]:
+        """
+        Return a dictionary containing all `Sheet`s and their names.
+        """
         return { ps["name"]: ps["sheet"] for ps in self._sheets_props.values() }
     
     @property
     def sheet(self) -> Optional[Sheet]:
+        """
+        Return current `Sheet` or `None`.
+        """
         return self._sheet
     
     def __init__(self, master, bootstyle_scrollbar='round', **kwargs):
@@ -2598,6 +2706,8 @@ class Book(ttk.Frame):
         # Build toolbar
         self._toolbar = tb = ttk.Frame(self)
         self._toolbar.pack(fill='x', padx=9, pady=3)
+        
+        ## Sidebar button
         self._sidebar_hidden: bool = True
         self._sidebar_toggle = ttk.Button(
             tb,
@@ -2607,10 +2717,14 @@ class Book(ttk.Frame):
             takefocus=0
         )
         self._sidebar_toggle.pack(side='left')
+        
+        ## Separator
         sep_fm = ttk.Frame(tb, width=3)
         sep_fm.pack(side='left', fill='y', padx=[20, 9], ipady=9)
         sep = ttk.Separator(sep_fm, orient='vertical', takefocus=0)
         sep.place(x=0, y=0, relheight=1.)
+        
+        ## Undo button
         self._undo_btn = ttk.Button(
             tb,
             style=self._button_style,
@@ -2619,6 +2733,8 @@ class Book(ttk.Frame):
             takefocus=0
         )
         self._undo_btn.pack(side='left')
+        
+        ## Redo button
         self._redo_btn = ttk.Button(
             tb,
             style=self._button_style,
@@ -2628,39 +2744,62 @@ class Book(ttk.Frame):
         )
         self._redo_btn.pack(side='left', padx=[5, 0])
         
+        ## Zooming optionmenu
+        self._zoom_om = OptionMenu(tb, bootstyle='outline')
+        self._zoom_om.pack(side='right')
+        
         # Build inputbar
         self._inputbar = ib = ttk.Frame(self)
         self._inputbar.pack(fill='x', padx=9, pady=[9, 6])
         self._inputbar.grid_columnconfigure(0, minsize=130)
         self._inputbar.grid_columnconfigure(1, weight=1)
+        
+        ## Row and col labels
         self._label_fm = label_fm = ttk.Frame(ib)
         self._label_fm.grid(row=0, column=0, sticky='sw')
+        
         font = ('TkDefaultfont', 10)
-        R_label = ttk.Label(label_fm, text='R', font=font)
+        R_label = ttk.Label(label_fm, text='R', font=font)  # prefix R
         R_label.pack(side='left')
+        
         self._r_label = r_label = ttk.Label(label_fm, font=font)
         self._r_label.pack(side='left')
-        s_label = ttk.Label(label_fm, text=',  ', font=font)
+        
+        s_label = ttk.Label(label_fm, text=',  ', font=font)  # seperator
         s_label.pack(side='left')
-        C_label = ttk.Label(label_fm, text='C', font=font)
+        
+        C_label = ttk.Label(label_fm, text='C', font=font)  # prefix C
         C_label.pack(side='left')
+        
         self._c_label = c_label = ttk.Label(label_fm, font=font)
         self._c_label.pack(side='left')
+        
+        ## Entry
         self._entry = en = ttk.Entry(ib, style=self._entry_style)
         self._entry.grid(row=0, column=1, sticky='nesw', padx=[12, 0])
         en.bind('<FocusIn>', lambda e: self.sheet._refresh_entry())
         en.bind('<KeyPress>', lambda e: self.sheet._on_entry_key_press(e))
         
+        # Separator
         ttk.Separator(self, takefocus=0).pack(fill='x')
         
         # Build sidebar and sheet frame
+        def _init_sidebar(event=None):
+            assert self._sidebar_hidden, self._sidebar_hidden
+            pw.unbind('<Map>')
+            self._toggle_sidebar()
+        
         self._panedwindow = pw = ttk.Panedwindow(self, orient='horizontal')
         self._panedwindow.pack(fill='both', expand=1)
+        pw.bind('<Map>', _init_sidebar)
         
-        ## Sidebar
+        # Sidebar
         self._sidebar_width: int = 150
         self._sidebar_fm = sbfm = ScrolledFrame(
             pw, scroll_orient='vertical', hbootstyle=bootstyle_scrollbar)
+        self._panedwindow.add(sbfm.container)
+        
+        ## Button to add new sheet
         self._sidebar_add = ttk.Button(
             sbfm,
             style=self._bold_button_style,
@@ -2669,24 +2808,22 @@ class Book(ttk.Frame):
             takefocus=0
         )
         self._sidebar_add.pack(anchor='e')
+        
+        ## Sheet labels
         self._sidebar = sb = TriggerOrderlyContainer(sbfm, cursor='arrow')
         self._sidebar.pack(fill='both', expand=1)
         self._sidebar.set_dnd_end_callback(self._on_dnd_end)
-        self._panedwindow.add(sbfm.container)
-        self._rightclick_menu = tk.Menu(sb, tearoff=0)
-        #
-        def _show_sidebar(event=None):
-            assert self._sidebar_hidden, self._sidebar_hidden
-            pw.unbind('<Map>')
-            self._toggle_sidebar()
-        #
-        pw.bind('<Map>', _show_sidebar)
         
-        ## Sheet padding frame
+        ## Right click menu
+        self._rightclick_menu = tk.Menu(sb, tearoff=0)  #TODO: create when needed
+        
+        ## Frame to contain sheets
         self._sheet_pad_fm = spfm = ttk.Frame(pw, padding=[3, 3, 0, 0])
         self._panedwindow.add(spfm)
         
-        # Build the first sheet
+        ## Build the first sheet
+        wref_switch_sheet = WeakMethod(self._switch_sheet)
+        switch_sheet = lambda *_: wref_switch_sheet()(*_)
         kwargs["bootstyle_scrollbar"] = bootstyle_scrollbar
         self._sheet_kw = {
             "shape": (10, 10),
@@ -2697,7 +2834,7 @@ class Book(ttk.Frame):
         }
         self._sheet_kw.update(kwargs)
         self._sheet_var = tk.IntVar(self)
-        self._sheet_var.trace_add('write', self._switch_sheet)
+        self._sheet_var.trace_add('write', switch_sheet)
         self._sheet: Optional[Sheet] = None
         self._sheets_props: Dict[int, list] = dict()
         self._sheets_props: Dict[int, list] = self.insert_sheet(0)
@@ -2765,12 +2902,6 @@ class Book(ttk.Frame):
     def _focus_on_sheet(self, *_, **__):
         self.sheet._focus()
     
-    def _refresh_undo_redo_buttons(self):
-        undo_state = 'normal' if self.sheet._history.backable else 'disabled'
-        redo_state = 'normal' if self.sheet._history.forwardable else 'disabled'
-        self._undo_btn.configure(state=undo_state)
-        self._redo_btn.configure(state=redo_state)
-    
     def _toggle_sidebar(self):
         if self._sidebar_hidden:  # show sidebar
             self._panedwindow.insert(0, self._sidebar_fm.container)
@@ -2791,7 +2922,18 @@ class Book(ttk.Frame):
         # Index input
         return list(self._sheets_props)[index_or_name]
     
-    def _switch_sheet(self, *_):
+    def _refresh_undo_redo_buttons(self):
+        undo_state = 'normal' if self.sheet._history.backable else 'disabled'
+        redo_state = 'normal' if self.sheet._history.forwardable else 'disabled'
+        self._undo_btn.configure(state=undo_state)
+        self._redo_btn.configure(state=redo_state)
+    
+    def _refresh_zoom_optionmenu(self):
+        self._zoom_om._variable = self.sheet._scale
+        self._zoom_om.configure(textvariable=self.sheet._scale)
+        self._zoom_om.set_menu(None, *self.sheet._valid_scales)
+    
+    def _switch_sheet(self, *_) -> Sheet:
         key = self._sheet_var.get()
         
         old_sheet = self._sheet
@@ -2805,6 +2947,7 @@ class Book(ttk.Frame):
         new_sheet._focus()
         new_sheet._history.set_callback(self._refresh_undo_redo_buttons)
         self._refresh_undo_redo_buttons()
+        self._refresh_zoom_optionmenu()
         
         self._r_label.configure(textvariable=new_sheet._focus_row)
         self._c_label.configure(textvariable=new_sheet._focus_col)
@@ -2909,16 +3052,13 @@ class Book(ttk.Frame):
                                   ('minimal cell width', sb_minw),
                                   ('minimal cell height', sb_minh)]:
                     if not sb.get().isnumeric():
-                        error_dialog = dialogs.PositionedMessageDialog(
+                        dialogs.PositionedMessagebox.show_error(
+                            parent=top,
+                            title='Value Error',
                             message=f'The value of "{which}" must be a positive '
                                     'integer',
-                            title='Value Error',
-                            parent=top,
-                            buttons=["OK:primary"],
-                            icon=Icon.error,
-                            alert=True
+                            position=self._center_window
                         )
-                        error_dialog.show(self._center_window)
                         return
                 nonlocal submitted
                 submitted = True
@@ -3063,17 +3203,16 @@ class Book(ttk.Frame):
     
     def _delete_sheet(self, key, destroy:bool=True, check:bool=False):
         if check:
-            dialog = dialogs.PositionedMessageDialog(
+            result = dialogs.PositionedMessagebox.okcancel(
+                parent=self,
+                title='Sheet Deletion',
                 message="This action can't be undone. "
                         "Would you like to continue?",
-                title='Sheet Deletion',
-                parent=self,
-                buttons=['Cancel:secondary', 'OK:primary'],
                 icon=Icon.warning,
-                alert=True
+                alert=True,
+                position=self._center_window
             )
-            dialog.show(self._center_window)
-            if dialog.result != 'OK':
+            if result != 'OK':
                 return
         
         sheets_props = self._sheets_props
@@ -3127,14 +3266,14 @@ class Book(ttk.Frame):
             self, key, _prompt='Enter a new name for this sheet:'):
         # Ask for new name
         old_name = self._sheets_props[key]["name"]
-        dialog = dialogs.PositionedQueryDialog(
+        new_name = dialogs.PositionedQuerybox.get_string(
             parent=self,
             title='Rename Sheet',
             prompt=_prompt,
-            initialvalue=old_name
+            initialvalue=old_name,
+            position=self._center_window
         )
-        dialog.show(position=self._center_window)
-        if (new_name := dialog.result) is None:  # cancelled
+        if new_name is None:  # cancelled
             return
         
         # Submitted
@@ -3152,6 +3291,21 @@ class Book(ttk.Frame):
 # ---- Main
 # =============================================================================
 if __name__ == '__main__':
+    root = ttk.Window(title='Book (Root)',
+                      themename='cyborg',
+                      position=(100, 100),
+                      size=(800, 500))
+    
+    book = Book(root, bootstyle_scrollbar='round-light')
+    book.pack(fill='both', expand=1)
+
+    book.insert_sheet(0, name='index = 0')
+    book.insert_sheet(1, name='index = 1')
+    
+    root.mainloop()
+    import sys
+    sys.exit()#???
+    
     root = ttk.Window(title='Book (Root)',
                       themename='morph',
                       position=(100, 100),

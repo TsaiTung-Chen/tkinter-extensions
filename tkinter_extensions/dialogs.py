@@ -7,11 +7,13 @@ Created on Sun Dec 11 19:18:31 2022
 """
 
 import tkinter as tk
+from weakref import WeakMethod
 from typing import Union, Callable, Optional
 
 import ttkbootstrap as ttk
 from ttkbootstrap.icons import Icon
-from ttkbootstrap.dialogs import QueryDialog, MessageDialog, FontDialog
+from ttkbootstrap.validation import validator, add_validation
+from ttkbootstrap.dialogs import Dialog, QueryDialog, MessageDialog, FontDialog
 from ttkbootstrap.dialogs.colorchooser import ColorChooserDialog
 # =============================================================================
 # ---- Classes
@@ -21,11 +23,12 @@ class _Positioned:
              position:Union[tuple, list, Callable, None]=None,
              wait=True,
              callback:Optional[Callable]=None):
-        self._callback = callback  # this function must receive the result value
+        self._callback = callback  #EDITED: this must receive the result value
         self._result = None
         self.build()
+        self._toplevel.wm_resizable(True, True)  #EDITED: make it resizable
         
-        if callable(position):  # add support for position function
+        if callable(position):  #EDITED: add support for position function
             position(self._toplevel)
         elif position is None:
             self._locate()
@@ -43,9 +46,13 @@ class _Positioned:
         if self._initial_focus:
             self._initial_focus.focus_force()
         
-        if wait:  # add a switch
+        if wait:  #EDITED: add a switch
             self._toplevel.grab_set()
             self._toplevel.wait_window()
+    
+    def build(self):
+        super().build()
+        self._toplevel.bind('<Destroy>', lambda e: self.destroy())
 
 
 class PositionedQueryDialog(_Positioned, QueryDialog):
@@ -66,27 +73,64 @@ class PositionedQueryDialog(_Positioned, QueryDialog):
         return res
 
 
+class PositionedMessageDialog(_Positioned, MessageDialog):
+    def on_button_press(self, *args, **kw):
+        res = super().on_button_press(*args, **kw)
+        if self._callback:
+            self._callback(self._result)
+        return res
+
+
+class PositionedColorChooserDialog(_Positioned, ColorChooserDialog):
+    def __init__(self, *args, **kwargs):  #EDITED
+        super().__init__(self, *args, **kwargs)
+        
+        # Remove and set the callback with weakref to avoid circular refs
+        trace_info = self.dropper.result.trace_info()
+        assert len(trace_info) == 1, trace_info
+        
+        wref_trace_dropper_color = WeakMethod(self.trace_dropper_color)
+        trace_dropper_color = lambda *_: wref_trace_dropper_color()(*_)
+        
+        cbname = trace_info[0][1]
+        self.dropper.result.trace_remove('write', cbname)
+        self.dropper.result.trace_add('write', trace_dropper_color)
+    
+    def on_button_press(self, *args, **kw):
+        res = super().on_button_press(*args, **kw)
+        if self._callback:
+            self._callback(self._result)
+        return res
+
+
 class PositionedFontDialog(_Positioned, FontDialog):
     from ttkbootstrap.localization import MessageCatalog as _MessageCatalog
     
     def __init__(self,
                  title="Font Selector",
                  parent=None,
-                 default:Optional[tk.font.Font]=None):
-        # Edit: set the default font as `default`
+                 default:Optional[tk.font.Font]=None,
+                 scale:float=1.):  # actual font size = int(option size * scale)
+        #EDITED: set the default font as `default`
         
-        #EDIT
+        #EDITED
         assert isinstance(default, (tk.font.Font, type(None))), default
         
         title = self._MessageCatalog.translate(title)
-        super().__init__(parent=parent, title=title)
+        Dialog.__init__(self, parent=parent, title=title)
         
-        #EDIT
+        #EDITED
         if default is None:
             default = tk.font.nametofont('TkDefaultFont')
+        default = default.copy()
         
+        # EDITED: use weakref to avoid circular refs
+        wref_update_font_preview = WeakMethod(self._update_font_preview)
+        update_font_preview = lambda *_: wref_update_font_preview()(*_)
+        
+        self._scale = scale  #EDITED
         self._style = ttk.Style()
-        self._default:tk.font.Font = default  #EDIT
+        self._default:tk.font.Font = default  #EDITED
         self._actual = self._default.actual()
         self._size = ttk.Variable(value=self._actual["size"])
         self._family = ttk.Variable(value=self._actual["family"])
@@ -95,27 +139,29 @@ class PositionedFontDialog(_Positioned, FontDialog):
         self._overstrike = ttk.Variable(value=self._actual["overstrike"])
         self._underline = ttk.Variable(value=self._actual["underline"])
         self._preview_font = tk.font.Font()
-        self._slant.trace_add("write", self._update_font_preview)
-        self._weight.trace_add("write", self._update_font_preview)
-        self._overstrike.trace_add("write", self._update_font_preview)
-        self._underline.trace_add("write", self._update_font_preview)
+        self._size.trace_add('write', update_font_preview)  #EDITED
+        self._family.trace_add('write', update_font_preview)  #EDITED
+        self._slant.trace_add("write", update_font_preview)  #EDITED
+        self._weight.trace_add("write", update_font_preview)  #EDITED
+        self._overstrike.trace_add("write", update_font_preview)  #EDITED
+        self._underline.trace_add("write", update_font_preview)  #EDITED
         
-        _headingfont = tk.font.nametofont("TkHeadingFont")
-        _headingfont.configure(weight="bold")
+        #EDITED: _headingfont = font.nametofont("TkHeadingFont")
+        #EDITED: _headingfont.configure(weight="bold")
         
         self._update_font_preview()
         self._families = set([self._family.get()])
         for f in tk.font.families():
             if all([f, not f.startswith("@"), "emoji" not in f.lower()]):
                 self._families.add(f)
-        self._families = sorted(self._families)  #EDIT
+        self._families = sorted(self._families)  #EDITED
     
     def create_body(self, master):
-        # Edit: use natural window size
+        #EDITED: use natural window size
         
-        #EDIT: width = utility.scale_size(master, 600)
-        #EDIT: height = utility.scale_size(master, 500)
-        #EDIT: self._toplevel.geometry(f"{width}x{height}")
+        #EDITED: width = utility.scale_size(master, 600)
+        #EDITED: height = utility.scale_size(master, 500)
+        #EDITED: self._toplevel.geometry(f"{width}x{height}")
         
         family_size_frame = ttk.Frame(master, padding=10)
         family_size_frame.pack(fill='x', anchor='n')
@@ -124,8 +170,137 @@ class PositionedFontDialog(_Positioned, FontDialog):
         self._font_options_selectors(master, padding=10)
         self._font_preview(master, padding=10)
     
+    def _font_families_selector(self, master):
+        container = ttk.Frame(master)
+        container.pack(fill='both', expand=1, side='left')
+        
+        header = ttk.Label(
+            container,
+            text=self._MessageCatalog.translate("Family"),
+            font="TkHeadingFont"
+        )
+        header.pack(fill='x', pady=(0, 2), anchor='n')
+        
+        #EDITED: add new font family optionmenu
+        om = ttk.OptionMenu(
+            container,
+            self._family,
+            None,
+            *self._families,
+            bootstyle='outline',
+            command=lambda value: style.configure(om_style, font=(value,))
+        )
+        om.pack(fill='x', expand=1)
+        
+        om_menu = om["menu"]
+        for idx, family in enumerate(self._families):
+            om_menu.entryconfigure(idx, font=(family,))
+        
+        om_style = f'{id(om)}.{om["style"]}'
+        style = om._root().style
+        style.configure(om_style, font=(self._family.get(),))
+        om.configure(style=om_style)
+        
+        return om
+        
+        '''EDIT: remove the Treeview
+        listbox = ttk.Treeview(
+            master=container,
+            height=5,
+            show="",
+            columns=[0],
+        )
+        listbox.column(0, width=utility.scale_size(listbox, 250))
+        listbox.pack(side='left', fill='both', expand=1)
+        
+        listbox_vbar = ttk.Scrollbar(
+            container,
+            command=listbox.yview,
+            orient='vertical',
+            bootstyle="rounded",
+        )
+        listbox_vbar.pack(side='right', fill='y')
+        listbox.configure(yscrollcommand=listbox_vbar.set)
+        
+        for f in self._families:
+            listbox.insert("", iid=f, index='end', tags=[f], values=[f])
+            listbox.tag_configure(f, font=(f, self._size.get()))
+        
+        iid = self._family.get()
+        listbox.selection_set(iid)  # select default value
+        listbox.see(iid)  # ensure default is visible
+        listbox.bind(
+            "<<TreeviewSelect>>", lambda e: self._on_select_font_family(e)
+        )
+        return listbox
+        '''
+    
+    def _font_size_selector(self, master):
+        container = ttk.Frame(master)
+        container.pack(side='left', fill='y', padx=(10, 0))
+        
+        header = ttk.Label(
+            container,
+            text=self._MessageCatalog.translate("Size"),
+            font="TkHeadingFont",
+        )
+        header.pack(fill='x', pady=(0, 2), anchor='n')
+        
+        # EDIT: add new size combobox
+        @validator
+        def _positive_int(event):
+            try:
+                value = int(event.postchangetext)
+            except ValueError:
+                return False
+            if value <= 0:
+                return False
+            self._size.set(int(size_buffer.get() * self._scale))
+             # update the real size variable
+            self._update_font_preview()
+            return True
+        
+        sizes = [*range(8, 13), *range(13, 30, 2), 36, 48, 72]
+        size_buffer = tk.IntVar(value=int(self._size.get() / self._scale))
+        cb = ttk.Combobox(
+            container,
+            textvariable=size_buffer,
+            values=sizes,
+            width=3
+        )
+        cb.pack()
+        add_validation(cb, _positive_int)
+        cb.bind('<Return>', lambda e: container.focus_set())
+        cb.bind('<<ComboboxSelected>>', lambda e: container.focus_set())
+        
+        '''#EDITED: remove the Treeview
+        sizes_listbox = ttk.Treeview(container, height=7, columns=[0], show="")
+        sizes_listbox.column(0, width=utility.scale_size(container, 25))
+        
+        sizes = [*range(8, 13), *range(13, 30, 2), 36, 48, 72]
+        for s in sizes:
+            sizes_listbox.insert("", iid=s, index='end', values=[s])
+
+        iid = self._size.get()
+        sizes_listbox.selection_set(iid)
+        sizes_listbox.see(iid)
+        sizes_listbox.bind(
+            "<<TreeviewSelect>>", lambda e: self._on_select_font_size(e)
+        )
+
+        sizes_listbox_vbar = ttk.Scrollbar(
+            master=container,
+            orient='vertical',
+            command=sizes_listbox.yview,
+            bootstyle="round",
+        )
+        sizes_listbox.configure(yscrollcommand=sizes_listbox_vbar.set)
+        sizes_listbox.pack(side='left', fill='y', expand=1, anchor='n')
+        sizes_listbox_vbar.pack(side='left', fill='y', expand=1)
+        '''
+    
     def _font_options_selectors(self, master, padding: int):
-        # Edit: don't change the values of the tk variables
+        #EDITED: don't change the values of the tk variables
         
         container = ttk.Frame(master, padding=padding)
         container.pack(fill='x', padx=2, pady=2, anchor='n')
@@ -140,7 +315,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
             value="normal",
             variable=self._weight,
         )
-        #EDIT: opt_normal.invoke()
+        #EDITED: opt_normal.invoke()
         opt_normal.pack(side='left', padx=5, pady=5)
         opt_bold = ttk.Radiobutton(
             master=weight_lframe,
@@ -160,7 +335,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
             value="roman",
             variable=self._slant,
         )
-        #EDIT: opt_roman.invoke()
+        #EDITED: opt_roman.invoke()
         opt_roman.pack(side='left', padx=5, pady=5)
         opt_italic = ttk.Radiobutton(
             master=slant_lframe,
@@ -188,7 +363,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
         opt_overstrike.pack(side='left', padx=5, pady=5)
     
     def _font_preview(self, master, padding:int):
-        # Edit: don't turn off `pack_propagate` and set a small width
+        #EDITED: don't turn off `pack_propagate` and set a small width
         
         container = ttk.Frame(master, padding=padding)
         container.pack(fill='both', expand=1, anchor='n')
@@ -196,7 +371,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
         header = ttk.Label(
             container,
             text=self._MessageCatalog.translate('Preview'),
-            font='TkHeadingFont',
+            font="TkHeadingFont",
         )
         header.pack(fill='x', pady=2, anchor='n')
 
@@ -206,23 +381,23 @@ class PositionedFontDialog(_Positioned, FontDialog):
         self._preview_text = ttk.Text(
             master=container,
             height=3,
-            width=1,   #EDIT: prevent the width from becoming too large
+            width=1,   #EDITED: prevent the width from becoming too large
             font=self._preview_font,
             highlightbackground=self._style.colors.primary
         )
         self._preview_text.insert('end', content)
         self._preview_text.pack(fill='both', expand=1)
-        #EDIT: container.pack_propagate(False)
+        #EDITED: container.pack_propagate(False)
     
     def _update_font_preview(self, *_):
-        # Edit: configure the weight of text and update `self._result` when 
+        #EDITED: configure the weight of text and update `self._result` when 
         # submitted
         
         self._preview_font.config(
             family=self._family.get(),
-            size=self._size.get(),
+            size=self._size.get(),   #EDITED
             slant=self._slant.get(),
-            weight=self._weight.get(),   #EDIT
+            weight=self._weight.get(),   #EDITED
             overstrike=self._overstrike.get(),
             underline=self._underline.get()
         )
@@ -230,37 +405,21 @@ class PositionedFontDialog(_Positioned, FontDialog):
             self._preview_text.configure(font=self._preview_font)
         except:
             pass
-        #EDIT: self._result = self._preview_font
+        #EDITED: self._result = self._preview_font
     
     def _on_submit(self):
-        # Edit: update `self._result` when submitted
+        #EDITED: update `self._result` when submitted
         
-        self._result = self._preview_font  #EDIT
+        self._result = self._preview_font  #EDITED
         res = super()._on_submit()
         if self._callback:
             self._callback(self._result)
         return res
     
     def _on_cancel(self):
-        # Edit: update `self._result` when submitted
+        #EDITED: update `self._result` when submitted
         
         res = super()._on_cancel()
-        if self._callback:
-            self._callback(self._result)
-        return res
-
-
-class PositionedMessageDialog(_Positioned, MessageDialog):
-    def on_button_press(self, *args, **kw):
-        res = super().on_button_press(*args, **kw)
-        if self._callback:
-            self._callback(self._result)
-        return res
-
-
-class PositionedColorChooserDialog(_Positioned, ColorChooserDialog):
-    def on_button_press(self, *args, **kw):
-        res = super().on_button_press(*args, **kw)
         if self._callback:
             self._callback(self._result)
         return res
@@ -275,12 +434,14 @@ class PositionedMessagebox:
     and alert options.
     """
     @staticmethod
-    def show_info(message,
-                  title=" ",
-                  parent=None,
-                  buttons=['OK:primary'],
-                  alert=False,
-                  **kwargs):
+    def show_info(
+            parent=None,
+            title=" ",
+            message='',
+            buttons=['OK:primary'],
+            alert=False,
+            **kwargs
+    ):
         position = kwargs.pop("position", None)
         wait = kwargs.pop("wait", True)
         callback = kwargs.pop("callback", None)
@@ -298,12 +459,14 @@ class PositionedMessagebox:
         return dialog.result
     
     @staticmethod
-    def show_warning(message,
-                     title=" ",
-                     parent=None,
-                     alert=True,
-                     buttons=['OK:primary'],
-                     **kwargs):
+    def show_warning(
+            parent=None,
+            title=" ",
+            message='',
+            buttons=['OK:primary'],
+            alert=True,
+            **kwargs
+    ):
         position = kwargs.pop("position", None)
         wait = kwargs.pop("wait", True)
         callback = kwargs.pop("callback", None)
@@ -321,12 +484,14 @@ class PositionedMessagebox:
         return dialog.result
     
     @staticmethod
-    def show_error(message,
-                   title=" ",
-                   parent=None,
-                   buttons=['OK:primary'],
-                   alert=True,
-                   **kwargs):
+    def show_error(
+            parent=None,
+            title=" ",
+            message='',
+            buttons=['OK:primary'],
+            alert=True,
+            **kwargs
+    ):
         position = kwargs.pop("position", None)
         wait = kwargs.pop("wait", True)
         callback = kwargs.pop("callback", None)
@@ -345,9 +510,9 @@ class PositionedMessagebox:
     
     @staticmethod
     def show_question(
-        message,
-        title=" ",
         parent=None,
+        title=" ",
+        message='',
         buttons=["No:secondary", "Yes:primary"],
         alert=True,
         **kwargs,
@@ -369,12 +534,14 @@ class PositionedMessagebox:
         return dialog.result
     
     @staticmethod
-    def ok(message,
-           title=" ",
-           parent=None,
-           buttons=['OK:primary'],
-           alert=False,
-           **kwargs):
+    def ok(
+        parent=None,
+        title=" ",
+        message='',
+        buttons=['OK:primary'],
+        alert=False,
+        **kwargs
+    ):
         position = kwargs.pop("position", None)
         wait = kwargs.pop("wait", True)
         callback = kwargs.pop("callback", None)
@@ -391,7 +558,7 @@ class PositionedMessagebox:
         return dialog.result
     
     @staticmethod
-    def okcancel(message, title=" ", alert=False, parent=None, **kwargs):
+    def okcancel(parent=None, title=" ", message='', alert=False, **kwargs):
         position = kwargs.pop("position", None)
         wait = kwargs.pop("wait", True)
         callback = kwargs.pop("callback", None)
@@ -399,6 +566,7 @@ class PositionedMessagebox:
             title=title,
             message=message,
             parent=parent,
+            buttons=['Cancel:secondary', 'OK:primary'],
             alert=alert,
             localize=True,
             **kwargs,
@@ -407,7 +575,7 @@ class PositionedMessagebox:
         return dialog.result
     
     @staticmethod
-    def yesno(message, title=" ", alert=False, parent=None, **kwargs):
+    def yesno(parent=None, title=" ", message='', alert=False, **kwargs):
         position = kwargs.pop("position", None)
         wait = kwargs.pop("wait", True)
         callback = kwargs.pop("callback", None)
@@ -424,7 +592,7 @@ class PositionedMessagebox:
         return dialog.result
 
     @staticmethod
-    def yesnocancel(message, title=" ", alert=False, parent=None, **kwargs):
+    def yesnocancel(parent=None, title=" ", message='', alert=False, **kwargs):
         position = kwargs.pop("position", None)
         wait = kwargs.pop("wait", True)
         callback = kwargs.pop("callback", None)
@@ -441,7 +609,7 @@ class PositionedMessagebox:
         return dialog.result
 
     @staticmethod
-    def retrycancel(message, title=" ", alert=False, parent=None, **kwargs):
+    def retrycancel(parent=None, title=" ", message='', alert=False, **kwargs):
         position = kwargs.pop("position", None)
         wait = kwargs.pop("wait", True)
         callback = kwargs.pop("callback", None)
@@ -463,6 +631,16 @@ class PositionedQuerybox:
     from the end user.
     """
     @staticmethod
+    def get_font(
+            parent=None, title="Font Selector", default=None, scale=1.0, **kw):
+        assert not (set(kw) - {"wait", "position", "callback"}), kw
+        dialog = PositionedFontDialog(
+            parent=parent, title=title, default=default, scale=scale)
+        dialog.show(**kw)
+        
+        return dialog.result
+    
+    @staticmethod
     def get_color(parent=None, title="Color Chooser", initialcolor=None, **kw):
         assert not (set(kw) - {"wait", "position", "callback"}), kw
         dialog = PositionedColorChooserDialog(parent, title, initialcolor)
@@ -472,7 +650,7 @@ class PositionedQuerybox:
     
     @staticmethod
     def get_string(
-        prompt="", title=" ", initialvalue=None, parent=None, **kwargs
+        parent=None, title=" ", prompt="", initialvalue=None, **kwargs
     ):
         initialvalue = initialvalue or ''
         position = kwargs.pop("position", None)
@@ -486,12 +664,12 @@ class PositionedQuerybox:
     
     @staticmethod
     def get_integer(
-        prompt="",
+        parent=None,
         title=" ",
+        prompt="",
         initialvalue=None,
         minvalue=None,
         maxvalue=None,
-        parent=None,
         **kwargs,
     ):
         initialvalue = initialvalue or ''
@@ -513,12 +691,12 @@ class PositionedQuerybox:
 
     @staticmethod
     def get_float(
-        prompt="",
+        parent=None,
         title=" ",
+        prompt="",
         initialvalue=None,
         minvalue=None,
         maxvalue=None,
-        parent=None,
         **kwargs,
     ):
         initialvalue = initialvalue or ''
