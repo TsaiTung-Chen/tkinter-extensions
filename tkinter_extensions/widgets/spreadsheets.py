@@ -47,14 +47,21 @@ class History:
     def forwardable(self) -> bool:
         return self.step < len(self._stack["forward"])
     
-    def __init__(self, callback:Optional[Callable]=None):
+    def __init__(
+            self, max_depth:Optional[int]=None,
+            callback:Optional[Callable]=None
+    ):
+        assert isinstance(max_depth, (type(None), int)), max_depth
         assert callback is None or callable(callback), callback
+        if isinstance(max_depth, int):
+            assert max_depth >= 1, max_depth
         
         self._callback: Optional[Callable] = callback
         self._sequence: Optional[Dict[str, List[Callable]]] = None
         self._stack = {"forward": list(), "backward": list()}
+        self._max_depth = max_depth
         self._step = 0
-    
+
     def reset(self, callback:Optional[Callable]=None):
         self.__init__(callback=callback)
     
@@ -62,10 +69,12 @@ class History:
         assert callable(forward) and callable(backward), (forward, backward)
         
         if self._sequence is None:
-            self._stack.update(#TODO: max number of stack
-                forward=self._stack["forward"][:self.step] + [forward],
-                backward=self._stack["backward"][:self.step] + [backward]
-            )
+            forward = self._stack["forward"][:self.step] + [forward]
+            backward = self._stack["backward"][:self.step] + [backward]
+            if self._max_depth:
+                forward = forward[-self._max_depth:]
+                backward = backward[-self._max_depth:]
+            self._stack.update(forward=forward, backward=backward)
             self._step += 1
             if self._callback:
                 self._callback()
@@ -186,6 +195,7 @@ class Sheet(ttk.Frame):
                  min_width:int=20,
                  min_height:int=10,
                  get_style:Optional[Callable]=None,
+                 max_undo:Union[int, None]=20,
                  autohide_scrollbar:bool=True,
                  mousewheel_sensitivity:float=2.,
                  bootstyle_scrollbar='round',
@@ -261,7 +271,7 @@ class Sheet(ttk.Frame):
         wref_scale = WeakMethod(self._zoom)
         apply_scale = lambda *_: wref_scale()()
         
-        self._history = History()
+        self._history = History(max_depth=max_undo)
         self._resize_start: Optional[dict] = None
         self._hover: Optional[Dict[str, str]] = None
         self._mouse_selection_id: Optional[str] = None
