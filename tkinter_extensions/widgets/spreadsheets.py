@@ -259,7 +259,7 @@ class Sheet(ttk.Frame):
         
         # Init the backend states
         wref_scale = WeakMethod(self._zoom)
-        apply_scale = lambda *_: wref_scale()(self._scale.get())
+        apply_scale = lambda *_: wref_scale()()
         
         self._history = History()
         self._resize_start: Optional[dict] = None
@@ -957,7 +957,7 @@ class Sheet(ttk.Frame):
         
         elif keysym in ('minus', 'equal') and COMMAND in modifiers:
             direction = 'down' if keysym == 'minus' else 'up'
-            self._zoom_with_next_scale_level(direction)
+            self._zoom_to_next_scale_level(direction)
             return 'break'
         
         elif keysym in ('Return', 'Tab'):
@@ -1004,7 +1004,7 @@ class Sheet(ttk.Frame):
         elif (MODIFIERS.isdisjoint(modifiers) and keysym == 'BackSpace') or (
                 not modifiers - {SHIFT, LOCK} and char):
             # Normal typing
-            self._focus_in_cell()  #FIXME: Chinese keyboard input
+            self._focus_in_cell()  #BUG: Chinese keyboard input
             self._entry.delete(0, 'end')
             self._entry.insert('end', char)
             return 'break'
@@ -1018,7 +1018,6 @@ class Sheet(ttk.Frame):
         if canvas in (self.cornercanvas, self.colcanvas):
             r2 = None
         else:
-            above = y <= y2s
             r2 = np.clip(
                 above.argmax() if (above := y <= y2s).any() else y2s.size - 1,
                 r1_vis,
@@ -1430,24 +1429,16 @@ class Sheet(ttk.Frame):
         assert type_ in ('cornerheader', 'rowheader', 'colheader'), self._hover
         
         # Select the current row/col if it is not selected
-        r, c = self._get_rc(tagdict, to_tuple=True, canvas=event.widget)
-        r1, c1, r2, c2 = self._selection_rcs
-        (r1, r2), (c1, c2) = [sorted([r1, r2]), sorted([c1, c2])]
-        max_r, max_c = [ s - 1 for s in self.shape ]
-        if type_ == 'rowheader':
-            axis_name, axis = ('Row', 0)
-            if not ((r1 <= r <= r2) and (c1 == 0) and (c2 >= max_c)):
-                self.select_cells(r, 0, r, max_c)
-        elif type_ == 'colheader':
-            axis_name, axis = ('Column', 1)
-            if not ((c1 <= c <= c2) and (r1 == 0) and (r2 >= max_r)):
-                self.select_cells(0, c, max_r, c)
-        else:
-            axis_name, axis = ('Row', 0)
-            if not ((r1 == c1 == 0) and (r1 >= max_r) and (c2 >= max_c)):
-                self.select_cells(0, 0, max_r, max_c)
+        self._on_leftbutton_press(event)
         
         # Setup the right click menu
+        if type_ == 'rowheader':
+            axis_name, axis = ('Row', 0)
+        elif type_ == 'colheader':
+            axis_name, axis = ('Column', 1)
+        else:
+            axis_name, axis = ('Row', 0)
+        
         menu = self._rightclick_menu
         
         if type_ in ('rowheader', 'colheader'):
@@ -2006,17 +1997,15 @@ class Sheet(ttk.Frame):
             self._history = _history
     
     def zoom(self, scale:float=1.):
-        self._scale.set(scale)
-    
-    def _zoom(self, scale:float=1.):
         """
         Zoom in when `scale` > 1.0 or zoom out when `scale` < 1.0.
         """
-        
         assert scale in self._valid_scales, [self._valid_scales, scale]
-        
+        self._scale.set(scale)
+    
+    def _zoom(self):
         # Update scale state
-        scale = float(scale)
+        scale = self._scale.get()
         ratio = scale / self._prev_scale
         self._prev_scale = scale
         
@@ -2038,7 +2027,7 @@ class Sheet(ttk.Frame):
         # Refresh canvases
         self.refresh()
     
-    def _zoom_with_next_scale_level(self, direction:str='up'):
+    def _zoom_to_next_scale_level(self, direction:str='up'):
         """
         If `direction` is 'up', zoom in with next scaling factor. If `direction`
         is 'down', zoom out with next scaling factor.
@@ -2066,14 +2055,15 @@ class Sheet(ttk.Frame):
                      sizes:Optional[np.ndarray]=None,
                      dialog:bool=False,
                      trace:Optional[str]=None,
-                     undo:bool=False):
+                     undo:bool=False) -> np.ndarray:
         assert axis in (0, 1), axis
         max_i = self.shape[axis] - 1
         assert -1 <= i <= max_i + 1, (i, max_i)
         assert N >= 1, N
         
+        scale = self._scale.get()
         _idc = np.arange(i+1, i+N+1)
-        old_sizes = self._cell_sizes[axis][_idc]
+        unscaled_old_sizes = self._cell_sizes[axis][_idc] / scale
         
         # Check for the new sizes
         if dialog:  # ask for new size
@@ -2081,21 +2071,23 @@ class Sheet(ttk.Frame):
             size = dialogs.PositionedQuerybox.get_integer(
                 parent=self,
                 prompt=f'Enter the new {dimension}:',
-                initialvalue=int(old_sizes[0]),
+                initialvalue=int(unscaled_old_sizes[0]),
                 position=self._center_window
             )
             if not isinstance(size, int):  # cancelled
                 return
-            new_sizes = sizes = np.full(N, size)
+            unscaled_new_sizes = sizes = np.full(N, size)
         elif sizes is None:  # reset the rows or cols sizes
-            new_sizes = np.full(N, self._default_cell_sizes[axis])
+            unscaled_new_sizes = np.full(N, self._default_cell_sizes[axis])
         else:  # new size
             assert np.shape(sizes) == (N,), (sizes, N)
-            new_sizes = np.asarray(sizes)
+            unscaled_new_sizes = np.asarray(sizes)
+        new_sizes = unscaled_new_sizes * scale
+        old_sizes = unscaled_old_sizes * scale
         
         # Update the status of the resized rows or cols
         key = ("row", "col")[axis]
-        min_size = self._min_sizes[axis]
+        min_size = self._min_sizes[axis] * scale
         deltas = np.maximum(new_sizes - old_sizes, min_size - old_sizes)
         self._cell_sizes[axis][_idc] += deltas
         self._update_content_size()
@@ -2135,10 +2127,15 @@ class Sheet(ttk.Frame):
                 forward=lambda: self.resize_cells(
                     i, axis=axis, N=N, sizes=copy.copy(sizes), trace='first'),
                 backward=lambda: self.resize_cells(
-                    i, axis=axis, N=N, sizes=copy.copy(old_sizes), trace='first')
+                    i,
+                    axis=axis,
+                    N=N,
+                    sizes=copy.copy(unscaled_old_sizes),
+                    trace='first'
+                )
             )
         
-        return new_sizes
+        return unscaled_new_sizes
     
     def insert_cells(self,
                      i:Optional[int]=None,
@@ -2188,11 +2185,12 @@ class Sheet(ttk.Frame):
         
         # Create a list of new sizes (a 1-D list)
         if sizes is None:
-            new_size = self._default_cell_sizes[axis]
-            new_sizes = np.array([ new_size for i in range(N) ])
+            unscaled_new_size = self._default_cell_sizes[axis]
+            unscaled_new_sizes = np.array([ unscaled_new_size for i in range(N) ])
         else:
             assert np.shape(sizes) == (N,), (sizes, N)
-            new_sizes = np.asarray(sizes)
+            unscaled_new_sizes = np.asarray(sizes)
+        new_sizes = unscaled_new_sizes * self._scale.get()
         
         # Create a list of new styles
         if styles is None:
@@ -2418,7 +2416,7 @@ class Sheet(ttk.Frame):
                     r1:Optional[int]=None,
                     c1:Optional[int]=None,
                     r2:Optional[int]=None,
-                    c2:Optional[int]=None):
+                    c2:Optional[int]=None) -> pd.DataFrame:
         r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
@@ -2610,7 +2608,7 @@ class Sheet(ttk.Frame):
     
     def _selection_copy_values(self):
         rcs = self._selection_rcs
-        return self.copy_values(*rcs)
+        self.copy_values(*rcs)
     
     def _selection_paste_values(self, undo:bool=False):
         df = pd.read_clipboard(
@@ -2652,8 +2650,6 @@ class Sheet(ttk.Frame):
             seq["backward"].insert(0, lambda: self.refresh(trace='first'))
         
         self.refresh()
-        
-        return df
     
     def _selection_set_styles(self, property_:str, values=None, undo:bool=False):
         rcs = self._selection_rcs
@@ -2661,15 +2657,15 @@ class Sheet(ttk.Frame):
     
     def _selection_set_fonts(self, dialog:bool=False, undo:bool=False):
         rcs = self._selection_rcs
-        return self.set_fonts(*rcs, dialog=dialog, undo=undo)
+        self.set_fonts(*rcs, dialog=dialog, undo=undo)
     
     def _selection_set_foregroundcolors(self, dialog:bool=False, undo:bool=False):
         rcs = self._selection_rcs
-        return self.set_foregroundcolors(*rcs, dialog=dialog, undo=undo)
+        self.set_foregroundcolors(*rcs, dialog=dialog, undo=undo)
     
     def _selection_set_backgroundcolors(self, dialog:bool=False, undo:bool=False):
         rcs = self._selection_rcs
-        return self.set_backgroundcolors(*rcs, dialog=dialog, undo=undo)
+        self.set_backgroundcolors(*rcs, dialog=dialog, undo=undo)
     
     def _selection_resize_cells(
             self, axis:int, dialog:bool=False, undo:bool=False):
@@ -2680,8 +2676,7 @@ class Sheet(ttk.Frame):
         assert (_i1 == 0) and (_i2 >= max_i), (axis, (r1, c1, r2, c2), self.shape)
         
         i1, i2 = rcs[axis]
-        return self.resize_cells(
-            i1, axis=axis, N=i2-i1+1, dialog=dialog, undo=undo)
+        self.resize_cells(i1, axis=axis, N=i2-i1+1, dialog=dialog, undo=undo)
 
 
 class Book(ttk.Frame):
@@ -2745,8 +2740,14 @@ class Book(ttk.Frame):
         self._redo_btn.pack(side='left', padx=[5, 0])
         
         ## Zooming optionmenu
-        self._zoom_om = OptionMenu(tb, bootstyle='outline')
+        self._zoom_om = zoom_om = OptionMenu(tb, bootstyle='outline')
         self._zoom_om.pack(side='right')
+        om_style = f'{id(zoom_om)}.{zoom_om["style"]}'
+        self._root().style.configure(om_style, padding=[5, 0])
+        self._zoom_om.configure(style=om_style)
+        
+        zoom_lb = ttk.Label(tb, text='x', bootstyle='primary')
+        zoom_lb.pack(side='right', padx=[5, 2])
         
         # Build inputbar
         self._inputbar = ib = ttk.Frame(self)
