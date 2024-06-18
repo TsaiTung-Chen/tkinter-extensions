@@ -8,6 +8,7 @@ Created on Mon May 22 22:35:24 2023
 
 import tkinter as tk
 from typing import Optional
+from weakref import WeakMethod
 
 import ttkbootstrap as ttk
 
@@ -54,7 +55,9 @@ class CollapsedFrame(ttk.Frame):
             style=style_button,
             bootstyle=bootstyle_button
         )
-        variable.trace_add('write', self.toggle)
+        wref_toggle = WeakMethod(self.toggle)
+        toggle = lambda *_: wref_toggle()()
+        variable.trace_add('write', toggle)
         
         self._container = container = ttk.Labelframe(master,
                                                      labelwidget=labelwidget,
