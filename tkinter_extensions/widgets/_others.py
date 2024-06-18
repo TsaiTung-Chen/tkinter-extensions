@@ -17,7 +17,6 @@ from ttkbootstrap import Colors
 class ErrorCatchingWindow(ttk.Window):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._fix_combobox_scrollbar_issue()
         self._error_message = tk.StringVar(self, name='err_msg')
     
     def report_callback_exception(self, exc, val, tb):
@@ -25,10 +24,6 @@ class ErrorCatchingWindow(ttk.Window):
         
         super().report_callback_exception(exc, val, tb)
         self._error_message.set(format_exc())
-    
-    def _fix_combobox_scrollbar_issue(self):
-        builder = self.style._get_builder()
-        builder.create_scrollbar_style()
 
 
 class OptionMenu(ttk.OptionMenu):
@@ -63,6 +58,20 @@ class OptionMenu(ttk.OptionMenu):
 
 
 class Combobox(ttk.Combobox):
+    _scrollbar_fixed: bool = False
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._fix_combobox_scrollbar_bug()
+    
+    def _fix_combobox_scrollbar_bug(self):
+        if Combobox._scrollbar_fixed:
+            return
+        
+        builder = self._root().style._get_builder()
+        builder.create_scrollbar_style()
+        Combobox._scrollbar_fixed = True
+    
     def configure_listbox(self, **kw):
         popdown = self.tk.eval(f'ttk::combobox::PopdownWindow {self}')
         listbox = f'{popdown}.f.l'

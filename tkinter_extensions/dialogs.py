@@ -15,6 +15,8 @@ from ttkbootstrap.icons import Icon
 from ttkbootstrap.validation import validator, add_validation
 from ttkbootstrap.dialogs import Dialog, QueryDialog, MessageDialog, FontDialog
 from ttkbootstrap.dialogs.colorchooser import ColorChooserDialog
+
+from .widgets import Combobox
 # =============================================================================
 # ---- Classes
 # =============================================================================
@@ -83,7 +85,7 @@ class PositionedMessageDialog(_Positioned, MessageDialog):
 
 class PositionedColorChooserDialog(_Positioned, ColorChooserDialog):
     def __init__(self, *args, **kwargs):  #EDITED
-        super().__init__(self, *args, **kwargs)
+        super().__init__(*args, **kwargs)
         
         # Remove and set the callback with weakref to avoid circular refs
         trace_info = self.dropper.result.trace_info()
@@ -262,7 +264,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
         
         sizes = [*range(8, 13), *range(13, 30, 2), 36, 48, 72]
         size_buffer = tk.IntVar(value=int(self._size.get() / self._scale))
-        cb = ttk.Combobox(
+        cb = Combobox(
             container,
             textvariable=size_buffer,
             values=sizes,

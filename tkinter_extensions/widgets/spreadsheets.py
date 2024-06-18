@@ -61,7 +61,7 @@ class History:
         self._stack = {"forward": list(), "backward": list()}
         self._max_depth = max_depth
         self._step = 0
-
+    
     def reset(self, callback:Optional[Callable]=None):
         self.__init__(callback=callback)
     
@@ -72,10 +72,12 @@ class History:
             forward = self._stack["forward"][:self.step] + [forward]
             backward = self._stack["backward"][:self.step] + [backward]
             if self._max_depth:
+                n = len(forward)
                 forward = forward[-self._max_depth:]
                 backward = backward[-self._max_depth:]
-            self._stack.update(forward=forward, backward=backward)
+                self._step -= (n - len(forward))
             self._step += 1
+            self._stack.update(forward=forward, backward=backward)
             if self._callback:
                 self._callback()
         else:
@@ -309,8 +311,7 @@ class Sheet(ttk.Frame):
         self._visible_rcs: List[Tuple[int, int]] = visible_rcs
         self._gy2s_gx2s: Tuple[np.ndarray, np.ndarray] = gyx2s
         
-        # Create a right-click menu and a entry widget
-        self._rightclick_menu = tk.Menu(self, tearoff=0)  #TODO: create when needed
+        # Create an entry widget
         self._entry = entry = tk.Entry(
             self, textvariable=self._focus_value, takefocus=0)
         entry.place(x=0, y=0)
@@ -788,8 +789,9 @@ class Sheet(ttk.Frame):
             )
         ))
     
-    def _build_general_rightclick_menu(self) -> tk.Menu:
-        menu = self._rightclick_menu
+    def _build_general_rightclick_menu(
+            self, menu:Optional[tk.Menu]=None) -> tk.Menu:
+        menu = menu or tk.Menu(self, tearoff=0)
         
         # Manipulate values in cells
         menu.add_command(
@@ -888,21 +890,6 @@ class Sheet(ttk.Frame):
                 "aligny", None, undo=True)
         )
         menu.add_cascade(label='Align', menu=menu_align)
-        
-        return menu
-    
-    def _reset_rightclick_menu(self) -> tk.Menu:
-        menu = self._rightclick_menu
-        try:
-            menu.delete(0, 'end')
-        except tk.TclError:
-            pass
-        
-        try:
-            for child in menu.winfo_children():
-                child.destroy()
-        except tk.TclError:
-            pass
         
         return menu
     
@@ -1014,7 +1001,7 @@ class Sheet(ttk.Frame):
         elif (MODIFIERS.isdisjoint(modifiers) and keysym == 'BackSpace') or (
                 not modifiers - {SHIFT, LOCK} and char):
             # Normal typing
-            self._focus_in_cell()  #BUG: Chinese keyboard input
+            self._focus_in_cell()
             self._entry.delete(0, 'end')
             self._entry.insert('end', char)
             return 'break'
@@ -1449,7 +1436,7 @@ class Sheet(ttk.Frame):
         else:
             axis_name, axis = ('Row', 0)
         
-        menu = self._rightclick_menu
+        menu = tk.Menu(self, tearoff=0)
         
         if type_ in ('rowheader', 'colheader'):
             menu.add_command(
@@ -1492,10 +1479,10 @@ class Sheet(ttk.Frame):
             )
             menu.add_cascade(label="Columns' Width(s)", menu=menu_width)
         menu.add_separator()
-        self._build_general_rightclick_menu()
+        self._build_general_rightclick_menu(menu)
         
         menu.post(event.x_root, event.y_root)
-        self.after_idle(self._reset_rightclick_menu)
+        self.after_idle(menu.destroy)
     
     def __on_handle_leftbutton_press(self, event, axis:int):  # resize starts
         tagdict = self._hover
@@ -1695,7 +1682,7 @@ class Sheet(ttk.Frame):
         
         menu = self._build_general_rightclick_menu()
         menu.post(event.x_root, event.y_root)
-        self.after_idle(self._reset_rightclick_menu)
+        self.after_idle(menu.destroy)
     
     def _refresh_entry(self, r:Optional[int]=None, c:Optional[int]=None):
         assert (r is None) == (c is None), (r, c)
@@ -2825,9 +2812,6 @@ class Book(ttk.Frame):
         self._sidebar.pack(fill='both', expand=1)
         self._sidebar.set_dnd_end_callback(self._on_dnd_end)
         
-        ## Right click menu
-        self._rightclick_menu = tk.Menu(sb, tearoff=0)  #TODO: create when needed
-        
         ## Frame to contain sheets
         self._sheet_pad_fm = spfm = ttk.Frame(pw, padding=[3, 3, 0, 0])
         self._panedwindow.add(spfm)
@@ -3176,26 +3160,11 @@ class Book(ttk.Frame):
         )
         self._sidebar_fm._on_map_child()
     
-    def _reset_rightclick_menu(self) -> tk.Menu:
-        menu = self._rightclick_menu
-        try:
-            menu.delete(0, 'end')
-        except tk.TclError:
-            pass
-        
-        try:
-            for child in menu.winfo_children():
-                child.destroy()
-        except tk.TclError:
-            pass
-        
-        return menu
-    
     def _post_switch_menu(self, event, key):
         # Focus on the sheet that has been clicked
         self.after_idle(self._sheet_var.set, key)
         
-        menu = self._rightclick_menu
+        menu = tk.Menu(self, tearoff=0)
         menu.add_command(
             label='Rename Sheet',
             command=lambda: self._rename_sheet(key)
@@ -3206,7 +3175,7 @@ class Book(ttk.Frame):
         )
         
         menu.post(event.x_root, event.y_root)  # show the right click menu
-        self.after_idle(self._reset_rightclick_menu)
+        self.after_idle(menu.destroy)
     
     def delete_sheet(self, name:str, destroy:bool=True, check:bool=False) -> dict:
         key = self._get_key(name)
@@ -3302,21 +3271,6 @@ class Book(ttk.Frame):
 # ---- Main
 # =============================================================================
 if __name__ == '__main__':
-    root = ttk.Window(title='Book (Root)',
-                      themename='cyborg',
-                      position=(100, 100),
-                      size=(800, 500))
-    
-    book = Book(root, bootstyle_scrollbar='round-light')
-    book.pack(fill='both', expand=1)
-
-    book.insert_sheet(0, name='index = 0')
-    book.insert_sheet(1, name='index = 1')
-    
-    root.mainloop()
-    import sys
-    sys.exit()#???
-    
     root = ttk.Window(title='Book (Root)',
                       themename='morph',
                       position=(100, 100),
