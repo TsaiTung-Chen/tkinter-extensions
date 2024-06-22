@@ -114,3 +114,9 @@ root.mainloop()
 Click the following thumbnail to watch a demo video:
 [![Click me to watch demo video](https://img.youtube.com/vi/kXKO83NwQCk/maxresdefault.jpg)](https://youtu.be/kXKO83NwQCk)
 
+
+# Installation
+```
+pip install https://github.com/TsaiTung-Chen/tkinter-extensions/archive/refs/tags/latest.zip
+```
+
