@@ -2505,7 +2505,6 @@ class Sheet(ttk.Frame):
             )
             if font is None:
                 return
-            font._unscaled_size = font.actual('size') / scale
             fonts = font_topleft if font_topleft.actual() == font.actual() \
                     else font
         

@@ -117,6 +117,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
         
         #EDITED
         assert isinstance(default, (tk.font.Font, type(None))), default
+        assert scale > 0, scale
         
         title = self._MessageCatalog.translate(title)
         Dialog.__init__(self, parent=parent, title=title)
@@ -124,6 +125,8 @@ class PositionedFontDialog(_Positioned, FontDialog):
         #EDITED
         if default is None:
             default = tk.font.nametofont('TkDefaultFont')
+        assert scale == 1 or hasattr(default, '_unscaled_size'), (scale, default)
+        unscaled_size = getattr(default, '_unscaled_size', default.actual('size'))
         default = default.copy()
         
         # EDITED: use weakref to avoid circular refs
@@ -140,7 +143,8 @@ class PositionedFontDialog(_Positioned, FontDialog):
         self._weight = ttk.Variable(value=self._actual["weight"])
         self._overstrike = ttk.Variable(value=self._actual["overstrike"])
         self._underline = ttk.Variable(value=self._actual["underline"])
-        self._preview_font = tk.font.Font()
+        self._preview_font = default.copy()  #EDITED
+        self._preview_font._unscaled_size = unscaled_size  #EDITED
         self._size.trace_add('write', update_font_preview)  #EDITED
         self._family.trace_add('write', update_font_preview)  #EDITED
         self._slant.trace_add("write", update_font_preview)  #EDITED
@@ -151,7 +155,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
         #EDITED: _headingfont = font.nametofont("TkHeadingFont")
         #EDITED: _headingfont.configure(weight="bold")
         
-        self._update_font_preview()
+        #EDITED: self._update_font_preview()
         self._families = set([self._family.get()])
         for f in tk.font.families():
             if all([f, not f.startswith("@"), "emoji" not in f.lower()]):
@@ -212,29 +216,9 @@ class PositionedFontDialog(_Positioned, FontDialog):
             show="",
             columns=[0],
         )
-        listbox.column(0, width=utility.scale_size(listbox, 250))
-        listbox.pack(side='left', fill='both', expand=1)
-        
-        listbox_vbar = ttk.Scrollbar(
-            container,
-            command=listbox.yview,
-            orient='vertical',
-            bootstyle="rounded",
-        )
-        listbox_vbar.pack(side='right', fill='y')
-        listbox.configure(yscrollcommand=listbox_vbar.set)
-        
-        for f in self._families:
-            listbox.insert("", iid=f, index='end', tags=[f], values=[f])
-            listbox.tag_configure(f, font=(f, self._size.get()))
-        
-        iid = self._family.get()
-        listbox.selection_set(iid)  # select default value
-        listbox.see(iid)  # ensure default is visible
-        listbox.bind(
-            "<<TreeviewSelect>>", lambda e: self._on_select_font_family(e)
-        )
-        return listbox
+        .
+        .
+        .
         '''
     
     def _font_size_selector(self, master):
@@ -258,12 +242,14 @@ class PositionedFontDialog(_Positioned, FontDialog):
             if value <= 0:
                 return False
             self._size.set(int(size_buffer.get() * self._scale))
-             # update the real size variable
+             # update the actual size
+            self._preview_font._unscaled_size = size_buffer.get()
+             # update the unscaled size
             self._update_font_preview()
             return True
         
         sizes = [*range(8, 13), *range(13, 30, 2), 36, 48, 72]
-        size_buffer = tk.IntVar(value=int(self._size.get() / self._scale))
+        size_buffer = tk.IntVar(value=self._preview_font._unscaled_size)
         cb = Combobox(
             container,
             textvariable=size_buffer,
@@ -277,28 +263,9 @@ class PositionedFontDialog(_Positioned, FontDialog):
         
         '''#EDITED: remove the Treeview
         sizes_listbox = ttk.Treeview(container, height=7, columns=[0], show="")
-        sizes_listbox.column(0, width=utility.scale_size(container, 25))
-        
-        sizes = [*range(8, 13), *range(13, 30, 2), 36, 48, 72]
-        for s in sizes:
-            sizes_listbox.insert("", iid=s, index='end', values=[s])
-
-        iid = self._size.get()
-        sizes_listbox.selection_set(iid)
-        sizes_listbox.see(iid)
-        sizes_listbox.bind(
-            "<<TreeviewSelect>>", lambda e: self._on_select_font_size(e)
-        )
-
-        sizes_listbox_vbar = ttk.Scrollbar(
-            master=container,
-            orient='vertical',
-            command=sizes_listbox.yview,
-            bootstyle="round",
-        )
-        sizes_listbox.configure(yscrollcommand=sizes_listbox_vbar.set)
-        sizes_listbox.pack(side='left', fill='y', expand=1, anchor='n')
-        sizes_listbox_vbar.pack(side='left', fill='y', expand=1)
+        .
+        .
+        .
         '''
     
     def _font_options_selectors(self, master, padding: int):
@@ -403,11 +370,13 @@ class PositionedFontDialog(_Positioned, FontDialog):
             overstrike=self._overstrike.get(),
             underline=self._underline.get()
         )
+        '''#EDITED
         try:
             self._preview_text.configure(font=self._preview_font)
         except:
             pass
-        #EDITED: self._result = self._preview_font
+        self._result = self._preview_font
+        '''
     
     def _on_submit(self):
         #EDITED: update `self._result` when submitted

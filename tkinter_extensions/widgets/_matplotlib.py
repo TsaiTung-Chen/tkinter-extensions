@@ -85,6 +85,7 @@ light_style.update({
     
     "legend.facecolor": '#CFD9E8',
     "legend.edgecolor": '#666666',
+    "legend.labelcolor": 'black',
     
     "xtick.color": '#1A1A1A',
     
@@ -110,6 +111,7 @@ dark_style.update({
     
     "legend.facecolor": 'black',
     "legend.edgecolor": '#808080',
+    "legend.labelcolor": 'white',
     
     "xtick.color": '#F2F2F2',
     

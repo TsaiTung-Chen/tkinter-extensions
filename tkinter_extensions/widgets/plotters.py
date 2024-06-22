@@ -56,16 +56,23 @@ def refresh_figcolors(fig, rc:Optional[dict]=None):
     for ax in fig.get_axes():
         ax.title.set_color(rc["text.color"])
         ax.set_facecolor(rc["axes.facecolor"])
+        
         for spine in ax.spines.values():
             spine.set_color(rc["axes.edgecolor"])
+        
         ax.xaxis.get_label().set_color(rc["axes.labelcolor"])
         ax.yaxis.get_label().set_color(rc["axes.labelcolor"])
+        
         ax.grid(color=rc["grid.color"], which='both')
+        
         if legend := ax.get_legend():
             legend.get_frame().set(
                 facecolor=rc["legend.facecolor"],
                 edgecolor=rc["legend.edgecolor"]
             )
+            for text in legend.get_texts():
+                text.set_color(rc["legend.labelcolor"])
+        
         ax.tick_params(axis='x', colors=rc["xtick.color"])
         ax.tick_params(axis='y', colors=rc["ytick.color"])
 

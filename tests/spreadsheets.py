@@ -42,7 +42,7 @@ def _set_value_method1():
 
 def _set_value_method2():
     ss.values.iat[5, 3] = 'R5, C3 (method 2)'
-    ss.redraw_cells(5, 3, 5, 3)
+    ss.draw_cells(5, 3, 5, 3)
 
 ss.after(1000, _set_value_method1)
 ss.after(2000, _set_value_method2)
