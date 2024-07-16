@@ -15,8 +15,7 @@ root.withdraw()
 
 win1 = ttk.Toplevel(title='ScrolledText')
 win1.lift()
-st = te.widgets.ScrolledText(
-    win1, scroll_orient='both', autohide=True, wrap='none')
+st = te.widgets.ScrolledText(win1, autohide=True, wrap='none', readonly=True)
 st.insert('end', ttk.tk.__doc__)
 st.pack(fill='both', expand=1)
 
@@ -41,3 +40,4 @@ for win in [win1, win2, win3]:
     win.place_window_center()
     win.protocol('WM_DELETE_WINDOW', te.utils.quit_if_all_closed(win))
 root.mainloop()
+

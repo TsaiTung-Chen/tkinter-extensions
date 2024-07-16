@@ -7,7 +7,7 @@ Created on Sun Dec 11 19:18:31 2022
 """
 
 from functools import wraps
-from typing import Tuple, Union, Callable
+from typing import Union, Callable
 import tkinter as tk
 from tkinter.font import Font
 from tkinter import Pack, Grid, Place
@@ -34,7 +34,7 @@ def quit_if_all_closed(window):
     return _wrapped
 
 
-def get_center_position(widget:tk.BaseWidget) -> Tuple[int, int]:
+def get_center_position(widget:tk.BaseWidget) -> tuple[int, int]:
     widget.update_idletasks()
     if (width := widget.winfo_width()) == 1:
         width = widget.winfo_reqwidth()
@@ -45,7 +45,7 @@ def get_center_position(widget:tk.BaseWidget) -> Tuple[int, int]:
     return (x_root + width//2, y_root + height//2)
 
 
-def center_window(to_center:tk.BaseWidget, center_of:tk.BaseWidget):
+def center_window(to_center: tk.BaseWidget, center_of: tk.BaseWidget):
     x_center, y_center = get_center_position(center_of)
     if (width := to_center.winfo_width()) == 1:
         width = to_center.winfo_reqwidth()
@@ -141,8 +141,8 @@ def unbind_recursively(widget, seqs=None, *, key, skip_top_children=True):
             child, seqs, key=key, skip_top_children=skip_top_children)
 
 
-def redirect_layout_managers(redirected:tk.BaseWidget,
-                             source:tk.BaseWidget,
+def redirect_layout_managers(redirected: tk.BaseWidget,
+                             source: tk.BaseWidget,
                              orig_prefix:str='content_'):
     """Redirect layout manager to the outer frame's layout manager
     """
@@ -159,7 +159,7 @@ def redirect_layout_managers(redirected:tk.BaseWidget,
         setattr(redirected, name, getattr(source, name))
 
 
-def get_modifiers(state:int, platform_specific:bool=True) -> set:
+def get_modifiers(state: int, platform_specific: bool = True) -> set:
     modifiers = set()
     _modifiers = MODIFIERS if platform_specific else MODIFIER_MASKS
     for mod in _modifiers:
@@ -169,8 +169,8 @@ def get_modifiers(state:int, platform_specific:bool=True) -> set:
     return modifiers
 
 
-def create_font(new_name:str=None,
-                base_font:Union[str, Font]='TkDefaultFont',
+def create_font(new_name: str = None,
+                base_font: Union[str, Font] = 'TkDefaultFont',
                 family=None,
                 size=None,
                 slant=None,
@@ -204,12 +204,12 @@ def get_font(class_name, default='TkDefaultFont'):
     return tk.font.nametofont(font_name)
 
 
-def create_font_style(class_name:str,
-                      prefix:str,
+def create_font_style(class_name: str,
+                      prefix: str,
                       bootstyle='',
                       orient=None,
-                      apply=True,
-                      **kwargs) -> Tuple[str, Font]:
+                      apply: bool = True,
+                      **kwargs) -> tuple[str, Font]:
     assert isinstance(class_name, str), class_name
     subs = [ '', *class_name.split('.') ]
     for i, widget_name in enumerate(subs[::-1]):
@@ -243,7 +243,7 @@ def create_font_style(class_name:str,
     return style_name, new_font
 
 
-def is_color(color:str):
+def is_color(color: str):
     try:
         ImageColor.getrgb(color)
     except ValueError:
@@ -251,14 +251,14 @@ def is_color(color:str):
     return True
 
 
-def contrast_color(color:str):
+def contrast_color(color: str):
     return colorutils.contrast_color(ImageColor.getrgb(color), model='rgb')
 
 
 def recolor_black(image:Image.Image,
-                  new_color:tuple,   # RGB
-                  photoimage=False,
-                  master:Union[tk.Tk, tk.BaseWidget, None]=None):
+                  new_color: tuple,   # RGB
+                  photoimage: bool = False,
+                  master: Union[tk.Tk, tk.BaseWidget, None] = None):
     assert isinstance(image, Image.Image), type(image)
     assert isinstance(new_color, tuple), type(new_color)
     
@@ -273,10 +273,10 @@ def recolor_black(image:Image.Image,
     return img_converted
 
 
-def create_image_pair(image:Image.Image,
-                      widget:tk.BaseWidget,
-                      photoimage=False,
-                      master:Union[tk.Tk, tk.BaseWidget, None]=None):
+def create_image_pair(image: Image.Image,
+                      widget: tk.BaseWidget,
+                      photoimage: bool = False,
+                      master: Union[tk.Tk, tk.BaseWidget, None] = None):
     _convert_bitdepth = lambda x: round((255./65535.) * x)
     
     style = ttk.Style()
@@ -292,11 +292,11 @@ def create_image_pair(image:Image.Image,
 
 
 def create_color_image(color,
-                       size:Union[int, tuple, list],
-                       padding:Union[int, tuple, list]=(0, 0),
-                       autoscale=True,
-                       photoimage=False,
-                       master:Union[tk.Tk, tk.BaseWidget, None]=None):
+                       size: Union[int, tuple, list],
+                       padding: Union[int, tuple, list] = (0, 0),
+                       autoscale: bool = True,
+                       photoimage: bool = False,
+                       master: Union[tk.Tk, tk.BaseWidget, None] = None):
     """Create an image of size `size` and color `color` with external padding 
     `padding`. The padded margin has the same rgb color but with zero alpha 
     value
@@ -339,8 +339,8 @@ def create_color_image(color,
     return image
 
 
-def modify_hsl(color, func: Callable, inmodel:str='hex', outmodel:str='hex'
-               ) -> Union[Tuple[int, int, int], str]:
+def modify_hsl(color, func: Callable, inmodel: str = 'hex', outmodel: str = 'hex'
+               ) -> Union[tuple[int, int, int], str]:
     h, s, l = colorutils.color_to_hsl(color, model=inmodel)
     h, s, l = func(h, s, l)
     

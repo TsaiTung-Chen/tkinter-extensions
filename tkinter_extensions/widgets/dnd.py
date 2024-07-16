@@ -8,7 +8,7 @@ Created on Mon May 22 22:35:24 2023
 
 import tkinter as tk
 import tkinter.dnd
-from typing import Union, Optional, List, Tuple, Callable
+from typing import Union, Optional, Callable
 # =============================================================================
 # ---- Classes
 # =============================================================================
@@ -18,7 +18,7 @@ class OrderlyContainer(tk.Canvas):
     achieved intuitively by drag-and-drop with the mouse cursor
     """
     
-    def __init__(self, *args, dnd_group_id:int=None, **kwargs):
+    def __init__(self, *args, dnd_group_id: int = None, **kwargs):
         super().__init__(*args, **kwargs)
         self._dnd_group_id = dnd_group_id
         self._dnd_widgets = list()
@@ -31,12 +31,12 @@ class OrderlyContainer(tk.Canvas):
         return self._dnd_widgets
     
     def dnd_put(self,
-                widgets:list,
-                orient:Optional[str]=None,
-                sticky:Optional[str]=None,
-                expand:Union[Tuple, List, bool, int]=False,
-                padding:Union[Tuple[int], List[int], int]=0,
-                ipadding:Union[Tuple[int], List[int], int]=0):
+                widgets: list,
+                orient: Optional[str] = None,
+                sticky: Optional[str] = None,
+                expand: Union[tuple, list, bool, int] = False,
+                padding: Union[tuple[int], list[int], int] = 0,
+                ipadding: Union[tuple[int], list[int], int] = 0):
         """Use this function to put widgets `widgets` onto the container 
         (canvas).
         
@@ -130,16 +130,16 @@ class OrderlyContainer(tk.Canvas):
         self._dnd = dict()
         self._update_widgets()
     
-    def bind_dnd_start(self, moved:tk.BaseWidget):
+    def bind_dnd_start(self, moved: tk.BaseWidget):
         """Overwrite this method to customize the trigger widget
         """
         self._bind_dnd_start(trigger=moved, moved=moved)
     
-    def _bind_dnd_start(self, *, trigger:tk.BaseWidget, moved:tk.BaseWidget):
+    def _bind_dnd_start(self, *, trigger: tk.BaseWidget, moved: tk.BaseWidget):
         trigger.configure(cursor='hand2')
         trigger.bind('<ButtonPress-1>', self._get_dnd_start(moved))
     
-    def set_dnd_start_callback(self, func:Callable):
+    def set_dnd_start_callback(self, func: Callable):
         """`func` will be executed when `dnd_start` runs. `func` should 
         accept `source` and `event` arguments
         """
@@ -149,7 +149,7 @@ class OrderlyContainer(tk.Canvas):
     def remove_dnd_start_callback(self):
         self._dnd_start_callback = None
     
-    def set_dnd_commit_callback(self, func:Callable):
+    def set_dnd_commit_callback(self, func: Callable):
         """`func` will be executed when `dnd_commit` runs. `func` should 
         accept `source` and `event` arguments
         """
@@ -159,7 +159,7 @@ class OrderlyContainer(tk.Canvas):
     def remove_dnd_commit_callback(self):
         self._dnd_commit_callback = None
     
-    def set_dnd_end_callback(self, func:Callable):
+    def set_dnd_end_callback(self, func: Callable):
         """`func` will be executed when `dnd_end` runs. `func` should 
         accept `target` and `event` arguments
         """
@@ -478,7 +478,7 @@ class OrderlyContainer(tk.Canvas):
 
 
 class TriggerOrderlyContainer(OrderlyContainer):
-    def bind_dnd_start(self, moved:tk.BaseWidget):
+    def bind_dnd_start(self, moved: tk.BaseWidget):
         for child in moved.winfo_children():
             if getattr(child, '_dnd_trigger', None):
                 self._bind_dnd_start(moved=moved, trigger=child)

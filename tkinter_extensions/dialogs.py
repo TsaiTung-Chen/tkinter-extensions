@@ -22,9 +22,9 @@ from .widgets import Combobox
 # =============================================================================
 class _Positioned:
     def show(self,
-             position:Union[tuple, list, Callable, None]=None,
-             wait=True,
-             callback:Optional[Callable]=None):
+             position: Union[tuple, list, Callable, None] = None,
+             wait: bool = True,
+             callback: Optional[Callable] = None):
         self._callback = callback  #EDITED: this must receive the result value
         self._result = None
         self.build()
@@ -111,7 +111,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
     def __init__(self,
                  title="Font Selector",
                  parent=None,
-                 default:Optional[tk.font.Font]=None,
+                 default: Optional[tk.font.Font] = None,
                  scale:float=1.):  # actual font size = int(option size * scale)
         #EDITED: set the default font as `default`
         
@@ -331,7 +331,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
         )
         opt_overstrike.pack(side='left', padx=5, pady=5)
     
-    def _font_preview(self, master, padding:int):
+    def _font_preview(self, master, padding: int):
         #EDITED: don't turn off `pack_propagate` and set a small width
         
         container = ttk.Frame(master, padding=padding)

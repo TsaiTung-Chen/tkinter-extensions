@@ -95,7 +95,7 @@ class ColorButton(ttk.Button):
     def background(self) -> str:
         return self._background
     
-    def __init__(self, master, *args, background:Optional[str]=None, **kw):
+    def __init__(self, master, *args, background: Optional[str] = None, **kw):
         super().__init__(master, *args, **kw)
         if background is None:
             style = ttk.Style.get_instance()
@@ -104,7 +104,7 @@ class ColorButton(ttk.Button):
         self.set_color(background)
         self.bind('<<ThemeChanged>>', lambda e: self.set_color())
     
-    def set_color(self, background:Optional[str]=None):
+    def set_color(self, background: Optional[str] = None):
         """Ref: `ttkbootstrap.style.StyleBuilderTTK.create_button_style`
         """
         style_name = f'{id(self)}.TButton'
@@ -156,7 +156,7 @@ class ColorButton(ttk.Button):
 # ---- Main
 # =============================================================================
 if __name__ == '__main__':
-    def _keep_changing_color(button:ColorButton, colors:list, ms:int):
+    def _keep_changing_color(button: ColorButton, colors: list, ms: int):
         colors = list(colors)
         old_color = button._background
         old_idx = colors.index(old_color)

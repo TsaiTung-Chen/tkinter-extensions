@@ -7,7 +7,7 @@ Created on Mon May 22 22:35:24 2023
 """
 
 import tkinter as tk
-from typing import Tuple, Callable
+from typing import Optional, Callable
 
 import ttkbootstrap as ttk
 # =============================================================================
@@ -17,10 +17,12 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
     def __init__(self,
                  master,
                  *args,
-                 window_title:str='',
-                 dock_callbacks:Tuple[Callable, Callable]=(None, None),
-                 undock_callbacks:Tuple[Callable, Callable]=(None, None),
-                 place_button:bool=True,
+                 window_title: str = '',
+                 dock_callbacks: tuple[Optional[Callable],
+                                       Optional[Callable]] = (None, None),
+                 undock_callbacks: tuple[Optional[Callable],
+                                         Optional[Callable]] = (None, None),
+                 place_button: bool = True,
                  **kwargs):
         super().__init__(master, *args, **kwargs)
         self._window_title = window_title

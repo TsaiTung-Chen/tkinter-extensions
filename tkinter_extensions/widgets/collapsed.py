@@ -20,12 +20,12 @@ class CollapsedFrame(ttk.Frame):
     def __init__(self,
                  master=None,
                  text='',
-                 labelwidget:tk.BaseWidget=None,
-                 variable:Optional[tk.Variable]=None,
+                 labelwidget: tk.BaseWidget = None,
+                 variable: Optional[tk.Variable] = None,
                  onvalue=None,
-                 orient:str='vertical',
-                 style:Optional[str]=None,
-                 bootstyle:Optional[str]=None,
+                 orient: str = 'vertical',
+                 style: Optional[str] = None,
+                 bootstyle: Optional[str] = None,
                  **kw):
         _style = None if style is None else style.lower()
         assert orient in ('vertical', 'horizontal'), orient

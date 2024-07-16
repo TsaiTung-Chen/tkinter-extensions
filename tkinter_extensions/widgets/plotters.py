@@ -26,7 +26,7 @@ from ._matplotlib import RC
 # ---- Functions
 # =============================================================================
 @contextmanager
-def rc_context(rc:Optional[dict]=None, fname=None):
+def rc_context(rc: Optional[dict] = None, fname=None):
     backend_prev = plt.rcParams["backend"]
     try:
         with plt.rc_context(rc, fname):
@@ -35,7 +35,7 @@ def rc_context(rc:Optional[dict]=None, fname=None):
         plt.rcParams["backend"] = backend_prev
 
 
-def use_rc_style(rc:Optional[dict]=None, fname=None):
+def use_rc_style(rc: Optional[dict] = None, fname=None):
     def _decorator(func):
         @wraps(func)
         def _wrapper(*args, **kwargs):
@@ -46,7 +46,7 @@ def use_rc_style(rc:Optional[dict]=None, fname=None):
     return _decorator
 
 
-def refresh_figcolors(fig, rc:Optional[dict]=None):
+def refresh_figcolors(fig, rc: Optional[dict] = None):
     rc = rc or plt.rcParams
     
     if suptitle := fig._suptitle:
@@ -77,7 +77,7 @@ def refresh_figcolors(fig, rc:Optional[dict]=None):
         ax.tick_params(axis='y', colors=rc["ytick.color"])
 
 
-def show_figs(*figs, reverse=False):  # convenience function
+def show_figs(*figs, reverse: bool = False):  # convenience function
     indices = list(range(1, len(figs)+1))
     if reverse:
         indices, figs = reversed(indices), reversed(figs)
@@ -107,7 +107,11 @@ def show_figs(*figs, reverse=False):  # convenience function
     return root
 
 
-def autoscale(ax:plt.Axes, x=True, y=True, force=False, visible_only=True):
+def autoscale(ax: plt.Axes,
+              x: bool = True,
+              y: bool = True,
+              force: bool = False,
+              visible_only: bool = True):
     assert x or y, (x, y)
     assert isinstance(ax, plt.Axes), ax
     
@@ -184,7 +188,7 @@ class ToolTipTtk(ToolTip):
 
 
 class NavigationToolbarTtk(NavigationToolbar2Tk):
-    def __init__(self, canvas, window=None, *, pack_toolbar=True):
+    def __init__(self, canvas, window=None, *, pack_toolbar: bool = True):
         from matplotlib import cbook
         from matplotlib.backend_bases import NavigationToolbar2
         
@@ -428,7 +432,7 @@ class BasePlotter(UndockedFrame):
     def delete_on_destroy(self) -> list:
         return self._delete_on_destroy
     
-    def __init__(self, master, figure, dnd_trigger=False, **kw):
+    def __init__(self, master, figure, dnd_trigger: bool = False, **kw):
         kw["place_button"] = False
         kw.setdefault("window_title", 'Plotting Pad')
         super().__init__(master, **kw)
@@ -495,7 +499,7 @@ class BasePlotter(UndockedFrame):
             return True
         return False
     
-    def _fetch_rc(self, copy:bool=True) -> dict:
+    def _fetch_rc(self, copy: bool = True) -> dict:
         rc = plt.rcParams
         if copy:
             return deepcopy(rc)
