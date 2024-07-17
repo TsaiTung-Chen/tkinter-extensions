@@ -23,9 +23,9 @@ win2 = ttk.Toplevel(title='ScrolledFrame')
 win2.lift()
 sf = te.widgets.ScrolledFrame(win2, autohide=False, scroll_orient='vertical')
 sf.pack(fill='both', expand=1)
-for i in range(30):
-    text = str(i)+'_'.join(str(i) for i in range(500))
-    ttk.Button(sf, text=text).pack(fill='both', expand=1)
+for i in range(20):
+    text = str(i) + ': ' + '_'.join(str(i) for i in range(30))
+    ttk.Button(sf, text=text).pack(anchor='e')
 
 win3 = ttk.Toplevel(title='ScrolledCanvas', width=1500, height=1000)
 win3.lift()
@@ -39,5 +39,6 @@ sc.configure(bg='gray', width=x2, height=y2)
 for win in [win1, win2, win3]:
     win.place_window_center()
     win.protocol('WM_DELETE_WINDOW', te.utils.quit_if_all_closed(win))
+
 root.mainloop()
 

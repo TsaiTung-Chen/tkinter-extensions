@@ -7,7 +7,7 @@ Created on Mon May 22 22:35:24 2023
 """
 
 import time
-from typing import Optional
+from typing import Optional, Union
 import tkinter as tk
 from tkinter.font import nametofont
 
@@ -33,7 +33,7 @@ class _GeneralView:
         return self._sensitivity
     
     @sensitivity.setter
-    def sensitivity(self, value:float):
+    def sensitivity(self, value: float):
         self._sensitivity = float(value)
     
     @property
@@ -167,10 +167,12 @@ class _GeneralXYView:
         super().__init__(*args, **kwargs)
         
         # Init x and y GeneralViews
-        self._xview = _GeneralView(widget=self, orient='x')
+        self._xview = _GeneralView(widget=self, orient='x', sensitivity=0.5)
         self._yview = _GeneralView(widget=self, orient='y')
     
-    def get_scrolling_sensitivity(self, x: bool = True, y: bool = True):
+    def _get_scrolling_sensitivity(self, x: bool = True, y: bool = True):
+        # Deprecated
+        
         assert x or y, (x, y)
         if x and y:
             return [self._xview.sensitivity, self._yview.sensitivity]
@@ -178,8 +180,10 @@ class _GeneralXYView:
             return self._xview.sensitivity
         return self._yview.sensitivity
     
-    def set_scrolling_sensitivity(
+    def _set_scrolling_sensitivity(
             self, x: Optional[float] = None, y: Optional[float] = None):
+        # Deprecated
+        
         assert not (x is None and y is None), (x, y)
         
         if x is not None:
@@ -219,12 +223,13 @@ class _GeneralXYView:
         self.yview_scroll(0, 'unit')
 
 
-class _Scrolled:#TODO: natural size
+class _Scrolled:
     """This class is designed to be used with multiple inheritance and must be 
     the 1st parent class. This means that it will automatically call the 2nd 
     parent class' `__init__` function
     """
-    mousewheel_sensitivity = 1.
+    
+    _scrollbar_padding = (0, 1)
     
     def __init__(self,
                  master=None,
@@ -232,12 +237,16 @@ class _Scrolled:#TODO: natural size
                  autohide=True,
                  hbootstyle='round',
                  vbootstyle='round',
+                 scroll_sensitivity: Union[float,
+                                           tuple[float, float],
+                                           list[float, float]] = 3.,
                  builtin_method=False,
                  **kwargs):
         valid_orients = ('vertical', 'horizontal', 'both', None)
         assert scroll_orient in valid_orients, (valid_orients, scroll_orient)
-        self._scroll_orient = scroll_orient
         self._builtin_method = builtin_method
+        self._scroll_orient = scroll_orient
+        self.scroll_sensitivity = scroll_sensitivity
         
         # Outer frame (container)
         self._container = container = ttk.Frame(
@@ -260,8 +269,7 @@ class _Scrolled:#TODO: natural size
             self.place(x=0, y=0)
         
         # Scrollbars
-        hbar, vbar = None, None
-        pad = (0, 1)
+        self._hbar = self._vbar = None
         if scroll_orient in ('horizontal', 'both'):
             self._hbar = hbar = AutoHiddenScrollbar(
                 master=container,
@@ -270,7 +278,7 @@ class _Scrolled:#TODO: natural size
                 bootstyle=hbootstyle,
                 orient='horizontal',
             )
-            hbar.grid(row=1, column=0, sticky='ew', pady=pad)
+            hbar.grid(row=1, column=0, sticky='ew', pady=self._scrollbar_padding)
             self.configure(xscrollcommand=hbar.set)
         elif not builtin_method:
             self.place(relwidth=1.)
@@ -283,7 +291,7 @@ class _Scrolled:#TODO: natural size
                 bootstyle=vbootstyle,
                 orient='vertical',
             )
-            vbar.grid(row=0, column=1, sticky='ns', padx=pad)
+            vbar.grid(row=0, column=1, sticky='ns', padx=self._scrollbar_padding)
             self.configure(yscrollcommand=vbar.set)
         elif not builtin_method:
             self.place(relheight=1.)
@@ -309,23 +317,46 @@ class _Scrolled:#TODO: natural size
     @property
     def vbar(self): return self._vbar
     
-    def show_scrollbars(self, after_ms: int = 0):
-        if self.hbar:
-            self.hbar.show(after_ms)
-        if self.vbar:
-            self.vbar.show(after_ms)
+    @property
+    def scroll_sensitivity(self): return self._scroll_sensitivity
     
-    def hide_scrollbars(self, after_ms: int = 0):
+    @scroll_sensitivity.setter
+    def scroll_sensitivity(
+            self,
+            sensitivity: Union[float, tuple[float, float], list[float, float]]
+    ):
+        assert isinstance(sensitivity, (float, tuple, list)), sensitivity
+        
+        try:
+            self._scroll_sensitivity = _, _ = tuple(sensitivity)
+        except TypeError:
+            self._scroll_sensitivity = (float(sensitivity), float(sensitivity))
+    
+    def autohide_scrollbars(self, auto: bool = True):
         if self.hbar:
-            self.hbar.hide(after_ms)
+            self.hbar.autohide = auto
         if self.vbar:
-            self.vbar.hide(after_ms)
+            self.vbar.autohide = auto
+    
+    def show_scrollbars(
+            self, after_ms: int = 0, autohide: Optional[bool] = None):
+        if self.hbar:
+            self.hbar.show(after_ms, autohide=autohide)
+        if self.vbar:
+            self.vbar.show(after_ms, autohide=autohide)
+    
+    def hide_scrollbars(
+            self, after_ms: int = 0, autohide: Optional[bool] = None):
+        if self.hbar:
+            self.hbar.hide(after_ms, autohide=autohide)
+        if self.vbar:
+            self.vbar.hide(after_ms, autohide=autohide)
     
     def rebind_mousewheel(self):
         self.unbind_mousewheel()
-        self.bind_mousewheel()
+        self._bind_mousewheel()
     
-    def bind_mousewheel(self):
+    def _bind_mousewheel(self):
         if self._os == 'x11':  # Linux
             seqs = ['<ButtonPress-4>', '<ButtonPress-5>']
         else:
@@ -364,14 +395,39 @@ class _Scrolled:#TODO: natural size
             delta = event.delta / 120.
         else:  # Mac
             delta = event.delta
-        number = -round(delta * self.mousewheel_sensitivity)
         
-        if ((event.state & MODIFIER_MASKS["Shift"]) == MODIFIER_MASKS["Shift"]):
+        x_direction = (event.state & MODIFIER_MASKS["Shift"]) \
+            == MODIFIER_MASKS["Shift"]
+        sensitivity = self.scroll_sensitivity[0 if x_direction else 1]
+        number = -round(delta * sensitivity)
+        
+        if x_direction:
             if self._builtin_method:
-                number *= 20
+                number *= 2
             self.xview_scroll(number, 'units')
         else:
             self.yview_scroll(number, 'units')
+        
+        return 'break'
+    
+    def natural_size(
+            self, hbar: bool = False, vbar: bool = False) -> tuple[int, int]:
+        content_width = self.winfo_reqwidth()
+        content_height = self.winfo_reqheight()
+        
+        pad_width = pad_height = sum(self._scrollbar_padding)
+        if vbar and self.vbar:
+            vbar_width = self.vbar.winfo_reqwidth()
+        else:
+            vbar_width = pad_width = 0
+        
+        if hbar and self.hbar:
+            hbar_height = self.hbar.winfo_reqheight()
+        else:
+            hbar_height = pad_height = 0
+        
+        return (content_width + vbar_width + pad_width,
+                content_height + hbar_height + pad_height)
 
 
 # =============================================================================
@@ -389,6 +445,15 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
         self._autohide_ms = autohide_ms
         self._manager = None
         self._last_func = dict()
+    
+    @property
+    def autohide(self) -> bool:
+        return self._autohide
+    
+    @autohide.setter
+    def autohide(self, auto: bool):
+        if auto is not None:
+            self._autohide = bool(auto)
     
     @property
     def hidden(self):
@@ -410,9 +475,7 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
     def show(self, after_ms: int = 0, autohide=None):
         assert self._manager, self._manager
         
-        if autohide is not None:
-            self.autohide = autohide
-        
+        self.autohide = autohide
         id_ = time.time()
         self._last_func = {"name": 'show', "id": id_}
         
@@ -422,9 +485,7 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
             self._show(id_)
     
     def hide(self, after_ms: int = 0, autohide=None):
-        if autohide is not None:
-            self.autohide = autohide
-        
+        self.autohide = autohide
         self._manager = manager = self._manager or self.winfo_manager()
         if not manager:
             return
@@ -466,20 +527,11 @@ def create_scrolledwidget(widget:tk.BaseWidget=ttk.Frame):
 
 def ScrolledWidget(master=None,
                    widget: tk.BaseWidget = ttk.Frame,
-                   scroll_orient='both',
-                   autohide=True,
-                   hbootstyle='round',
-                   vbootstyle='round',
                    **kwargs):
     """A convenience function working like a class instance init function.
     """
-    return create_scrolledwidget(widget=widget)(master=master,
-                                                scroll_orient=scroll_orient,
-                                                autohide=autohide,
-                                                hbootstyle=hbootstyle,
-                                                vbootstyle=vbootstyle,
-                                                builtin_method=False,
-                                                **kwargs)
+    return create_scrolledwidget(widget=widget)(
+        master=master, builtin_method=False, **kwargs)
 
 
 # Scrolled widgets using non-builtin method
@@ -542,9 +594,9 @@ if __name__ == '__main__':
     win2.lift()
     sf = ScrolledFrame(win2, autohide=False, scroll_orient='vertical')
     sf.pack(fill='both', expand=1)
-    for i in range(30):
-        text = str(i)+'_'.join(str(i) for i in range(500))
-        ttk.Button(sf, text=text).pack(fill='both', expand=1)
+    for i in range(20):
+        text = str(i) + ': ' + '_'.join(str(i) for i in range(30))
+        ttk.Button(sf, text=text).pack(anchor='e')
     
     win3 = ttk.Toplevel(title='ScrolledCanvas', width=1500, height=1000)
     win3.lift()
@@ -558,5 +610,6 @@ if __name__ == '__main__':
     for win in [win1, win2, win3]:
         win.place_window_center()
         win.protocol('WM_DELETE_WINDOW', quit_if_all_closed(win))
+    
     root.mainloop()
 

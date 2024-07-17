@@ -143,8 +143,8 @@ def unbind_recursively(widget, seqs=None, *, key, skip_top_children=True):
 
 def redirect_layout_managers(redirected: tk.BaseWidget,
                              source: tk.BaseWidget,
-                             orig_prefix:str='content_'):
-    """Redirect layout manager to the outer frame's layout manager
+                             orig_prefix: str = 'content_'):
+    """Redirect layout manager to the `source`'s layout manager
     """
     layout_methods = vars(Pack).keys() | vars(Grid).keys() | vars(Place).keys()
     is_layout = lambda name: (

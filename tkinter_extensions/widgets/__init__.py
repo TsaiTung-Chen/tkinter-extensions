@@ -9,8 +9,8 @@ Created on Mon May 22 22:35:24 2023
 from .dnd import OrderlyContainer, TriggerOrderlyContainer
 from .collapsed import CollapsedFrame
 from .scrolled import ScrolledWidget
-from .scrolled import ScrolledFrame, ScrolledLabelframe
-from .scrolled import ScrolledText, ScrolledTreeview
+from .scrolled import ScrolledTkFrame, ScrolledFrame, ScrolledLabelframe
+from .scrolled import ScrolledText, ScrolledTreeview, ScrolledCanvas
 from .undocked import UndockedFrame
 from .plotters import BasePlotter
 from .spreadsheets import Sheet, Book
@@ -20,8 +20,9 @@ from ._others import (
 
 __all__ = [
     'OrderlyContainer', 'TriggerOrderlyContainer', 'CollapsedFrame',
-    'ScrolledWidget', 'ScrolledFrame', 'ScrolledLabelframe', 'ScrolledText',
-    'ScrolledTreeview', 'UndockedFrame', 'BasePlotter', 'Sheet', 'Book',
-    'ErrorCatchingWindow', 'OptionMenu', 'Combobox', 'ColorButton'
+    'ScrolledWidget', 'ScrolledTkFrame', 'ScrolledFrame', 'ScrolledLabelframe',
+    'ScrolledText', 'ScrolledTreeview', 'ScrolledCanvas', 'UndockedFrame',
+    'BasePlotter', 'Sheet', 'Book', 'ErrorCatchingWindow', 'OptionMenu',
+    'Combobox', 'ColorButton'
 ]
 
