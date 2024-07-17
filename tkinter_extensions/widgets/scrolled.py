@@ -219,7 +219,7 @@ class _GeneralXYView:
         self.yview_scroll(0, 'unit')
 
 
-class _Scrolled:
+class _Scrolled:#TODO: natural size
     """This class is designed to be used with multiple inheritance and must be 
     the 1st parent class. This means that it will automatically call the 2nd 
     parent class' `__init__` function

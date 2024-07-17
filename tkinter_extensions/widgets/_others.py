@@ -11,13 +11,15 @@ from typing import Optional
 
 import ttkbootstrap as ttk
 from ttkbootstrap import Colors
+
+from .. import variables as vrb
 # =============================================================================
 # ---- Classes
 # =============================================================================
 class ErrorCatchingWindow(ttk.Window):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._error_message = tk.StringVar(self, name='err_msg')
+        self._error_message = vrb.StringVar(self, name='err_msg')
     
     def report_callback_exception(self, exc, val, tb):
         from traceback import format_exc
@@ -166,17 +168,38 @@ if __name__ == '__main__':
         new_color = colors[new_idx]
         button.set_color(new_color)
         button.after(ms, _keep_changing_color, button, colors, ms)
+    
+    def _new_error():
+        def _raise_error():
+            raise ValueError("Error Catched")
+        
+        error_lb.configure(text='No error')
+        root.after(1000, _raise_error)
     #
-    root = ttk.Window(size=(1280, 960))
-    ttk.Button(root, text='Normal Button', bootstyle='danger').pack()
+    
+    root = ErrorCatchingWindow(size=(800, 600))
+    
+    ttk.Button(root, text='Raise error', command=_new_error).pack(pady=[3, 0])
+    error_lb = ttk.Label(root, text='No error', bootstyle='inverse')
+    error_lb.pack(pady=[1, 3])
+    root._error_message.trace_add(
+        'write',
+        lambda name, *_: error_lb.configure(text=root.getvar(name))
+    )
+    
+    ttk.Button(root, text='Normal Button', bootstyle='danger').pack(pady=[3, 0])
+    
     red_bt = ColorButton(root, text='Red Button')
-    red_bt.pack()
+    red_bt.pack(pady=[1, 0])
     red_bt.set_color('red')
-    varying_bt = ColorButton(root, text='Red Button')
-    varying_bt.pack()
+    
+    varying_bt = ColorButton(root, text='Varying Button')
+    varying_bt.pack(pady=[1, 3])
     varying_bt.set_color('red')
+    
     colors = ['red', 'blue', 'green']
     root.after(1500, _keep_changing_color, varying_bt, colors, 1500)
     root.after(10000, lambda: root.style.theme_use('cyborg'))
+    
     root.mainloop()
 
