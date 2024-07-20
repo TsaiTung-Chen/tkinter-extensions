@@ -8,10 +8,10 @@ Created on Mon May 22 22:35:24 2023
 
 import tkinter as tk
 from typing import Optional
-from weakref import WeakMethod
 
 import ttkbootstrap as ttk
 
+from .. import variables as vrb
 from ..utils import redirect_layout_managers
 # =============================================================================
 # ---- Widgets
@@ -44,7 +44,7 @@ class CollapsedFrame(ttk.Frame):
             style = None
         
         self._onvalue = onvalue = onvalue or '__on__'
-        self._variable = variable = variable or tk.StringVar(
+        self._variable = variable = variable or vrb.StringVar(
             master, value=onvalue)
         self._labelwidget = labelwidget = labelwidget or ttk.Checkbutton(
             master,
@@ -55,9 +55,7 @@ class CollapsedFrame(ttk.Frame):
             style=style_button,
             bootstyle=bootstyle_button
         )
-        wref_toggle = WeakMethod(self.toggle)
-        toggle = lambda *_: wref_toggle()()
-        variable.trace_add('write', toggle)
+        variable.trace_add('write', self.toggle, weak=True)
         
         self._container = container = ttk.Labelframe(master,
                                                      labelwidget=labelwidget,
@@ -113,7 +111,7 @@ class CollapsedFrame(ttk.Frame):
         self.container.grid_propagate(1)
         self.content_grid()
     
-    def toggle(self, name=None, index=None, mode=None):
+    def toggle(self, *_):
         if self.variable.get() == self._onvalue:  # show
             self.resume()
         else:  # hide

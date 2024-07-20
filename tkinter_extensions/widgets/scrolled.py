@@ -412,17 +412,18 @@ class _Scrolled:
     
     def natural_size(
             self, hbar: bool = False, vbar: bool = False) -> tuple[int, int]:
-        content_width = self.winfo_reqwidth()
-        content_height = self.winfo_reqheight()
+        self.update_idletasks()
+        content_width = self.winfo_width()
+        content_height = self.winfo_height()
         
         pad_width = pad_height = sum(self._scrollbar_padding)
         if vbar and self.vbar:
-            vbar_width = self.vbar.winfo_reqwidth()
+            vbar_width = self.vbar.winfo_width()
         else:
             vbar_width = pad_width = 0
         
         if hbar and self.hbar:
-            hbar_height = self.hbar.winfo_reqheight()
+            hbar_height = self.hbar.winfo_height()
         else:
             hbar_height = pad_height = 0
         

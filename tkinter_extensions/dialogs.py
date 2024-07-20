@@ -7,7 +7,6 @@ Created on Sun Dec 11 19:18:31 2022
 """
 
 import tkinter as tk
-from weakref import WeakMethod
 from typing import Union, Callable, Optional
 
 import ttkbootstrap as ttk
@@ -17,6 +16,7 @@ from ttkbootstrap.dialogs import Dialog, QueryDialog, MessageDialog, FontDialog
 from ttkbootstrap.dialogs.colorchooser import ColorChooserDialog
 
 from .widgets import Combobox
+from . import variables as vrb
 # =============================================================================
 # ---- Classes
 # =============================================================================
@@ -87,16 +87,11 @@ class PositionedColorChooserDialog(_Positioned, ColorChooserDialog):
     def __init__(self, *args, **kwargs):  #EDITED
         super().__init__(*args, **kwargs)
         
-        # Remove and set the callback with weakref to avoid circular refs
-        trace_info = self.dropper.result.trace_info()
-        assert len(trace_info) == 1, trace_info
-        
-        wref_trace_dropper_color = WeakMethod(self.trace_dropper_color)
-        trace_dropper_color = lambda *_: wref_trace_dropper_color()(*_)
-        
-        cbname = trace_info[0][1]
-        self.dropper.result.trace_remove('write', cbname)
-        self.dropper.result.trace_add('write', trace_dropper_color)
+        # Remove the variable and set a new one with weak ref to the callback
+        # to avoid circular refs
+        self.dropper.result = vrb.Variable()
+        self.dropper.result.trace_add(
+            'write', self.trace_dropper_color, weak=True)
     
     def on_button_press(self, *args, **kw):
         res = super().on_button_press(*args, **kw)
@@ -129,28 +124,26 @@ class PositionedFontDialog(_Positioned, FontDialog):
         unscaled_size = getattr(default, '_unscaled_size', default.actual('size'))
         default = default.copy()
         
-        # EDITED: use weakref to avoid circular refs
-        wref_update_font_preview = WeakMethod(self._update_font_preview)
-        update_font_preview = lambda *_: wref_update_font_preview()(*_)
-        
         self._scale = scale  #EDITED
         self._style = ttk.Style()
         self._default:tk.font.Font = default  #EDITED
         self._actual = self._default.actual()
-        self._size = ttk.Variable(value=self._actual["size"])
-        self._family = ttk.Variable(value=self._actual["family"])
-        self._slant = ttk.Variable(value=self._actual["slant"])
-        self._weight = ttk.Variable(value=self._actual["weight"])
-        self._overstrike = ttk.Variable(value=self._actual["overstrike"])
-        self._underline = ttk.Variable(value=self._actual["underline"])
+        self._size = vrb.Variable(value=self._actual["size"])
+        self._family = vrb.Variable(value=self._actual["family"])
+        self._slant = vrb.Variable(value=self._actual["slant"])
+        self._weight = vrb.Variable(value=self._actual["weight"])
+        self._overstrike = vrb.Variable(value=self._actual["overstrike"])
+        self._underline = vrb.Variable(value=self._actual["underline"])
         self._preview_font = default.copy()  #EDITED
         self._preview_font._unscaled_size = unscaled_size  #EDITED
-        self._size.trace_add('write', update_font_preview)  #EDITED
-        self._family.trace_add('write', update_font_preview)  #EDITED
-        self._slant.trace_add("write", update_font_preview)  #EDITED
-        self._weight.trace_add("write", update_font_preview)  #EDITED
-        self._overstrike.trace_add("write", update_font_preview)  #EDITED
-        self._underline.trace_add("write", update_font_preview)  #EDITED
+        
+        #EDITED: use weakref to avoid circular refs
+        self._size.trace_add('write', self._update_font_preview, weak=True)
+        self._family.trace_add('write', self._update_font_preview, weak=True)
+        self._slant.trace_add("write", self._update_font_preview, weak=True)
+        self._weight.trace_add("write", self._update_font_preview, weak=True)
+        self._overstrike.trace_add("write", self._update_font_preview, weak=True)
+        self._underline.trace_add("write", self._update_font_preview, weak=True)
         
         #EDITED: _headingfont = font.nametofont("TkHeadingFont")
         #EDITED: _headingfont.configure(weight="bold")
@@ -232,7 +225,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
         )
         header.pack(fill='x', pady=(0, 2), anchor='n')
         
-        # EDIT: add new size combobox
+        #EDITED: add new size combobox
         @validator
         def _positive_int(event):
             try:
@@ -249,7 +242,7 @@ class PositionedFontDialog(_Positioned, FontDialog):
             return True
         
         sizes = [*range(8, 13), *range(13, 30, 2), 36, 48, 72]
-        size_buffer = tk.IntVar(value=self._preview_font._unscaled_size)
+        size_buffer = vrb.IntVar(value=self._preview_font._unscaled_size)
         cb = Combobox(
             container,
             textvariable=size_buffer,

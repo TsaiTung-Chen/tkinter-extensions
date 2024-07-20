@@ -45,6 +45,7 @@ class _Weakref:
 # =============================================================================
 # ---- Variables
 # =============================================================================
+class Variable(_Memory, _Weakref, tk.Variable): pass
 class StringVar(_Memory, _Weakref, tk.StringVar): pass
 class IntVar(_Memory, _Weakref, tk.IntVar): pass
 class DoubleVar(_Memory, _Weakref, tk.DoubleVar): pass

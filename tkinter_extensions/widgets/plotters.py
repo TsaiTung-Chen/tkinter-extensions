@@ -19,6 +19,7 @@ from matplotlib.backend_bases import _Mode
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends._backend_tk import NavigationToolbar2Tk, ToolTip
 
+from .. import variables as vrb
 from ..utils import create_image_pair, unbind, quit_if_all_closed, defer
 from .undocked import UndockedFrame
 from ._matplotlib import RC
@@ -229,7 +230,7 @@ class NavigationToolbarTtk(NavigationToolbar2Tk):
                           style='NavigationToolbar.TLabel')
         label.pack(side='right')
         
-        self.message = tk.StringVar(master=self)
+        self.message = vrb.StringVar(master=self)
         self._message_label = ttk.Label(master=self,
                                         textvariable=self.message,
                                         style='NavigationToolbar.TLabel')
@@ -258,7 +259,7 @@ class NavigationToolbarTtk(NavigationToolbar2Tk):
                 bootstyle='outline'
             )
         else:
-            var = tk.IntVar(master=self)
+            var = vrb.IntVar(master=self)
             b = ttk.Checkbutton(
                 master=self,
                 text=text,

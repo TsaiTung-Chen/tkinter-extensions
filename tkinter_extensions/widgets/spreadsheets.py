@@ -11,7 +11,6 @@ import copy
 import random
 import tkinter as tk
 import tkinter.font
-from weakref import WeakMethod
 from contextlib import contextmanager
 from typing import Union, Optional, Callable, Literal
 
@@ -25,6 +24,7 @@ from ..constants import (
     RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK)
 from ..utils import get_modifiers, center_window, modify_hsl
 from .. import dialogs
+from .. import variables as vrb
 from .dnd import TriggerOrderlyContainer
 from .scrolled import AutoHiddenScrollbar, ScrolledFrame
 from ._others import OptionMenu
@@ -48,18 +48,19 @@ class History:
         return self.step < len(self._stack["forward"])
     
     def __init__(
-            self, max_depth: Optional[int] = None,
+            self,
+            max_height: Optional[int] = None,
             callback: Optional[Callable] = None
     ):
-        assert isinstance(max_depth, (type(None), int)), max_depth
+        assert isinstance(max_height, (type(None), int)), max_height
         assert callback is None or callable(callback), callback
-        if isinstance(max_depth, int):
-            assert max_depth >= 1, max_depth
+        if isinstance(max_height, int):
+            assert max_height >= 1, max_height
         
         self._callback: Optional[Callable] = callback
         self._sequence: Optional[dict[str, list[Callable]]] = None
         self._stack = {"forward": list(), "backward": list()}
-        self._max_depth = max_depth
+        self._max_height = max_height
         self._step = 0
     
     def reset(self, callback: Optional[Callable] = None):
@@ -71,10 +72,10 @@ class History:
         if self._sequence is None:
             forward = self._stack["forward"][:self.step] + [forward]
             backward = self._stack["backward"][:self.step] + [backward]
-            if self._max_depth:
+            if self._max_height:
                 n = len(forward)
-                forward = forward[-self._max_depth:]
-                backward = backward[-self._max_depth:]
+                forward = forward[-self._max_height:]
+                backward = backward[-self._max_height:]
                 self._step -= (n - len(forward))
             self._step += 1
             self._stack.update(forward=forward, backward=backward)
@@ -270,20 +271,17 @@ class Sheet(ttk.Frame):
         canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         
         # Init the backend states
-        wref_scale = WeakMethod(self._zoom)
-        apply_scale = lambda *_: wref_scale()()
-        
-        self._history = History(max_depth=max_undo)
+        self._history = History(max_height=max_undo)
         self._resize_start: Optional[dict] = None
         self._hover: Optional[dict[str, str]] = None
         self._mouse_selection_id: Optional[str] = None
         self._focus_old_value: Optional[str] = None
-        self._focus_row = tk.IntVar(self)
-        self._focus_col = tk.IntVar(self)
+        self._focus_row = vrb.IntVar(self)
+        self._focus_col = vrb.IntVar(self)
         self._focus_value = tk.StringVar(self)
         self._prev_scale: float = 1.0
-        self._scale = tk.DoubleVar(self, value=1.0)
-        self._scale.trace_add('write', apply_scale)
+        self._scale = vrb.DoubleVar(self, value=1.0)
+        self._scale.trace_add('write', self._zoom, weak=True)
         
         self._values = pd.DataFrame(np.full(shape, '', dtype=object))
         self._cell_sizes = [
@@ -894,6 +892,12 @@ class Sheet(ttk.Frame):
                 "aligny", None, undo=True)
         )
         menu.add_cascade(label='Align', menu=menu_align)
+        
+        # Reset styles
+        menu.add_command(
+            label='Reset Style(s)',
+            command=lambda: self._selection_reset_styles(undo=True)
+        )
         
         return menu
     
@@ -2459,7 +2463,7 @@ class Sheet(ttk.Frame):
         old_values = np.array([ [ d.get(property_) for d in dicts ]
                               for dicts in styles ])
         
-        # Update the style collection with the new values
+        # Update the style collections with the new values
         for style, value in zip(styles.flat, values.flat):
             if value is None:
                 style.pop(property_, None)
@@ -2487,6 +2491,75 @@ class Sheet(ttk.Frame):
                     trace='first'
                 )
             )
+    
+    def reset_styles(self,
+                     r1: Optional[int] = None,
+                     c1: Optional[int] = None,
+                     r2: Optional[int] = None,
+                     c2: Optional[int] = None,
+                     *,
+                     draw: bool = True,
+                     trace: Optional[str] = None,
+                     undo: bool = False):
+        r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
+        [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
+        idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
+        styles = self._cell_styles[idc]  # an sub array of dictionaries
+        
+        # Get the old values
+        old_styles = np.array([ [ d.copy() for d in dicts ]
+                                for dicts in styles ])
+        
+        # Clear the style collections
+        for style in styles.flat:
+            style.clear()
+        
+        if draw:
+            self.draw_cells(r1, c1, r2, c2)
+            self._reselect_cells(trace=trace)
+        
+        if undo:
+            self._history.add(
+                forward=lambda: self.reset_styles(
+                    *rcs,
+                    draw=draw,
+                    trace='first'
+                ),
+                backward=lambda: self._undo_reset_styles(
+                    *rcs,
+                    styles=old_styles,
+                    draw=draw,
+                    trace='first'
+                )
+            )
+    
+    def _undo_reset_styles(self,
+                           r1: Optional[int] = None,
+                           c1: Optional[int] = None,
+                           r2: Optional[int] = None,
+                           c2: Optional[int] = None,
+                           *,
+                           styles: np.ndarray,
+                           draw: bool = True,
+                           trace: Optional[str] = None):
+        assert isinstance(styles, np.ndarray), type(styles)
+        assert styles.ndim == 2, styles.shape
+        assert all([ isinstance(d, dict) for dicts in styles for d in dicts ])
+        
+        r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
+        [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
+        idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
+        old_styles = self._cell_styles[idc]  # an sub array of dictionaries
+        assert old_styles.shape == styles.shape, [old_styles.shape, styles.shape]
+        
+        # Clear the style collections
+        for style, new_style in zip(old_styles.flat, styles.flat):
+            style.clear()
+            style.update(new_style)
+        
+        if draw:
+            self.draw_cells(r1, c1, r2, c2)
+            self._reselect_cells(trace=trace)
     
     def set_fonts(self,
                   r1: Optional[int] = None,
@@ -2661,6 +2734,10 @@ class Sheet(ttk.Frame):
         rcs = self._selection_rcs
         self.set_styles(*rcs, property_=property_, values=values, undo=undo)
     
+    def _selection_reset_styles(self, undo: bool = False):
+        rcs = self._selection_rcs
+        self.reset_styles(*rcs, undo=undo)
+    
     def _selection_set_fonts(self, dialog: bool = False, undo: bool = False):
         rcs = self._selection_rcs
         self.set_fonts(*rcs, dialog=dialog, undo=undo)
@@ -2702,7 +2779,11 @@ class Book(ttk.Frame):
         """
         return self._sheet
     
-    def __init__(self, master, bootstyle_scrollbar='round', **kwargs):
+    def __init__(self,
+                 master,
+                 bootstyle_scrollbar='round',
+                 sidebar_width: int = 150,
+                 **kwargs):
         super().__init__(master)
         self._create_styles()
         
@@ -2715,7 +2796,7 @@ class Book(ttk.Frame):
         self._sidebar_toggle = ttk.Button(
             tb,
             style=self._button_style,
-            text='▕ ▌ Sidebar',
+            text='[Sidebar]',
             command=self._toggle_sidebar,
             takefocus=0
         )
@@ -2802,13 +2883,13 @@ class Book(ttk.Frame):
         self._panedwindow.pack(fill='both', expand=1)
         pw.bind('<Map>', _init_sidebar)
         
-        # Sidebar
-        self._sidebar_width: int = 150
+        ## Sidebar
+        self._sidebar_width: int = int(sidebar_width)
         self._sidebar_fm = sbfm = ScrolledFrame(
             pw, scroll_orient='vertical', hbootstyle=bootstyle_scrollbar)
         self._panedwindow.add(sbfm.container)
         
-        ## Button to add new sheet
+        ### Button to add new sheet
         self._sidebar_add = ttk.Button(
             sbfm,
             style=self._bold_button_style,
@@ -2818,18 +2899,16 @@ class Book(ttk.Frame):
         )
         self._sidebar_add.pack(anchor='e')
         
-        ## Sheet labels
+        ### Sheet labels
         self._sidebar = sb = TriggerOrderlyContainer(sbfm, cursor='arrow')
         self._sidebar.pack(fill='both', expand=1)
         self._sidebar.set_dnd_end_callback(self._on_dnd_end)
         
         ## Frame to contain sheets
-        self._sheet_pad_fm = spfm = ttk.Frame(pw, padding=[3, 3, 0, 0])
-        self._panedwindow.add(spfm)
+        self._sheet_pane = sp = ttk.Frame(pw, padding=[1, 1, 0, 0])
+        self._panedwindow.add(sp)
         
-        ## Build the first sheet
-        wref_switch_sheet = WeakMethod(self._switch_sheet)
-        switch_sheet = lambda *_: wref_switch_sheet()(*_)
+        ### Build the first sheet
         kwargs["bootstyle_scrollbar"] = bootstyle_scrollbar
         self._sheet_kw = {
             "shape": (10, 10),
@@ -2839,8 +2918,8 @@ class Book(ttk.Frame):
             "min_height": 10
         }
         self._sheet_kw.update(kwargs)
-        self._sheet_var = tk.IntVar(self)
-        self._sheet_var.trace_add('write', switch_sheet)
+        self._sheet_var = vrb.IntVar(self)
+        self._sheet_var.trace_add('write', self._switch_sheet, weak=True)
         self._sheet: Optional[Sheet] = None
         self._sheets_props: dict[int, list] = dict()
         self._sheets_props: dict[int, list] = self.insert_sheet(0)
@@ -3121,7 +3200,7 @@ class Book(ttk.Frame):
             key = generate_key()
         
         # Build a new sheet widget and sidebar button
-        sheet = Sheet(self._sheet_pad_fm, **sheet_kw)
+        sheet = Sheet(self._sheet_pane, **sheet_kw)
         frame = ttk.Frame(self._sidebar)
         bt = ttk.Button(
             frame,
