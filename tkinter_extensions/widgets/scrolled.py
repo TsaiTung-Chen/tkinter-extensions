@@ -339,14 +339,14 @@ class _Scrolled:
             self.vbar.autohide = auto
     
     def show_scrollbars(
-            self, after_ms: int = 0, autohide: Optional[bool] = None):
+            self, after_ms: int = -1, autohide: Optional[bool] = None):
         if self.hbar:
             self.hbar.show(after_ms, autohide=autohide)
         if self.vbar:
             self.vbar.show(after_ms, autohide=autohide)
     
     def hide_scrollbars(
-            self, after_ms: int = 0, autohide: Optional[bool] = None):
+            self, after_ms: int = -1, autohide: Optional[bool] = None):
         if self.hbar:
             self.hbar.hide(after_ms, autohide=autohide)
         if self.vbar:
@@ -473,19 +473,19 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
         if self.autohide and (not self.hidden) and self.all_visible:
             self.hide(after_ms=self._autohide_ms)
     
-    def show(self, after_ms: int = 0, autohide=None):
+    def show(self, after_ms: int = -1, autohide=None):
         assert self._manager, self._manager
         
         self.autohide = autohide
         id_ = time.time()
         self._last_func = {"name": 'show', "id": id_}
         
-        if after_ms > 0:
-            self.after(after_ms, self._show, id_)
-        else:
+        if after_ms < 0:
             self._show(id_)
+        else:
+            self.after(after_ms, self._show, id_)
     
-    def hide(self, after_ms: int = 0, autohide=None):
+    def hide(self, after_ms: int = -1, autohide=None):
         self.autohide = autohide
         self._manager = manager = self._manager or self.winfo_manager()
         if not manager:
@@ -496,10 +496,10 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
         id_ = time.time()
         
         self._last_func = {"name": 'hide', "id": id_}
-        if after_ms > 0:
-            self.after(after_ms, self._hide, id_)
-        else:
+        if after_ms < 0:
             self._hide(id_)
+        else:
+            self.after(after_ms, self._hide, id_)
     
     def _show(self, id_):
         if self._last_func.get("id", None) == id_:

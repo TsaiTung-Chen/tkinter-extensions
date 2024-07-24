@@ -202,6 +202,8 @@ class Sheet(ttk.Frame):
                  autohide_scrollbar: bool = True,
                  mousewheel_sensitivity: float = 2.,
                  bootstyle_scrollbar='round',
+                 lock_number_of_rows: bool = False,
+                 lock_number_of_cols: bool = False,
                  _reset: bool = False,
                  **kw):
         self._init_configs = {
@@ -282,6 +284,8 @@ class Sheet(ttk.Frame):
         self._prev_scale: float = 1.0
         self._scale = vrb.DoubleVar(self, value=1.0)
         self._scale.trace_add('write', self._zoom, weak=True)
+        self._lock_number_of_rows: bool = bool(lock_number_of_rows)
+        self._lock_number_of_cols: bool = bool(lock_number_of_cols)
         
         self._values = pd.DataFrame(np.full(shape, '', dtype=object))
         self._cell_sizes = [
@@ -1439,10 +1443,15 @@ class Sheet(ttk.Frame):
         # Setup the right click menu
         if type_ == 'rowheader':
             axis_name, axis = ('Row', 0)
+            modifiable_nheaders = 'disabled' if self._lock_number_of_rows \
+                                  else 'active'
         elif type_ == 'colheader':
             axis_name, axis = ('Column', 1)
+            modifiable_nheaders = 'disabled' if self._lock_number_of_cols \
+                                  else 'active'
         else:
             axis_name, axis = ('Row', 0)
+            modifiable_nheaders = 'active'
         
         menu = tk.Menu(self, tearoff=0)
         
@@ -1450,16 +1459,19 @@ class Sheet(ttk.Frame):
             menu.add_command(
                 label=f'Insert New {axis_name}s Ahead',
                 command=lambda: self._selection_insert_cells(
-                    axis, mode='ahead', dialog=True, undo=True)
+                    axis, mode='ahead', dialog=True, undo=True),
+                state=modifiable_nheaders
             )
             menu.add_command(
                 label=f'Insert New {axis_name}s Behind',
                 command=lambda: self._selection_insert_cells(
-                    axis, mode='behind', dialog=True, undo=True)
+                    axis, mode='behind', dialog=True, undo=True),
+                state=modifiable_nheaders
             )
         menu.add_command(
             label=f'Delete Selected {axis_name}(s)',
-            command=lambda: self._selection_delete_cells(undo=True)
+            command=lambda: self._selection_delete_cells(undo=True),
+            state=modifiable_nheaders
         )
         menu.add_separator()
         if type_ in ('cornerheader', 'rowheader'):
@@ -2705,18 +2717,24 @@ class Sheet(ttk.Frame):
         
         idc = (slice(r_start, r_end + 1), slice(c_start, c_end + 1))
         n_rows_exist, n_cols_exist = self.values.iloc[idc].shape
-        r_add, c_add = self.shape  # add new cells at the end
+        r_max, c_max = self.shape  # add new cells at the end
         with self._history.add_sequence() as seq:
             # Add new rows/cols before pasting if the table to be paste has 
             # a larger shape
             if (n_rows_add := n_rows - n_rows_exist):
-                self.insert_cells(
-                    r_add, axis=0, N=n_rows_add, draw=False, undo=undo)
+                if self._lock_number_of_rows:
+                    df = df.iloc[:-n_rows_add, :]
+                else:
+                    self.insert_cells(
+                        r_max, axis=0, N=n_rows_add, draw=False, undo=undo)
             if (n_cols_add := n_cols - n_cols_exist):
-                self.insert_cells(
-                    c_add, axis=1, N=n_cols_add, draw=False, undo=undo)
+                if self._lock_number_of_cols:
+                    df = df.iloc[:, :-n_cols_add]
+                else:
+                    self.insert_cells(
+                        c_max, axis=1, N=n_cols_add, draw=False, undo=undo)
             
-            # Set the values
+            # Set values
             self.set_values(
                 r_start, c_start, r_end, c_end,
                 values=df,
@@ -2783,7 +2801,7 @@ class Book(ttk.Frame):
                  master,
                  bootstyle_scrollbar='round',
                  sidebar_width: int = 150,
-                 **kwargs):
+                 **sheet_kw):
         super().__init__(master)
         self._create_styles()
         
@@ -2909,7 +2927,7 @@ class Book(ttk.Frame):
         self._panedwindow.add(sp)
         
         ### Build the first sheet
-        kwargs["bootstyle_scrollbar"] = bootstyle_scrollbar
+        sheet_kw["bootstyle_scrollbar"] = bootstyle_scrollbar
         self._sheet_kw = {
             "shape": (10, 10),
             "cell_width": 80,
@@ -2917,7 +2935,7 @@ class Book(ttk.Frame):
             "min_width": 20,
             "min_height": 10
         }
-        self._sheet_kw.update(kwargs)
+        self._sheet_kw.update(sheet_kw)
         self._sheet_var = vrb.IntVar(self)
         self._sheet_var.trace_add('write', self._switch_sheet, weak=True)
         self._sheet: Optional[Sheet] = None
