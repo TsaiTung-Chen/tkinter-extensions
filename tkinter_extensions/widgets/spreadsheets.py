@@ -433,7 +433,7 @@ class Sheet(ttk.Frame):
     def __update_content_and_scrollbar(self, axis: int, start: int):
         new_start, new_stop = self.__confine_region(axis, start)
         old_start, old_stop = self._view[axis]
-        (old_r1, old_r2), (old_c1, old_c2) = self._visible_rcs
+        (r1_old, r2_old), (c1_old, c2_old) = self._visible_rcs
         self._view[axis] = (new_start, new_stop)
         *_, [(new_r1, new_r2), (new_c1, new_c2)] = self._update_visible_and_p2s()
         
@@ -441,14 +441,14 @@ class Sheet(ttk.Frame):
         delta_canvas = old_start - new_start  # -delta_view
         if axis == 0:
             key = "col"
-            old_i1, old_i2, new_i1, new_i2 = (old_c1, old_c2, new_c1, new_c2)
+            old_i1, old_i2, new_i1, new_i2 = (c1_old, c2_old, new_c1, new_c2)
             header_canvas = self.colcanvas
             
             self.canvas.move('xscroll', delta_canvas, 0)
             header_canvas.move('xscroll', delta_canvas, 0)
         else:
             key = "row"
-            old_i1, old_i2, new_i1, new_i2 = (old_r1, old_r2, new_r1, new_r2)
+            old_i1, old_i2, new_i1, new_i2 = (r1_old, r2_old, new_r1, new_r2)
             header_canvas = self.rowcanvas
             
             self.canvas.move('yscroll', 0, delta_canvas)
@@ -1018,7 +1018,8 @@ class Sheet(ttk.Frame):
             self._entry.insert('end', char)
             return 'break'
     
-    def __mouse_select(self, x, y, canvas, expand: bool):
+    def __mouse_select(
+            self, x, y, canvas, expand: bool, dry: bool = False) -> tuple:
         heights, widths = self._cell_sizes
         gy2s, gx2s = self._gy2s_gx2s
         x2s, y2s = (self._canvasx(gx2s[1:]), self._canvasy(gy2s[1:]))
@@ -1046,12 +1047,15 @@ class Sheet(ttk.Frame):
         else:
             r1, c1 = (r2, c2)
         
-        self.select_cells(r1, c1, r2, c2)
+        if not dry:
+            self.select_cells(r1, c1, r2, c2)
+        
+        return (r1, c1, r2, c2)
     
-    def _on_leftbutton_press(self, event):
+    def _on_leftbutton_press(self, event, select: bool = True):
         self._focus()
         x, y, canvas = (event.x, event.y, event.widget)
-        self.__mouse_select(x, y, canvas, expand=False)
+        return self.__mouse_select(x, y, canvas, expand=False, dry=not select)
     
     def _on_leftbutton_motion(self, event, _dxdy: Optional[tuple] = None):
         # Move the viewing window if the mouse cursor is moving outside the 
@@ -1073,7 +1077,7 @@ class Sheet(ttk.Frame):
         # Cancel the old autoscroll function loop and then setup a new one
         # This function loop will autoscroll the canvas with the (dx, dy) above. 
         # This makes the user, once the first motion event has been triggered, 
-        # not need to continue moving the mouse to trigger the motion events
+        # don't need to continue moving the mouse to trigger the motion events
         if (funcid := self._mouse_selection_id) is not None:
             self.after_cancel(funcid)
         self._mouse_selection_id = self.after(
@@ -1348,9 +1352,6 @@ class Sheet(ttk.Frame):
         type_ = tagdict["type"]
         assert type_ in ('cornerheader', 'rowheader', 'colheader'), type_
         
-        r1, c1, r2, c2 = self._selection_rcs
-        (r1, r2), (c1, c2) = sorted([r1, r2]), sorted([c1, c2])
-        
         if type_ == 'cornerheader':
             canvas = self.cornercanvas
             tag = self._make_tag("type", type_=type_)
@@ -1438,21 +1439,32 @@ class Sheet(ttk.Frame):
         assert type_ in ('cornerheader', 'rowheader', 'colheader'), self._hover
         
         # Select the current row/col if it is not selected
-        self._on_leftbutton_press(event)
+        _r1, _c1, _r2, _c2 = self._selection_rcs
+        (r_low, r_high), (c_low, c_high) = sorted([_r1, _r2]), sorted([_c1, _c2])
+        r1, c1, r2, c2 = self._on_leftbutton_press(event, select=False)
+        r_max, c_max = [ s - 1 for s in self.shape ]
         
-        # Setup the right click menu
         if type_ == 'rowheader':
+            if (c_low, c_high) != (0, c_max) or not r_low <= r1 <= r_high:
+                self.select_cells(r1, c1, r2, c2)
+            
             axis_name, axis = ('Row', 0)
             modifiable_nheaders = 'disabled' if self._lock_number_of_rows \
                                   else 'active'
         elif type_ == 'colheader':
+            if (r_low, r_high) != (0, r_max) or not c_low <= c1 <= c_high:
+                self.select_cells(r1, c1, r2, c2)
+            
             axis_name, axis = ('Column', 1)
             modifiable_nheaders = 'disabled' if self._lock_number_of_cols \
                                   else 'active'
         else:
+            self.select_cells(r1, c1, r2, c2)
+            
             axis_name, axis = ('Row', 0)
             modifiable_nheaders = 'active'
         
+        # Setup the right click menu
         menu = tk.Menu(self, tearoff=0)
         
         if type_ in ('rowheader', 'colheader'):
@@ -1597,9 +1609,9 @@ class Sheet(ttk.Frame):
         
         r1, r2 = sorted([ np.clip(r, r1_vis, r2_vis) for r in (r1, r2) ])
         c1, c2 = sorted([ np.clip(c, c1_vis, c2_vis) for c in (c1, c2) ])
-        max_r, max_c = [ s - 1 for s in self.shape ]
-        assert 0 <= r1 <= r2 <= max_r, (r1, r2, max_r)
-        assert 0 <= c1 <= c2 <= max_c, (c1, c2, max_c)
+        r_max, c_max = [ s - 1 for s in self.shape ]
+        assert 0 <= r1 <= r2 <= r_max, (r1, r2, r_max)
+        assert 0 <= c1 <= c2 <= c_max, (c1, c2, c_max)
         
         heights, widths = self._cell_sizes
         x2s, y2s = (self._canvasx(gx2s[1:]), self._canvasy(gy2s[1:]))
@@ -1779,11 +1791,11 @@ class Sheet(ttk.Frame):
         assert (r1 is not None) or (r2 is None), (r1, r2)
         assert (c1 is not None) or (c2 is None), (c1, c2)
         
-        max_r, max_c = [ s - 1 for s in self.shape ]
-        r1 = 0 if r1 is None else np.clip(r1, 0, max_r)
-        c1 = 0 if c1 is None else np.clip(c1, 0, max_c)
-        r2 = max_r if r2 is None else np.clip(r2, 0, max_r)
-        c2 = max_c if c2 is None else np.clip(c2, 0, max_c)
+        r_max, c_max = [ s - 1 for s in self.shape ]
+        r1 = 0 if r1 is None else np.clip(r1, 0, r_max)
+        c1 = 0 if c1 is None else np.clip(c1, 0, c_max)
+        r2 = r_max if r2 is None else np.clip(r2, 0, r_max)
+        c2 = c_max if c2 is None else np.clip(c2, 0, c_max)
         
         self._selection_rcs:tuple[int, int, int, int] = (r1, c1, r2, c2)
         
@@ -1794,14 +1806,14 @@ class Sheet(ttk.Frame):
         r1, c1, r2, c2 = self._selection_rcs
         r_low, r_high = sorted([r1, r2])
         c_low, c_high = sorted([c1, c2])
-        max_r, max_c = [ s - 1 for s in self.shape ]
+        r_max, c_max = [ s - 1 for s in self.shape ]
         cornercanvas = self.cornercanvas
         rowcanvas, colcanvas = self.rowcanvas, self.colcanvas
         
         for canvas in (cornercanvas, rowcanvas, colcanvas):
             canvas.dtag('selected', 'selected')
         
-        if (r_low, r_high) == (0, max_r) and (c_low, c_high) == (0, max_c):
+        if (r_low, r_high) == (0, r_max) and (c_low, c_high) == (0, c_max):
             tag = self._make_tag("type", type_='cornerheader')
             cornercanvas.addtag_withtag('selected', tag)
         
@@ -1860,7 +1872,7 @@ class Sheet(ttk.Frame):
         # Set each header's state
         rows_on, cols_on = self._update_selection_tags()
         (r1_vis, r2_vis), (c1_vis, c2_vis) = self._visible_rcs
-        max_r, max_c = [ s - 1 for s in self.shape ]
+        r_max, c_max = [ s - 1 for s in self.shape ]
         
         ## Rowheaders
         for r in range(r1_vis, r2_vis+1):
@@ -1877,8 +1889,8 @@ class Sheet(ttk.Frame):
             )
         
         ## Cornerheader
-        state = 'selected' if ((r_low, r_high) == (0, max_r) and
-                               (c_low, c_high) == (0, max_c)) \
+        state = 'selected' if ((r_low, r_high) == (0, r_max) and
+                               (c_low, c_high) == (0, c_max)) \
                            else 'normal'
         tagdict = self._make_tags(type_='cornerheader', withkey=False)
         self._set_header_state(tagdict, state=state)
@@ -1901,34 +1913,34 @@ class Sheet(ttk.Frame):
         assert area in ('paragraph', 'all', None), area
         assert isinstance(expand, bool), expand
         
-        old_r1, old_c1, old_r2, old_c2 = self._selection_rcs
-        max_rc = [ s - 1 for s in self.shape ]
+        r1_old, c1_old, r2_old, c2_old = self._selection_rcs
+        rc_max = [ s - 1 for s in self.shape ]
         axis = 0 if direction in ('up', 'down') else 1
-        new_rc1 = [old_r1, old_c1]
-        old_rc2, new_rc2 = [old_r2, old_c2], [old_r2, old_c2]
+        rc1_new = [r1_old, c1_old]
+        rc2_old, rc2_new = [r2_old, c2_old], [r2_old, c2_old]
         
         if area == 'all':
-            new_rc2[axis] = 0 if direction in ('up', 'left') else max_rc[axis]
+            rc2_new[axis] = 0 if direction in ('up', 'left') else rc_max[axis]
             
             if not expand:  # single-cell selection
-                new_rc1 = new_rc2
+                rc1_new = rc2_new
             
-            return self.select_cells(*new_rc1, *new_rc2, trace='last')
+            return self.select_cells(*rc1_new, *rc2_new, trace='last')
         
         elif area == 'paragraph':
             # Move the last selection to the nearset nonempty cell in the same
             # paragraph or next paragraph
             
             ## Slice the cell value array to an 1-D DataFrame
-            slices = [old_r2, old_c2]  # [row index, col index]
+            slices = [r2_old, c2_old]  # [row index, col index]
             if direction in ('up', 'left'):
-                lim_rc = [0, 0]
+                rc_lim = [0, 0]
                 flip = slice(None, None, -1)
                 slices[axis] = slice(None, slices[axis] + 1)
                 values = self.values.iloc[tuple(slices)]
                 i_correction1, i_correction2 = (-1, values.size - 1)
             else:  # down or right
-                lim_rc = max_rc
+                rc_lim = rc_max
                 flip = slice(None, None, None)
                 i_correction1, i_correction2 = (1, slices[axis])
                 slices[axis] = slice(slices[axis], None)
@@ -1942,24 +1954,24 @@ class Sheet(ttk.Frame):
                 vary_at = vary_at[1:]
             
             if vary_at.size:  # found
-                new_rc2[axis] = (vary_at[0] if diff[vary_at[0]] == -1
+                rc2_new[axis] = (vary_at[0] if diff[vary_at[0]] == -1
                     else vary_at[0] + 1) * i_correction1 + i_correction2
             else:  # not found
-                new_rc2[axis] = lim_rc[axis]
+                rc2_new[axis] = rc_lim[axis]
             
             if not expand:  # single-cell selection
-                new_rc1 = new_rc2
+                rc1_new = rc2_new
             
-            return self.select_cells(*new_rc1, *new_rc2, trace='last')
+            return self.select_cells(*rc1_new, *rc2_new, trace='last')
         
         # Move the last selection by 1 step
         step = -1 if direction in ('up', 'left') else +1
-        new_rc2[axis] = np.clip(old_rc2[axis] + step, 0, max_rc[axis])
+        rc2_new[axis] = np.clip(rc2_old[axis] + step, 0, rc_max[axis])
         
         if not expand:  # single-cell selection
-            new_rc1 = new_rc2
+            rc1_new = rc2_new
         
-        return self.select_cells(*new_rc1, *new_rc2, trace='last')
+        return self.select_cells(*rc1_new, *rc2_new, trace='last')
     
     def draw(self,
                update_visible_rcs: bool = True,
@@ -2022,7 +2034,7 @@ class Sheet(ttk.Frame):
         assert scale in self._valid_scales, [self._valid_scales, scale]
         self._scale.set(scale)
     
-    def _zoom(self):
+    def _zoom(self, *_):
         # Update scale state
         scale = self._scale.get()
         ratio = scale / self._prev_scale
@@ -2663,8 +2675,8 @@ class Sheet(ttk.Frame):
         
         r1, c1, r2, c2 = self._selection_rcs
         rcs = [(r1, r2), (c1, c2)] = [sorted([r1, r2]), sorted([c1, c2])]
-        max_r, max_c = [ s - 1 for s in self.shape ]
-        (_i1, _i2), max_i = rcs[axis-1], [max_r, max_c][axis-1]
+        r_max, c_max = [ s - 1 for s in self.shape ]
+        (_i1, _i2), max_i = rcs[axis-1], [r_max, c_max][axis-1]
         assert (_i1 == 0) and (_i2 >= max_i), (axis, (r1, c1, r2, c2), self.shape)
         
         if mode == 'ahead':
@@ -2677,10 +2689,10 @@ class Sheet(ttk.Frame):
     def _selection_delete_cells(self, undo: bool = False):
         r1, c1, r2, c2 = self._selection_rcs
         rcs = [(r1, r2), (c1, c2)] = [sorted([r1, r2]), sorted([c1, c2])]
-        max_r, max_c = [ s - 1 for s in self.shape ]
-        if (r1 == 0) and (r2 >= max_r):  # cols selected
+        r_max, c_max = [ s - 1 for s in self.shape ]
+        if (r1 == 0) and (r2 >= r_max):  # cols selected
             axis = 1
-        elif (c1 == 0) and (c2 >= max_c):  # rows selected
+        elif (c1 == 0) and (c2 >= c_max):  # rows selected
             axis = 0
         else:
             raise ValueError(
@@ -2774,8 +2786,8 @@ class Sheet(ttk.Frame):
             self, axis: int, dialog: bool = False, undo: bool = False):
         r1, c1, r2, c2 = self._selection_rcs
         rcs = [(r1, r2), (c1, c2)] = [sorted([r1, r2]), sorted([c1, c2])]
-        max_r, max_c = [ s - 1 for s in self.shape ]
-        (_i1, _i2), max_i = rcs[axis-1], [max_r, max_c][axis-1]
+        r_max, c_max = [ s - 1 for s in self.shape ]
+        (_i1, _i2), max_i = rcs[axis-1], [r_max, c_max][axis-1]
         assert (_i1 == 0) and (_i2 >= max_i), (axis, (r1, c1, r2, c2), self.shape)
         
         i1, i2 = rcs[axis]
@@ -2822,9 +2834,9 @@ class Book(ttk.Frame):
         
         ## Separator
         sep_fm = ttk.Frame(tb, width=3)
-        sep_fm.pack(side='left', fill='y', padx=[20, 9], ipady=9)
+        sep_fm.pack(side='left', fill='y', padx=9, ipady=9)
         sep = ttk.Separator(sep_fm, orient='vertical', takefocus=0)
-        sep.place(x=0, y=0, relheight=1.)
+        sep.place(relx=0.5, y=0, relheight=1.)
         
         ## Undo button
         self._undo_btn = ttk.Button(
