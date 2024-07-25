@@ -18,7 +18,7 @@ class OrderlyContainer(tk.Canvas):
     achieved intuitively by drag-and-drop with the mouse cursor
     """
     
-    def __init__(self, *args, dnd_group_id: int = None, **kwargs):
+    def __init__(self, *args, dnd_group_id: Optional[int] = None, **kwargs):
         super().__init__(*args, **kwargs)
         self._dnd_group_id = dnd_group_id
         self._dnd_widgets = list()
@@ -37,8 +37,7 @@ class OrderlyContainer(tk.Canvas):
                 expand: Union[tuple, list, bool, int] = False,
                 padding: Union[tuple[int], list[int], int] = 0,
                 ipadding: Union[tuple[int], list[int], int] = 0):
-        """Use this function to put widgets `widgets` onto the container 
-        (canvas).
+        """Use this function to put `widgets` into the container (canvas).
         
         `widgets` must be a list of widgets or a list of lists of 
         widgets. If `widgets` is a list of lists of widgets (a 2-D array of 
@@ -121,14 +120,14 @@ class OrderlyContainer(tk.Canvas):
             widget.dnd_end = self._get_dnd_end(widget)
             widget._dnd_group_id = self._dnd_group_id
         
-        self._dnd_binding = self.bind('<Configure>', self._update_widgets)
+        self._dnd_bind_id = self.bind('<Configure>', self._update_layout)
         self._dnd_place_info = place_info_list
         self._dnd_widgets = widgets_flat
         self._dnd_ids = dict(zip(widget_ids, widgets_flat))
         self._dnd_grid_size = params["grid_size"]
         self._dnd_handler = None
         self._dnd = dict()
-        self._update_widgets()
+        self._update_layout()
     
     def bind_dnd_start(self, moved: tk.BaseWidget):
         """Overwrite this method to customize the trigger widget
@@ -261,7 +260,7 @@ class OrderlyContainer(tk.Canvas):
         
         return place_info
     
-    def _update_widgets(self, event=None):
+    def _update_layout(self, event=None):
         self.update_idletasks()
         width_canvas, height_canvas = self.winfo_width(), self.winfo_height()
         for widget, info in zip(self._dnd_widgets, self._dnd_place_info):
@@ -343,18 +342,18 @@ class OrderlyContainer(tk.Canvas):
         return _init_dnd
     
     def dnd_accept(self, source, event):
-        """(This will return a cross-window dragging function)
+        """This will return a cross-window dragging function
         """
         if source._dnd_group_id == self._dnd_group_id:
             return self
     
     def dnd_enter(self, source, event):
-        """(This will return a cross-window dragging function)
+        """This will return a cross-window dragging function
         """
         pass
     
     def dnd_motion(self, source, event):
-        """(This will return a cross-window dragging function)
+        """This will return a cross-window dragging function
         """
         def _find_target(widget):
             dummy = lambda *args: None
@@ -392,20 +391,20 @@ class OrderlyContainer(tk.Canvas):
         self._dnd["target"] = new_target
     
     def dnd_leave(self, source, event):
-        """(This will return a cross-window dragging function)
+        """This will return a cross-window dragging function
         """
         if self._dnd_group_id is None:  # leaving this container => commit
             self.dnd_commit(source, event)
     
     def dnd_commit(self, source, event):
-        """(This will return a cross-window dragging function)
+        """This will return a cross-window dragging function
         """
         self._put(source)
         if self._dnd_commit_callback:
             self._dnd_commit_callback(source, event)
     
     def _get_dnd_widget_accept(self, target):
-        """(This will return a function for dragging inside a window)
+        """This will return a function for dragging a widget inside a window
         """
         def _get_target(source, event):
             if source is not target:
@@ -414,7 +413,7 @@ class OrderlyContainer(tk.Canvas):
         return _get_target
     
     def _get_dnd_widget_enter(self, target):
-        """(This will return a function for dragging inside a window)
+        """This will return a function for dragging a widget inside a window
         """
         def _exchange_order_indices(source, event):
             # Exchange the order indices of `source` and `target`
@@ -442,7 +441,7 @@ class OrderlyContainer(tk.Canvas):
         return _exchange_order_indices
     
     def _get_dnd_widget_motion(self, widget=None):
-        """(This will return a function for dragging inside a window)
+        """This will return a function for dragging a widget inside a window
         """
         def _move_source(source, event):
             old_event, self._dnd["event"] = self._dnd.pop("event"), event
@@ -456,14 +455,14 @@ class OrderlyContainer(tk.Canvas):
         #
         return _move_source
     
-    def _get_dnd_widget_leave(self, target):
-        """(This will return a function for dragging inside a window)
+    def _get_dnd_widget_leave(self, target=None):
+        """This will return a function for dragging a widget inside a window
         """
         def _none(source, event): pass
         return _none
     
-    def _get_dnd_end(self, widget):
-        """(This will return a cross-window dragging function)
+    def _get_dnd_end(self, widget=None):
+        """This will return a cross-window dragging function
         """
         def _unset_focus(target, event):
             if target is None:
