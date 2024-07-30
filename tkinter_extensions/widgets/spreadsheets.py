@@ -200,10 +200,10 @@ class Sheet(ttk.Frame):
                  get_style: Optional[Callable] = None,
                  max_undo: Union[int, None] = 20,
                  autohide_scrollbar: bool = True,
-                 mousewheel_sensitivity: float = 2.,
-                 bootstyle_scrollbar='round',
+                 scrollbar_bootstyle='round',
                  lock_number_of_rows: bool = False,
                  lock_number_of_cols: bool = False,
+                 mousewheel_sensitivity: float = 2.,
                  _reset: bool = False,
                  **kw):
         self._init_configs = {
@@ -243,7 +243,7 @@ class Sheet(ttk.Frame):
             master=self,
             autohide=autohide_scrollbar,
             command=self.xview,
-            bootstyle=bootstyle_scrollbar,
+            bootstyle=scrollbar_bootstyle,
             orient='horizontal',
         )
         self._hbar.grid(row=2, column=0, columnspan=2, sticky='ew', pady=(1, 0))
@@ -251,7 +251,7 @@ class Sheet(ttk.Frame):
             master=self,
             autohide=autohide_scrollbar,
             command=self.yview,
-            bootstyle=bootstyle_scrollbar,
+            bootstyle=scrollbar_bootstyle,
             orient='vertical',
         )
         self._vbar.grid(row=0, column=2, rowspan=2, sticky='ns', padx=(1, 0))
@@ -2814,7 +2814,7 @@ class Book(ttk.Frame):
     
     def __init__(self,
                  master,
-                 bootstyle_scrollbar='round',
+                 scrollbar_bootstyle='round',
                  sidebar_width: int = 150,
                  **sheet_kw):
         super().__init__(master)
@@ -2919,7 +2919,7 @@ class Book(ttk.Frame):
         ## Sidebar
         self._sidebar_width: int = int(sidebar_width)
         self._sidebar_fm = sbfm = ScrolledFrame(
-            pw, scroll_orient='vertical', hbootstyle=bootstyle_scrollbar)
+            pw, scroll_orient='vertical', hbootstyle=scrollbar_bootstyle)
         self._panedwindow.add(sbfm.container)
         
         ### Button to add new sheet
@@ -2942,7 +2942,7 @@ class Book(ttk.Frame):
         self._panedwindow.add(sp)
         
         ### Build the first sheet
-        sheet_kw["bootstyle_scrollbar"] = bootstyle_scrollbar
+        sheet_kw["scrollbar_bootstyle"] = scrollbar_bootstyle
         self._sheet_kw = {
             "shape": (10, 10),
             "cell_width": 80,
@@ -3403,7 +3403,7 @@ if __name__ == '__main__':
                       size=(800, 500))
     
     
-    book = Book(root, bootstyle_scrollbar='round-light')
+    book = Book(root, scrollbar_bootstyle='round-light')
     book.pack(fill='both', expand=1)
     
     book.insert_sheet(1, name='index = 1')
@@ -3417,7 +3417,7 @@ if __name__ == '__main__':
     
     win = ttk.Toplevel(title='Sheet', position=(100, 100), size=(800, 500))
     
-    ss = Sheet(win, bootstyle_scrollbar='light-round')
+    ss = Sheet(win, scrollbar_bootstyle='light-round')
     ss.pack(fill='both', expand=1)
     
     ss.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)

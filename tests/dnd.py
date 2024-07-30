@@ -10,7 +10,6 @@ import random
 import ttkbootstrap as ttk
 import tkinter_extensions as te
 
-
 root = ttk.Window(title='Drag and Drop', themename='cyborg')
 
 container = te.widgets.OrderlyContainer(root)
