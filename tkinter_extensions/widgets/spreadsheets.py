@@ -2411,7 +2411,10 @@ class Sheet(ttk.Frame):
                    undo: bool = False):
         assert isinstance(values, (pd.DataFrame, str)), type(values)
         
-        df = pd.DataFrame([[values]]) if isinstance(values, str) else values
+        if isinstance(values, pd.DataFrame):
+            df = values.astype(str)
+        else:
+            df = pd.DataFrame([[values]])
         
         r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
@@ -3297,9 +3300,11 @@ class Book(ttk.Frame):
         menu.post(event.x_root, event.y_root)  # show the right click menu
         self.after_idle(menu.destroy)
     
-    def delete_sheet(
-            self, name: str, destroy: bool = True, check: bool = False) -> dict:
-        key = self._get_key(name)
+    def delete_sheet(self,
+                     index_or_name: Union[int, str],
+                     destroy: bool = True,
+                     check: bool = False) -> dict:
+        key = self._get_key(index_or_name)
         return self._delete_sheet(key, destroy=destroy, check=check)
     
     def _delete_sheet(self, key, destroy: bool = True, check: bool = False):
