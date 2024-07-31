@@ -23,12 +23,11 @@ class OrderlyContainer(tk.Canvas):
     
     def __init__(self,
                  *args,
-                 dnd_group_id: Optional[int] = None,
                  border_bootstyle: str = 'warning',
                  **kwargs):
         super().__init__(*args, **kwargs)
         self._border_bootstyle = border_bootstyle
-        self._dnd_group_id = dnd_group_id
+        self._dnd_container_id = id(self)
         self._dnd_widgets = list()
         self._dnd_start_callback = None
         self._dnd_commit_callback = None
@@ -96,7 +95,7 @@ class OrderlyContainer(tk.Canvas):
         self.update_idletasks()
         widths, heights = list(), list()
         for widget, id_ in zip(widgets_flat, widget_ids):
-            widget._id = id_
+            widget._dnd_id = id_
             widths.append(widget.winfo_reqwidth() + 1)
             heights.append(widget.winfo_reqheight() + 1)
         width_cell = max(widths)
@@ -115,9 +114,9 @@ class OrderlyContainer(tk.Canvas):
         for r, row in enumerate(widgets):
             for c, widget in enumerate(row):
                 place_info_list.append(
-                    self._calculate_place_info(r, c,
-                                               widths[i], heights[i],
-                                               **params)
+                    self._calculate_place_info(
+                        r, c, widths[i], heights[i], **params
+                    )
                 )
                 i += 1
         
@@ -128,9 +127,9 @@ class OrderlyContainer(tk.Canvas):
             widget.dnd_widget_enter = self._get_dnd_widget_enter(widget)
             widget.dnd_widget_leave = self._get_dnd_widget_leave(widget)
             widget.dnd_end = self._get_dnd_end(widget)
-            widget._dnd_group_id = self._dnd_group_id
+            widget._dnd_container_id = self._dnd_container_id
         
-        self._dnd_bind_id = self.bind('<Configure>', self._update_layout)
+        self._dnd_configure_id = self.bind('<Configure>', self._update_layout)
         self._dnd_place_info = place_info_list
         self._dnd_widgets = widgets_flat
         self._dnd_ids = dict(zip(widget_ids, widgets_flat))
@@ -145,7 +144,8 @@ class OrderlyContainer(tk.Canvas):
     
     def _bind_dnd_start(self, *, trigger: tk.BaseWidget, moved: tk.BaseWidget):
         trigger.configure(cursor='hand2')
-        trigger.bind('<ButtonPress-1>', self._get_dnd_start(moved))
+        trigger._dnd_start_id = trigger.bind(
+            '<ButtonPress-1>', self._get_dnd_start(moved))
     
     def set_dnd_start_callback(self, func: Callable):
         """`func` will be executed when `dnd_start` runs. `func` should 
@@ -284,8 +284,8 @@ class OrderlyContainer(tk.Canvas):
         x = max(int(info["relx"] * width_canvas + info["x"]), 0)
         y = max(int(info["rely"] * height_canvas + info["y"]), 0)
         
-        self.itemconfigure(widget._id, anchor=info["anchor"])
-        self.coords(widget._id, x, y)
+        self.itemconfigure(widget._dnd_id, anchor=info["anchor"])
+        self.coords(widget._dnd_id, x, y)
     
     def _resize(self, widget, info, width_canvas=None, height_canvas=None):
         info = info or self._dnd_place_info[self._dnd_widgets.index(widget)]
@@ -295,7 +295,7 @@ class OrderlyContainer(tk.Canvas):
         w = max(int(info["relwidth"] * width_canvas + info["width"]), 0)
         h = max(int(info["relheight"] * height_canvas + info["height"]), 0)
         
-        self.itemconfigure(widget._id, width=w, height=h)
+        self.itemconfigure(widget._dnd_id, width=w, height=h)
     
     def _get_dnd_start(self, source):
         """Get the dnd init function that will be called when drag starts.
@@ -310,7 +310,7 @@ class OrderlyContainer(tk.Canvas):
             source_x, source_y = source.winfo_x(), source.winfo_y()
             source_w, source_h = source.winfo_width(), source.winfo_height()
             mouse_x, mouse_y = event.x_root, event.y_root
-            source_anchor = self.itemconfigure(source._id, 'anchor')
+            source_anchor = self.itemconfigure(source._dnd_id, 'anchor')
             source_anchor = '' if source_anchor == 'center' else source_anchor
             
             # Calculate the initial, relative mouse position
@@ -335,7 +335,7 @@ class OrderlyContainer(tk.Canvas):
             
             # Create a temp border frame surrounding the source widget
             border_fm = ttk.Frame(self, bootstyle=self._border_bootstyle)
-            border_fm._id = self.create_window(
+            border_fm._dnd_id = self.create_window(
                 source_x - 1,
                 source_y - 1,
                 anchor='nw',
@@ -348,7 +348,6 @@ class OrderlyContainer(tk.Canvas):
             # Save the initial state for future use
             self._dnd = {
                 "handler": dnd_handler,
-                "widgets": self._dnd_widgets.copy(),
                 "event": None,
                 "source": source,
                 "target": None,
@@ -377,8 +376,7 @@ class OrderlyContainer(tk.Canvas):
     def dnd_accept(self, source, event):
         """This will return a cross-window dragging function
         """
-        if source._dnd_group_id == self._dnd_group_id:
-            return self
+        return self
     
     def dnd_enter(self, source, event):
         """This will return a cross-window dragging function
@@ -399,8 +397,26 @@ class OrderlyContainer(tk.Canvas):
                 if target is not None:
                     return target
         #
-        # Widget motion
-        self.dnd_widget_motion(source, event)
+        if source._dnd_container_id != self._dnd_container_id:
+            return
+        old_event, self._dnd["event"] = self._dnd.pop("event"), event
+        if old_event is event:  # `source` has been moved before
+            return
+        
+        # Move the source widget according to the cursor position
+        self.coords(
+            source._dnd_id,
+            event.x_root - self._dnd["offset_x"],
+            event.y_root - self._dnd["offset_y"]
+        )
+        
+        # Move the border frame according to the source widget position
+        source_x, source_y, _, _ = self.bbox(source._dnd_id)
+        self.coords(
+            self._dnd["border_frame"]._dnd_id,
+            source_x - 1,
+            source_y - 1
+        )
         
         # Find the target under mouse cursor
         x = event.x_root - self._dnd["canvas_x"]
@@ -417,7 +433,7 @@ class OrderlyContainer(tk.Canvas):
         if new_target is old_target:  # in the same target
             return
         
-        # Left `old_target` and entered `new_target`
+        # Mouse has left `old_target` and entered `new_target`
         self._dnd["target"] = None
         if old_target:
             old_target.dnd_widget_leave(source, event)
@@ -428,19 +444,22 @@ class OrderlyContainer(tk.Canvas):
     def dnd_leave(self, source, event):
         """This will return a cross-window dragging function
         """
-        if self._dnd_group_id is None:  # leaving this container => commit
+        if source._dnd_container_id == self._dnd_container_id:
             self.dnd_commit(source, event)
     
     def dnd_commit(self, source, event):
         """This will return a cross-window dragging function
         """
+        if source._dnd_container_id != self._dnd_container_id:
+            return
+        
         # Put the source widget according to the place info
         self._put(source)
         
         # Move the border frame according to the source widget position
-        source_x, source_y, _, _ = self.bbox(source._id)
+        source_x, source_y, _, _ = self.bbox(source._dnd_id)
         self.coords(
-            self._dnd["border_frame"]._id,
+            self._dnd["border_frame"]._dnd_id,
             source_x - 1,
             source_y - 1
         )
@@ -485,28 +504,6 @@ class OrderlyContainer(tk.Canvas):
         #
         return _exchange_order_indices
     
-    def dnd_widget_motion(self, source, event):
-        """This will return a function for dragging a widget inside a window
-        """
-        old_event, self._dnd["event"] = self._dnd.pop("event"), event
-        if old_event is event:  # `source` has been moved before
-            return
-        
-        # Move the source widget according to the cursor position
-        self.coords(
-            source._id,
-            event.x_root - self._dnd["offset_x"],
-            event.y_root - self._dnd["offset_y"]
-        )
-        
-        # Move the border frame according to the source widget position
-        source_x, source_y, _, _ = self.bbox(source._id)
-        self.coords(
-            self._dnd["border_frame"]._id,
-            source_x - 1,
-            source_y - 1
-        )
-    
     def _get_dnd_widget_leave(self, target=None):
         """This will return a function for dragging a widget inside a window
         """
@@ -524,7 +521,6 @@ class OrderlyContainer(tk.Canvas):
             
             if self._dnd_end_callback:
                 self._dnd_end_callback(target, event)
-            
             
             # Clean up the temp info for this round
             self._dnd["border_frame"].destroy()
