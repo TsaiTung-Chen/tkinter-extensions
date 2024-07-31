@@ -6,9 +6,9 @@ Created on Mon May 22 22:35:24 2023
 @author: tungchentsai
 """
 
-from weakref import proxy
 import tkinter as tk
 import tkinter.dnd
+from weakref import proxy
 from typing import Union, Optional, Callable
 
 import ttkbootstrap as ttk
@@ -87,7 +87,10 @@ class OrderlyContainer(tk.Canvas):
                   "sticky": sticky}
         
         # Calculate canvas size and place widgets onto the canvas
-        widgets_flat = [ proxy(w) for row in widgets for w in row ]
+        try:
+            widgets_flat = [ proxy(w) for row in widgets for w in row ]
+        except TypeError:
+            widgets_flat = [ w for row in widgets for w in row ]
         widget_ids = [ self.create_window(0, 0, anchor='nw', window=widget)
                        for widget in widgets_flat ]
         self.update_idletasks()
@@ -542,7 +545,6 @@ class TriggerOrderlyContainer(OrderlyContainer):
 # =============================================================================
 if __name__ == '__main__':
     import random
-    import ttkbootstrap as ttk
     
     root = ttk.Window(title='Drag and Drop', themename='cyborg')
     
