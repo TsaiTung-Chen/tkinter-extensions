@@ -27,7 +27,7 @@ for i in range(20):
     text = str(i) + ': ' + '_'.join(str(i) for i in range(30))
     ttk.Button(sf, text=text).pack(anchor='e')
 
-win3 = ttk.Toplevel(title='ScrolledCanvas', width=1500, height=1000)
+win3 = ttk.Toplevel(title='ScrolledCanvas')
 win3.lift()
 sc = te.widgets.ScrolledWidget(win3, widget=ttk.Canvas, vbootstyle='round-light')
 sc.pack(fill='both', expand=1)

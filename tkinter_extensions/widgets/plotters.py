@@ -460,11 +460,11 @@ class BasePlotter(UndockedFrame):
         self._delete_on_destroy.append(self._toolbar)
         
         self.place_undock_button(anchor='ne', relx=1., rely=0., x=0, y=-6)
-        self._init_id = canvas.bind('<Map>', self._on_first_mapped, add='+')
-        canvas.bind('<<DrawStarted>>', self._on_draw_started, add='+')
-        canvas.bind('<<DrawEnded>>', self._on_draw_ended, add='+')
-        canvas.bind('<<ThemeChanged>>', self._on_theme_changed, add='+')
-        self.bind('<Destroy>', self._on_destroy, add='+')
+        self._init_id = canvas.bind('<Map>', self._on_first_mapped, add=True)
+        canvas.bind('<<DrawStarted>>', self._on_draw_started, add=True)
+        canvas.bind('<<DrawEnded>>', self._on_draw_ended, add=True)
+        canvas.bind('<<ThemeChanged>>', self._on_theme_changed, add=True)
+        self.bind('<Destroy>', self._on_destroy, add=True)
     
     def __del__(self):
         """Delete bindings to free memory

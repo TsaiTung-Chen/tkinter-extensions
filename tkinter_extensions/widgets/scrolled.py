@@ -299,10 +299,10 @@ class _Scrolled:
         redirect_layout_managers(self, container, orig_prefix='content_')
         
         if not builtin_method:
-            cropper.bind('<Configure>', self._on_configure, add='+')
-        container.bind('<Map>', self._on_map, add='+')
-        container.bind('<<MapChild>>', self._on_map_child, add='+')
-        self.bind('<<MapChild>>', self._on_map_child, add='+')
+            cropper.bind('<Configure>', self._on_configure, add=True)
+        container.bind('<Map>', self._on_map, add=True)
+        container.bind('<<MapChild>>', self._on_map_child, add=True)
+        self.bind('<<MapChild>>', self._on_map_child, add=True)
         self._os = self.tk.call('tk', 'windowingsystem')
     
     @property
@@ -362,7 +362,7 @@ class _Scrolled:
         else:
             seqs = ['<MouseWheel>']
         funcs = [self._mousewheel_scroll] * len(seqs)
-        bind_recursively(self, seqs, funcs, add='+', key='scroll')
+        bind_recursively(self, seqs, funcs, add=True, key='scroll')
     
     def unbind_mousewheel(self):
         unbind_recursively(self, key='scroll')
@@ -429,6 +429,13 @@ class _Scrolled:
         
         return (content_width + vbar_width + pad_width,
                 content_height + hbar_height + pad_height)
+    
+    def set_size(self, width: Optional[int] = None, height: Optional[int] = None):
+        if self._builtin_method:
+            raise TypeError("This function does not support built-in methods.")
+        
+        self.cropper.configure(width=width, height=height)
+        self.container.configure(width=width, height=height)
 
 
 # =============================================================================
@@ -551,11 +558,11 @@ class ScrolledText(_Scrolled, ttk.Text):
                  **kwargs):
         super().__init__(*args, builtin_method=True, **kwargs)
         if readonly:
-            self.bind('<KeyPress>', self._prevent_modification, add='+')
+            self.bind('<KeyPress>', self._prevent_modification, add=True)
         
         if bind_select_all:
-            self.bind(f'<{COMMAND}-A>', self._select_all, add='+')
-            self.bind(f'<{COMMAND}-a>', self._select_all, add='+')
+            self.bind(f'<{COMMAND}-A>', self._select_all, add=True)
+            self.bind(f'<{COMMAND}-a>', self._select_all, add=True)
     
     def _prevent_modification(self, event):
         command_mask = MODIFIER_MASKS[COMMAND]
@@ -599,7 +606,7 @@ if __name__ == '__main__':
         text = str(i) + ': ' + '_'.join(str(i) for i in range(30))
         ttk.Button(sf, text=text).pack(anchor='e')
     
-    win3 = ttk.Toplevel(title='ScrolledCanvas', width=1500, height=1000)
+    win3 = ttk.Toplevel(title='ScrolledCanvas')
     win3.lift()
     sc = ScrolledWidget(win3, widget=ttk.Canvas, vbootstyle='round-light')
     sc.pack(fill='both', expand=1)

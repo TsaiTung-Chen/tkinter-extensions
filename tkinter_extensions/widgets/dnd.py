@@ -137,6 +137,12 @@ class OrderlyContainer(tk.Canvas):
         self._dnd = dict()
         self._update_layout()
     
+    def dnd_forget(self):
+        self.delete('all')
+        for widget in self.dnd_widgets:
+            widget.destroy()
+        self.dnd_widgets.clear()
+    
     def bind_dnd_start(self, moved: tk.BaseWidget):
         """Overwrite this method to customize the trigger widget
         """
@@ -467,6 +473,24 @@ class OrderlyContainer(tk.Canvas):
         if self._dnd_commit_callback:
             self._dnd_commit_callback(source, event)
     
+    def _get_dnd_end(self, widget=None):
+        """This will return a cross-window dragging function
+        """
+        def _dnd_end(target, event):
+            if target is None:
+                self.winfo_toplevel().focus_set()
+            else:
+                target.winfo_toplevel().focus_set()
+            
+            if self._dnd_end_callback:
+                self._dnd_end_callback(target, event)
+            
+            # Clean up the temp info for this round
+            self._dnd["border_frame"].destroy()
+            self._dnd.clear()
+        #
+        return _dnd_end
+    
     def _get_dnd_widget_accept(self, target):
         """This will return a function for dragging a widget inside a window
         """
@@ -509,24 +533,6 @@ class OrderlyContainer(tk.Canvas):
         """
         def _none(source, event): pass
         return _none
-    
-    def _get_dnd_end(self, widget=None):
-        """This will return a cross-window dragging function
-        """
-        def _dnd_end(target, event):
-            if target is None:
-                self.winfo_toplevel().focus_set()
-            else:
-                target.winfo_toplevel().focus_set()
-            
-            if self._dnd_end_callback:
-                self._dnd_end_callback(target, event)
-            
-            # Clean up the temp info for this round
-            self._dnd["border_frame"].destroy()
-            self._dnd.clear()
-        #
-        return _dnd_end
 
 
 class TriggerOrderlyContainer(OrderlyContainer):

@@ -6,8 +6,8 @@ Created on Wed Jul 17 22:18:34 2024
 @author: tungchentsai
 """
 
-from weakref import ref, WeakMethod
 import tkinter as tk
+from weakref import ref, WeakMethod
 # =============================================================================
 # ---- Patches
 # =============================================================================

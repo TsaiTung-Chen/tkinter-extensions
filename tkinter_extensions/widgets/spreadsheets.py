@@ -2919,7 +2919,7 @@ class Book(ttk.Frame):
         ## Sidebar
         self._sidebar_width: int = int(sidebar_width)
         self._sidebar_fm = sbfm = ScrolledFrame(
-            pw, scroll_orient='vertical', hbootstyle=scrollbar_bootstyle)
+            pw, scroll_orient='vertical', vbootstyle=scrollbar_bootstyle)
         self._panedwindow.add(sbfm.container)
         
         ### Button to add new sheet
@@ -3276,7 +3276,7 @@ class Book(ttk.Frame):
         self._sidebar.delete('all')
         self._sidebar.dnd_put(
             [ ps["switch_frame"] for ps in self._sheets_props.values() ],
-            sticky='we',
+            sticky='nwe',
             expand=(True, False),
             padding=[6, 3],
             ipadding=1
