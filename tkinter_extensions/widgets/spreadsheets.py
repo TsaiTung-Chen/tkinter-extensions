@@ -2099,7 +2099,7 @@ class Sheet(ttk.Frame):
         # Check for the new sizes
         if dialog:  # ask for new size
             dimension = ('height', 'width')[axis]
-            size = dialogs.PositionedQuerybox.get_integer(
+            size = dialogs.Querybox.get_integer(
                 parent=self,
                 prompt=f'Enter the new {dimension}:',
                 initialvalue=int(unscaled_old_sizes[0]),
@@ -2189,7 +2189,7 @@ class Sheet(ttk.Frame):
         if dialog:
             # Ask for number of rows/cols to insert
             axis_name = ('rows', 'columns')[axis]
-            N = dialogs.PositionedQuerybox.get_integer(
+            N = dialogs.Querybox.get_integer(
                 parent=self,
                 title='Rename Sheet',
                 prompt=f'Enter the number of {axis_name} to insert:',
@@ -2603,9 +2603,9 @@ class Sheet(ttk.Frame):
             style_topleft = self._cell_styles[min(r1, r2), min(c1, c2)]
             font_topleft = style_topleft.get("font", default_font)
             scale = self._scale.get()
-            font = dialogs.PositionedQuerybox.get_font(
+            font = dialogs.Querybox.get_font(
                 parent=self,
-                default=font_topleft,
+                initialvalue=font_topleft,
                 scale=scale,
                 position=self._center_window
             )
@@ -2642,9 +2642,9 @@ class Sheet(ttk.Frame):
             default_color = self._default_styles["cell"][field]["normal"]
             style_topleft = self._cell_styles[min(r1, r2), min(c1, c2)]
             color_topleft = style_topleft.get(field, default_color)
-            color = dialogs.PositionedQuerybox.get_color(
+            color = dialogs.Querybox.get_color(
                 parent=self,
-                initialcolor=color_topleft,
+                initialvalue=color_topleft,
                 position=self._center_window
             )
             if color is None:
@@ -3170,7 +3170,7 @@ class Book(ttk.Frame):
                                   ('minimal cell width', sb_minw),
                                   ('minimal cell height', sb_minh)]:
                     if not sb.get().isnumeric():
-                        dialogs.PositionedMessagebox.show_error(
+                        dialogs.Messagebox.show_error(
                             parent=top,
                             title='Value Error',
                             message=f'The value of "{which}" must be a positive '
@@ -3309,7 +3309,7 @@ class Book(ttk.Frame):
     
     def _delete_sheet(self, key, destroy: bool = True, check: bool = False):
         if check:
-            result = dialogs.PositionedMessagebox.okcancel(
+            result = dialogs.Messagebox.okcancel(
                 parent=self,
                 title='Sheet Deletion',
                 message="This action can't be undone. "
@@ -3372,7 +3372,7 @@ class Book(ttk.Frame):
             self, key, _prompt='Enter a new name for this sheet:'):
         # Ask for new name
         old_name = self._sheets_props[key]["name"]
-        new_name = dialogs.PositionedQuerybox.get_string(
+        new_name = dialogs.Querybox.get_string(
             parent=self,
             title='Rename Sheet',
             prompt=_prompt,
