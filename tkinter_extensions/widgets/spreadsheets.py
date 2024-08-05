@@ -2962,7 +2962,7 @@ class Book(ttk.Frame):
         
         # Focus on current sheet if any of the frames or canvas is clicked
         for widget in [self, tb, ib, R_label, r_label, s_label, C_label, c_label,
-                       sbfm, sbfm.cropper, sb]:
+                       sbfm, sbfm.canvas, sb]:
             widget.configure(takefocus=0)
             widget.bind('<ButtonPress-1>', self._focus_on_sheet)
         
@@ -3218,6 +3218,7 @@ class Book(ttk.Frame):
             top.wm_deiconify()
             sb_rows.select_range(0, 'end')
             sb_rows.focus_set()
+            top.grab_set()
             top.wait_window()  # don't continue until the window is destroyed
             
             if not submitted:
@@ -3281,7 +3282,7 @@ class Book(ttk.Frame):
             padding=[6, 3],
             ipadding=1
         )
-        self._sidebar_fm._on_map_child()
+        self._sidebar_fm.event_generate('<<MapChild>>')
     
     def _post_switch_menu(self, event, key):
         # Focus on the sheet that has been clicked
@@ -3406,10 +3407,19 @@ if __name__ == '__main__':
     book = Book(root, scrollbar_bootstyle='round-light')
     book.pack(fill='both', expand=1)
     
-    book.insert_sheet(1, name='index = 1')
-    book.insert_sheet(0, name='index = 0')
-    book.insert_sheet(1, name='index = 1')
-    book.insert_sheet(-1, name='index = -1')
+    '''
+    book.after(1000, lambda: print('idx 1'))
+    book.after(1000, lambda: book.insert_sheet(1, name='index = 1'))
+    book.after(2000, lambda: print('idx 0'))
+    book.after(2000, lambda: book.insert_sheet(0, name='index = 0'))
+    book.after(3000, lambda: print('idx -1'))
+    book.after(3000, lambda: book.insert_sheet(-1, name='index = -1'))
+    book.after(4000, lambda: book.delete_sheet(0))
+    '''
+    
+    root.mainloop()
+    import sys
+    sys.exit()#???
     
     book.after(3000, lambda: root.style.theme_use('minty'))
     book.after(5000, lambda: root.style.theme_use('cyborg'))

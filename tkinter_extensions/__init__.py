@@ -6,12 +6,16 @@ Created on Mon May 22 22:35:24 2023
 @author: tungchentsai
 """
 
-from importlib.metadata import version
+from importlib.metadata import version, PackageNotFoundError
 
 from . import constants, dialogs, widgets
 
 
-__version__ = version('tkinter_extensions')
+try:
+    __version__ = version('tkinter_extensions')
+except PackageNotFoundError:
+    __version__ = ''
 
 __all__ = ['__version__', 'constants', 'dialogs', 'widgets']
+del version, PackageNotFoundError
 
