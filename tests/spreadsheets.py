@@ -16,21 +16,20 @@ root = ttk.Window(title='Book (Root)',
                   size=(800, 500))
 
 
-book = te.widgets.Book(root, bootstyle_scrollbar='round-light')
+book = te.Book(root, scrollbar_bootstyle='round-light')
 book.pack(fill='both', expand=1)
 
 book.insert_sheet(1, name='index = 1')
 book.insert_sheet(0, name='index = 0')
-book.insert_sheet(1, name='index = 1')
 book.insert_sheet(-1, name='index = -1')
 
 book.after(3000, lambda: root.style.theme_use('minty'))
-book.after(5000, lambda: root.style.theme_use('cyborg'))
+book.after(4000, lambda: root.style.theme_use('cyborg'))
 
 
 win = ttk.Toplevel(title='Sheet', position=(100, 100), size=(800, 500))
 
-ss = te.widgets.Sheet(win, bootstyle_scrollbar='light-round')
+ss = te.Sheet(win, scrollbar_bootstyle='light-round')
 ss.pack(fill='both', expand=1)
 
 ss.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)

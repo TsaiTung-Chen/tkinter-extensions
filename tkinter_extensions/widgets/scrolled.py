@@ -14,7 +14,8 @@ from tkinter.font import nametofont
 import ttkbootstrap as ttk
 
 from ..constants import MODIFIER_MASKS, COMMAND
-from ..utils import (bind_recursively,
+from ..utils import (defer,
+                     bind_recursively,
                      unbind_recursively,
                      redirect_layout_managers)
 # =============================================================================
@@ -436,12 +437,6 @@ class _Scrolled:
             self._refresh()
     
     def _on_map(self, event=None):
-        self._on_map_child()
-    
-    def _on_map_child(self, event=None):
-        if not self.container.winfo_ismapped():
-            return
-        
         self.rebind_mousewheel()
         
         if not self._builtin_method:
@@ -449,6 +444,10 @@ class _Scrolled:
                 self.cropper.configure(width=self.winfo_reqwidth())
             if not self.vbar:
                 self.cropper.configure(height=self.winfo_reqheight())
+    
+    def _on_map_child(self, event=None):
+        if self.container.winfo_ismapped():
+            self._on_map(event)
     
     def _mousewheel_scroll(self, event):
         """Callback for when the mouse wheel is scrolled.
@@ -566,8 +565,24 @@ class ScrolledText(_Scrolled, ttk.Text):
 class ScrolledCanvas(_Scrolled, tk.Canvas):
     def __init__(self, *args, fill: bool = True, **kwargs):
         assert isinstance(fill, bool), (type(fill), fill)
+        self._on_map_child = defer(200)(self._on_map_child)
         super().__init__(*args, builtin_method=True, **kwargs)
         self._fill = fill
+    
+    def xview(self, *args):
+        if super().xview() != (0.0, 1.0):  # prevent from over scrolling
+            super().xview(*args)
+    
+    def yview(self, *args):
+        if super().yview() != (0.0, 1.0):  # prevent from over scrolling
+            super().yview(*args)
+    
+    def _update_scrollregion(self):
+        self.update_idletasks()
+        x1, y1, x2, y2 = self.bbox('all')
+        x2, y2 = max(x2, 0), max(y2, 0)
+        self.configure(scrollregion=(0, 0, x2, y2))
+        return (0, 0, x2, y2)
     
     def _on_configure(self, event=None):
         # Fill the space with content in the non-scrollable direction
@@ -577,48 +592,35 @@ class ScrolledCanvas(_Scrolled, tk.Canvas):
             xscale = 1.0 if self.hbar else self.winfo_width() / x2
             yscale = 1.0 if self.vbar else self.winfo_height() / y2
             
-            ## Scale non-widget objects
+            ## Scale objects
             self.scale('all', 0, 0, xscale, yscale)
-            
+        
         self._update_scrollregion()
     
-    def _on_map_child(self, event=None):
-        if not self.container.winfo_ismapped():
-            return
-        
+    def _on_map(self, event=None):
+        self.refresh()
+    
+    def refresh(self):
         self.rebind_mousewheel()
         
         if self._fill:
             # Init widget size to enable widget scaling in `self._on_configure`
             self.update_idletasks()
             for oid in self.find_all():
-                if self.type(oid) == 'window':
-                    widget = self.nametowidget(self.itemcget(oid, 'window'))
-                    self.itemconfigure(
-                        oid,
-                        width=widget.winfo_reqwidth(),
-                        height=widget.winfo_reqheight()
-                    )
+                if self.type(oid) != 'window':
+                    continue
+                elif (self.hbar or int(self.itemcget(oid, 'width')) != 0) and (
+                        self.vbar or int(self.itemcget(oid, 'height')) != 0):
+                    continue
+                widget = self.nametowidget(self.itemcget(oid, 'window'))
+                width = None if self.hbar else widget.winfo_reqwidth()
+                height = None if self.vbar else widget.winfo_reqheight()
+                self.itemconfigure(oid, width=width, height=height)
         
         # Resize the canvas to fit the content
         x1, y1, x2, y2 = self.bbox('all')
         self.configure(width=x2, height=y2)
         self._on_configure()
-    
-    def _update_scrollregion(self):
-        self.update_idletasks()
-        x1, y1, x2, y2 = self.bbox('all')
-        x2, y2 = max(x2, 0), max(y2, 0)
-        self.configure(scrollregion=(0, 0, x2, y2))
-        return (0, 0, x2, y2)
-    
-    def xview(self, *args):
-        if super().xview() != (0.0, 1.0):  # prevent from over scrolling
-            super().xview(*args)
-    
-    def yview(self, *args):
-        if super().yview() != (0.0, 1.0):  # prevent from over scrolling
-            super().yview(*args)
     
     def content_size(
             self, hbar: bool = False, vbar: bool = False) -> tuple[int, int]:
@@ -641,13 +643,27 @@ class ScrolledCanvas(_Scrolled, tk.Canvas):
     
     def set_size(self, width: Optional[int] = None, height: Optional[int] = None):
         self.configure(width=width, height=height)
+        self._on_configure()
 
 
 class _CanvasBasedScrolled:
-    def __init__(self, master=None, **kwargs):
-        canvas_kw = { k: kwargs.pop(k) for k in list(kwargs) if k in [
-            'scroll_orient', 'autohide', 'hbootstyle', 'vbootstyle',
-            'scroll_sensitivity'] }
+    def __init__(self,
+                 master=None,
+                 scroll_orient: Optional[str] = 'both',
+                 autohide=True,
+                 hbootstyle='round',
+                 vbootstyle='round',
+                 scroll_sensitivity: Union[float,
+                                           tuple[float, float],
+                                           list[float, float]] = 1.,
+                 **kwargs):
+        canvas_kw = {
+            "scroll_orient": scroll_orient,
+            "autohide": autohide,
+            "hbootstyle": hbootstyle,
+            "vbootstyle": vbootstyle,
+            "scroll_sensitivity": scroll_sensitivity
+        }
         self._canvas = ScrolledCanvas(master, fill=True, **canvas_kw)
         super().__init__(self._canvas, **kwargs)
         self._id = self._canvas.create_window(0, 0, anchor='nw', window=self)
@@ -663,8 +679,23 @@ class _CanvasBasedScrolled:
     def canvas(self) -> ScrolledCanvas:
         return self._canvas  # scrolled canvas
     
-    def _on_map_child(self, event):
+    def _on_map_child(self, event=None):
         return self.canvas._on_map_child(event)
+    
+    def rebind_mousewheel(self, *args, **kwargs):
+        return self.canvas.rebind_mousewheel(*args, **kwargs)
+    
+    def unbind_mousewheel(self, *args, **kwargs):
+        return self.canvas.unbind_mousewheel(*args, **kwargs)
+    
+    def content_size(self, *args, **kwargs):
+        return self.canvas.content_size(*args, **kwargs)
+    
+    def set_size(self, *args, **kwargs):
+        return self.canvas.set_size(*args, **kwargs)
+    
+    def refresh(self, *args, **kwargs):
+        return self.canvas.refresh(*args, **kwargs)
 
 
 class ScrolledFrame(_CanvasBasedScrolled, ttk.Frame): pass

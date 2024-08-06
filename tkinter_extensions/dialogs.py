@@ -51,7 +51,7 @@ class _Positioned:
             self._toplevel.wait_window()
         
         if callback:
-            callback()#EDITED
+            callback(self._result)#EDITED
     
     def build(self):
         super().build()

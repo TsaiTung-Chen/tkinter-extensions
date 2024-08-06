@@ -3268,12 +3268,12 @@ class Book(ttk.Frame):
         self._sheets_props = dict(zip(keys, props))
         
         # Remap the radio buttons
-        self._remap_switches()
+        self._refresh_sidebar()
         self._sheet_var.set(key)
         
         return self._sheets_props
     
-    def _remap_switches(self):
+    def _refresh_sidebar(self):
         self._sidebar.delete('all')
         self._sidebar.dnd_put(
             [ ps["switch_frame"] for ps in self._sheets_props.values() ],
@@ -3328,7 +3328,7 @@ class Book(ttk.Frame):
         
         # Update GUI
         if sheets_props:  # the book is not empty after deleting the sheet
-            self._remap_switches()
+            self._refresh_sidebar()
             
             # Switch sheet
             index_focus = min(index, len(sheets_props) - 1)
@@ -3407,22 +3407,12 @@ if __name__ == '__main__':
     book = Book(root, scrollbar_bootstyle='round-light')
     book.pack(fill='both', expand=1)
     
-    '''
-    book.after(1000, lambda: print('idx 1'))
-    book.after(1000, lambda: book.insert_sheet(1, name='index = 1'))
-    book.after(2000, lambda: print('idx 0'))
-    book.after(2000, lambda: book.insert_sheet(0, name='index = 0'))
-    book.after(3000, lambda: print('idx -1'))
-    book.after(3000, lambda: book.insert_sheet(-1, name='index = -1'))
-    book.after(4000, lambda: book.delete_sheet(0))
-    '''
-    
-    root.mainloop()
-    import sys
-    sys.exit()#???
+    book.insert_sheet(1, name='index = 1')
+    book.insert_sheet(0, name='index = 0')
+    book.insert_sheet(-1, name='index = -1')
     
     book.after(3000, lambda: root.style.theme_use('minty'))
-    book.after(5000, lambda: root.style.theme_use('cyborg'))
+    book.after(4000, lambda: root.style.theme_use('cyborg'))
     
     
     win = ttk.Toplevel(title='Sheet', position=(100, 100), size=(800, 500))

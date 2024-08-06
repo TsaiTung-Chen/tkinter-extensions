@@ -12,6 +12,8 @@ from weakref import proxy
 from typing import Union, Optional, Callable
 
 import ttkbootstrap as ttk
+
+from ..utils import unbind
 # =============================================================================
 # ---- Classes
 # =============================================================================
@@ -28,10 +30,15 @@ class OrderlyContainer(tk.Canvas):
         super().__init__(*args, **kwargs)
         self._border_bootstyle = border_bootstyle
         self._dnd_container_id = id(self)
-        self._dnd_widgets = list()
         self._dnd_start_callback = None
         self._dnd_commit_callback = None
         self._dnd_end_callback = None
+        
+        self._dnd_place_info = list()
+        self._dnd_widgets = list()
+        self._dnd_ids = dict()
+        self._dnd_grid_size = tuple()
+        self._dnd = dict()
     
     @property
     def dnd_widgets(self):
@@ -137,11 +144,20 @@ class OrderlyContainer(tk.Canvas):
         self._dnd = dict()
         self._update_layout()
     
-    def dnd_forget(self):
-        self.delete('all')
-        for widget in self.dnd_widgets:
-            widget.destroy()
-        self.dnd_widgets.clear()
+    def dnd_forget(self, destroy: bool = True):
+        for id_ in self._dnd_ids:
+            self.delete(id_)
+        
+        if destroy:
+            for widget in self.dnd_widgets:
+                widget.destroy()
+        
+        unbind(self, '<Configure>', self._dnd_configure_id)
+        self._dnd_place_info.clear()
+        self._dnd_widgets.clear()
+        self._dnd_ids.clear()
+        self._dnd_grid_size = tuple()
+        self._dnd.clear()
     
     def bind_dnd_start(self, moved: tk.BaseWidget):
         """Overwrite this method to customize the trigger widget
@@ -486,8 +502,9 @@ class OrderlyContainer(tk.Canvas):
                 self._dnd_end_callback(target, event)
             
             # Clean up the temp info for this round
-            self._dnd["border_frame"].destroy()
-            self._dnd.clear()
+            if self._dnd:
+                self._dnd["border_frame"].destroy()
+                self._dnd.clear()
         #
         return _dnd_end
     

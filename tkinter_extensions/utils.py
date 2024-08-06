@@ -75,15 +75,17 @@ def defer(ms:int=1000):
 
 
 def unbind(widget, sequence, funcid=None):
-    """Built-in function don't work as expected that can't unbind the specified 
-    function even if `funcid` is provided. So we make this workaround function 
+    """The built-in function does not unbind the expected specified function
+    when `funcid` is provided. So we make this workaround function 
     to replace the use of the original `widget.unbind` method
     """
     if not funcid:
         return widget.unbind(sequence, funcid)
     
     cmds = widget.bind(sequence).split('\n')  # [cmd, '', cmd, '', ...]
-    widget.unbind(sequence)  # remove bindings but don't `widget.deletecommand`
+    widget.unbind(sequence)  # remove bindings but does not `widget.deletecommand`
+    
+    # Rebind the other functions
     new_cmds = [ c for c in cmds[::2] if funcid not in c ]  # [cmd, cmd, ...]
     if new_cmds:
         widget.bind(sequence, '\n'.join([ c + '\n' for c in new_cmds ]))
