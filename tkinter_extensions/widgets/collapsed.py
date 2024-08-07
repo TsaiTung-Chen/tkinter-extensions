@@ -102,6 +102,7 @@ class CollapsedFrame(ttk.Frame):
         self.container.grid_propagate(0)
         self.content_grid_remove()
         self.container.configure(width=width, height=height)
+        self.container.master.event_generate('<<MapChild>>')
     
     def resume(self):
         if not self.collapsed:
@@ -110,6 +111,7 @@ class CollapsedFrame(ttk.Frame):
         self._collapsed = False
         self.container.grid_propagate(1)
         self.content_grid()
+        self.container.master.event_generate('<<MapChild>>')
     
     def toggle(self, *_):
         if self.variable.get() == self._onvalue:  # show
