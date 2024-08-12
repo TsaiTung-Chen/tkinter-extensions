@@ -64,11 +64,11 @@ def defer(ms:int=1000):
         @wraps(func)
         def _wrapped(*args, **kwargs):
             nonlocal last_id
-            root = tk._get_default_root('postpone')
+            root = tk._get_default_root(func.__name__)
             root.after_cancel(last_id)
             last_id = root.after(ms, lambda: func(*args, **kwargs))
         #
-        last_id = -1
+        last_id: str = '-1'
         return _wrapped
     #
     return _wrapper

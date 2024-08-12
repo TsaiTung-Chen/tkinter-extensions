@@ -15,8 +15,9 @@ from ttkbootstrap.dialogs import dialogs, colorchooser
 from ttkbootstrap.validation import validator, add_validation
 from ttkbootstrap.localization import MessageCatalog as MessageCatalog
 
-from .widgets import Combobox
+from . import utils
 from . import variables as vrb
+from .widgets import Combobox
 # =============================================================================
 # ---- Classes
 # =============================================================================
@@ -25,8 +26,12 @@ class _Positioned:
              position: Union[tuple, list, Callable, None] = None,
              wait: bool = True,
              callback: Optional[Callable] = None):
+        #EDITED self._result = None
         self.build()
+        self._callback = callback  #EDITED: run callback on destroy
         self._toplevel.wm_resizable(True, True)  #EDITED: make it resizable
+        self._destroy_id = self._toplevel.bind(  #EDITED: new binding
+            '<Destroy>', self._on_destroy, add=True)
         
         if callable(position):  #EDITED: add support for position function
             position(self._toplevel)
@@ -49,13 +54,12 @@ class _Positioned:
         if wait:  #EDITED: add a switch
             self._toplevel.grab_set()
             self._toplevel.wait_window()
-        
-        if callback:
-            callback(self._result)#EDITED
     
-    def build(self):
-        super().build()
-        self._toplevel.bind('<Destroy>', lambda e: self.destroy())
+    def _on_destroy(self, event=None):
+        self.destroy()
+        if self._callback:
+            self._callback(self.result)
+        utils.unbind(self._toplevel, '<Destroy>', self._destroy_id)
 
 
 class MessageDialog(_Positioned, dialogs.MessageDialog):
@@ -66,6 +70,20 @@ class QueryDialog(_Positioned, dialogs.QueryDialog):
     def create_body(self, master):
         super().create_body(master=master)
         self._initial_focus.select_range(0, 'end')
+    
+    def on_submit(self, *_):
+        #EDITED: save the result only if valid
+        original_result = self._result
+        self._result = self._initial_focus.get()
+        valid = False
+        try:
+            valid = self.validate()
+        finally:
+            if not valid:
+                self._result = original_result
+                return  # keep toplevel open for valid response
+        self._toplevel.destroy()
+        self.apply()
 
 
 class ColorChooserDialog(_Positioned, colorchooser.ColorChooserDialog):
@@ -549,7 +567,6 @@ class Querybox:
     def get_font(
             parent=None, title='Font Selector', initialvalue=None, **kwargs
     ):
-        initialvalue = initialvalue or ''
         position = kwargs.pop('position', None)
         wait = kwargs.pop('wait', True)
         callback = kwargs.pop('callback', None)
@@ -561,7 +578,7 @@ class Querybox:
     
     @staticmethod
     def get_color(
-            parent=None, title='Color Chooser', initialvalue='', **kwargs):
+            parent=None, title='Color Chooser', initialvalue=None, **kwargs):
         position = kwargs.pop('position', None)
         wait = kwargs.pop('wait', True)
         callback = kwargs.pop('callback', None)
@@ -575,7 +592,7 @@ class Querybox:
     def get_string(
         parent=None, title=' ', prompt='', initialvalue=None, **kwargs
     ):
-        initialvalue = initialvalue or ''
+        initialvalue = '' if initialvalue is None else initialvalue
         position = kwargs.pop('position', None)
         wait = kwargs.pop('wait', True)
         callback = kwargs.pop('callback', None)
@@ -595,7 +612,7 @@ class Querybox:
         maxvalue=None,
         **kwargs,
     ):
-        initialvalue = initialvalue or ''
+        initialvalue = '' if initialvalue is None else initialvalue
         position = kwargs.pop('position', None)
         wait = kwargs.pop('wait', True)
         callback = kwargs.pop('callback', None)
@@ -622,7 +639,7 @@ class Querybox:
         maxvalue=None,
         **kwargs,
     ):
-        initialvalue = initialvalue or ''
+        initialvalue = '' if initialvalue is None else initialvalue
         position = kwargs.pop('position', None)
         wait = kwargs.pop('wait', True)
         callback = kwargs.pop('callback', None)
@@ -638,4 +655,18 @@ class Querybox:
         )
         dialog.show(position, wait=wait, callback=callback)
         return dialog.result
+
+
+# =============================================================================
+# ---- Test
+# =============================================================================
+if __name__ == '__main__':
+    root = ttk.Window()
+    result = Querybox.get_float(
+        title='Test',
+        prompt='Enter a number.',
+        wait=True,
+        callback=print
+    )
+    root.destroy()
 
