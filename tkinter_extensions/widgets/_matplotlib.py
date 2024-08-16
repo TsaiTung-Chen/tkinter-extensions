@@ -38,8 +38,8 @@ common_style = {
     
     "mathtext.fontset": 'stix',   # default: 'dejavusans'
     
-    "figure.figsize": (9, 6),
-    "figure.dpi": 54,   # default: 120
+    "figure.figsize": (9, 6),   # default: (6.4, 4.8)
+    "figure.dpi": 80,   # default: 100
     "figure.constrained_layout.use": True,
 #    "figure.autolayout": True,   # this enables fig.tight_layout()
     "figure.titlesize": 'x-large',   # default: 'large'

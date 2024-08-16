@@ -96,11 +96,11 @@ def show_figs(*figs, reverse: bool = False):  # convenience function
         frame = tk.Frame(window)
         frame.pack(fill='both', expand=True)
         
-        canvas = FigureCanvasTkAgg(fig, master=frame)
+        canvas = PlotterFigureCanvasTkAgg(fig, master=frame)
         canvas.draw_idle()
         canvas.get_tk_widget().pack(side='bottom', fill='both', expand=1)
         
-        toolbar = NavigationToolbar2Tk(canvas, frame, pack_toolbar=False)
+        toolbar = NavigationToolbarTtk(canvas, frame, pack_toolbar=False)
         toolbar.pack(side='top', anchor='w', fill='x')
     
     root.mainloop()
@@ -118,21 +118,21 @@ def autoscale(ax: plt.Axes,
     
     ax.relim(visible_only=visible_only)
     
-    if force:
+    if force:  # temporarily enable the autoscale
         if x:
-            orig_x = ax.get_autoscalex_on()
+            x_enabled = ax.get_autoscalex_on()
             ax.set_autoscalex_on(True)
         if y:
-            orig_y = ax.get_autoscaley_on()
+            y_enabled = ax.get_autoscaley_on()
             ax.set_autoscaley_on(True)
     try:
         ax.autoscale_view(scalex=x, scaley=y)
     finally:
-        if force:
+        if force:  # restore the autoscale settings
             if x:
-                ax.set_autoscalex_on(orig_x)
+                ax.set_autoscalex_on(x_enabled)
             if y:
-                ax.set_autoscaley_on(orig_y)
+                ax.set_autoscaley_on(y_enabled)
 
 
 # =============================================================================
@@ -256,6 +256,7 @@ class NavigationToolbarTtk(NavigationToolbar2Tk):
                 master=self,
                 text=text,
                 command=command,
+                takefocus=False,
                 bootstyle='outline'
             )
         else:
@@ -265,6 +266,7 @@ class NavigationToolbarTtk(NavigationToolbar2Tk):
                 text=text,
                 command=command,
                 variable=var,
+                takefocus=False,
                 bootstyle='outline-toolbutton'
             )
             b.var = var
@@ -278,6 +280,8 @@ class NavigationToolbarTtk(NavigationToolbar2Tk):
         
         if image_file is not None:
             self._set_image_for_button(b)
+            b.bind(
+                '<<ThemeChanged>>', lambda e: self._set_image_for_button(b))
         
         return b
     
@@ -307,9 +311,6 @@ class NavigationToolbarTtk(NavigationToolbar2Tk):
             image_mapping.append(statespec)
             image_mapping.append(img_pressed)
         button.configure(image=image_mapping)
-        
-        button.bind(
-            '<<ThemeChanged>>', lambda e: self._set_image_for_button(button))
     
     def _update_buttons_checked(self):
         for text, mode in [('Zoom', _Mode.ZOOM), ('Pan', _Mode.PAN)]:
@@ -414,24 +415,24 @@ class NavigationToolbarTtk(NavigationToolbar2Tk):
 
 class BasePlotter(UndockedFrame):
     @property
-    def figure(self):
-        return self._figcanvas.figure
-    
-    @property
-    def figcanvas(self):
-        return self._figcanvas
-    
-    @property
-    def canvas(self):
-        return self._figcanvas.get_tk_widget()
-    
-    @property
     def toolbar(self):
         return self._toolbar
     
     @property
-    def delete_on_destroy(self) -> list:
-        return self._delete_on_destroy
+    def canvas(self):
+        return self._figurecanvas.get_tk_widget()
+    
+    @property
+    def figurecanvas(self):
+        return self._figurecanvas
+    
+    @property
+    def figure(self):
+        return self._figurecanvas.figure
+    
+    @property
+    def axes(self) -> list:
+        return self._figurecanvas.figure.axes
     
     def __init__(self, master, figure, dnd_trigger: bool = False, **kw):
         kw["place_button"] = False
@@ -439,6 +440,7 @@ class BasePlotter(UndockedFrame):
         super().__init__(master, **kw)
         self._delete_on_destroy = list()
         self._rc = self._fetch_rc()
+        self._refresh_on_map: bool = False
         
         if dnd_trigger:
             dnd_trigger = ttk.Button(self,
@@ -448,19 +450,20 @@ class BasePlotter(UndockedFrame):
             dnd_trigger.pack(side='top', fill='x', expand=1)
             dnd_trigger._dnd_trigger = True
         
-        self._figcanvas = PlotterFigureCanvasTkAgg(figure, master=self)
-        self._delete_on_destroy.append(self._figcanvas)
-        canvas = self._figcanvas.get_tk_widget()
+        self._figurecanvas = PlotterFigureCanvasTkAgg(figure, master=self)
+        self._delete_on_destroy.append(self._figurecanvas)
+        canvas = self._figurecanvas.get_tk_widget()
         canvas.pack(side='top', fill='both', expand=1)
         
         self._toolbar = NavigationToolbarTtk(
-            self._figcanvas, self, pack_toolbar=False)
+            self._figurecanvas, self, pack_toolbar=False)
         self._toolbar.pack(side='bottom', anchor='w', fill='x')
         self._toolbar.update()
         self._delete_on_destroy.append(self._toolbar)
         
         self.place_undock_button(anchor='ne', relx=1., rely=0., x=0, y=-6)
-        self._init_id = canvas.bind('<Map>', self._on_first_mapped, add=True)
+        self._init_id = canvas.bind('<Map>', self._on_first_map, add=True)
+        canvas.bind('<Map>', self._on_map, add=True)
         canvas.bind('<<DrawStarted>>', self._on_draw_started, add=True)
         canvas.bind('<<DrawEnded>>', self._on_draw_ended, add=True)
         canvas.bind('<<ThemeChanged>>', self._on_theme_changed, add=True)
@@ -474,17 +477,24 @@ class BasePlotter(UndockedFrame):
     def _on_destroy(self, event=None):
         """Delete bindings to free memory
         """
-        if (event is None or event.widget == self) and self.delete_on_destroy:
-            for name, attr in list(vars(self).items()):
-                if attr in self.delete_on_destroy:
-                    delattr(self, name)
-            self.delete_on_destroy.clear()
+        if not self._delete_on_destroy:
+            return
+        
+        for name, attr in list(vars(self).items()):
+            if attr in self._delete_on_destroy:
+                delattr(self, name)
+        self._delete_on_destroy.clear()
     
-    def _on_first_mapped(self, event=None):
+    def _on_first_map(self, event=None):
         unbind(self.canvas, '<Map>', self._init_id)
+        del self._init_id
         self._on_theme_changed()
         self.draw_idle()
-
+    
+    def _on_map(self, event=None):
+        if self._refresh_on_map:
+            self.refresh()
+    
     def _on_draw_started(self, event=None):
         pass
     
@@ -494,11 +504,13 @@ class BasePlotter(UndockedFrame):
     def _on_theme_changed(self, event=None):
         old_rc = self._rc
         new_rc = self._rc = self._fetch_rc()
-        if new_rc != old_rc:
-            refresh_figcolors(self.figure)
-            self.refresh()
-            return True
-        return False
+        
+        if new_rc == old_rc:
+            return False
+        
+        refresh_figcolors(self.figure)
+        self.refresh()
+        return True
     
     def _fetch_rc(self, copy: bool = True) -> dict:
         rc = plt.rcParams
@@ -507,13 +519,21 @@ class BasePlotter(UndockedFrame):
         return rc
     
     def draw_idle(self):
-        self.figcanvas.draw_idle()
+        self.figurecanvas.draw_idle()
     
     def autoscale(self, *args, **kwargs):
         autoscale(*args, **kwargs)
     
-    def refresh(self, *args, **kw):
-        pass
+    def refresh(self):
+        if not self.winfo_ismapped():  # defer refreshing until next map
+            self._refresh_on_map = True
+            return
+        
+        self._refresh_on_map = False
+        
+        for ax in self.axes:
+            self.autoscale(ax)
+        self.draw_idle()
 
 
 # =============================================================================
@@ -522,14 +542,13 @@ class BasePlotter(UndockedFrame):
 if __name__ == '__main__':
     import numpy as np
     
-    root = ttk.Window(
-        title='Embedding in Ttk', themename='cyborg', size=[600, 600])
+    root = ttk.Window(title='Embedding in Ttk', themename='cyborg')
     
     t = np.arange(0, 3, .01)
     x = 2 * np.sin(2 * np.pi * 1 * t)
     
     plt.rcParams.update(RC["dark"])
-    fig = plt.Figure(figsize=(5, 4), dpi=100)
+    fig = plt.Figure()
     fig.suptitle('Sine wave')
     ax = fig.subplots()
     line, = ax.plot(t, x, label='f = 1 Hz')
@@ -542,13 +561,11 @@ if __name__ == '__main__':
     
     def _update_frequency(new_val):
         f = float(new_val)
-        
-        # update data
         y = 2 * np.sin(2 * np.pi * f * t)
         line.set_ydata(y)
         line.set_label(f'f = {f: .2f} Hz')
         ax.legend(loc='upper right')
-        plotter.figcanvas.draw_idle()  # update canvas
+        plotter.refresh()  # update canvas
     
     slider = ttk.Scale(root,
                        from_=1,

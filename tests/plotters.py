@@ -13,14 +13,13 @@ from tkinter_extensions.widgets.plotters import RC
 import matplotlib.pyplot as plt
 
 
-root = ttk.Window(
-    title='Embedding in Ttk', themename='cyborg', size=[600, 600])
+root = ttk.Window(title='Embedding in Ttk', themename='cyborg')
 
 t = np.arange(0, 3, .01)
 x = 2 * np.sin(2 * np.pi * 1 * t)
 
 plt.rcParams.update(RC["dark"])
-fig = plt.Figure(figsize=(5, 4), dpi=100)
+fig = plt.Figure()
 fig.suptitle('Sine wave')
 ax = fig.subplots()
 line, = ax.plot(t, x, label='f = 1 Hz')
@@ -33,8 +32,6 @@ plotter.pack(side='top', fill='both', expand=1)
 
 def _update_frequency(new_val):
     f = float(new_val)
-    
-    # update data
     y = 2 * np.sin(2 * np.pi * f * t)
     line.set_ydata(y)
     line.set_label(f'f = {f: .2f} Hz')
