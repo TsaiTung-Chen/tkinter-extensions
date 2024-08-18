@@ -4,6 +4,7 @@
 Created on Mon May 22 22:35:24 2023
 
 @author: tungchentsai
+@repository: https://github.com/TsaiTung-Chen/tkinter-extensions
 """
 
 from importlib.metadata import version, PackageNotFoundError

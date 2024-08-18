@@ -22,7 +22,7 @@ from matplotlib.backends._backend_tk import NavigationToolbar2Tk, ToolTip
 from .. import variables as vrb
 from ..utils import create_image_pair, unbind, quit_if_all_closed, defer
 from .undocked import UndockedFrame
-from ._matplotlib import RC
+from ._matplotlib_config import RC
 # =============================================================================
 # ---- Functions
 # =============================================================================
@@ -100,7 +100,7 @@ def show_figs(*figs, reverse: bool = False):  # convenience function
         canvas.draw_idle()
         canvas.get_tk_widget().pack(side='bottom', fill='both', expand=1)
         
-        toolbar = NavigationToolbarTtk(canvas, frame, pack_toolbar=False)
+        toolbar = NavigationToolbar2Ttk(canvas, frame, pack_toolbar=False)
         toolbar.pack(side='top', anchor='w', fill='x')
     
     root.mainloop()
@@ -170,9 +170,9 @@ class ToolTipTtk(ToolTip):
         self.tipwindow = tw = ttk.Toplevel(self.widget)
         try:
             # For Mac OS
-            tw.tk.call("::tk::unsupported::MacWindowStyle",
-                       "style", tw._w,
-                       "help", "noActivates")
+            tw.tk.call('::tk::unsupported::MacWindowStyle',
+                       'style', tw._w,
+                       'help', 'noActivates')
         except tk.TclError:
             pass
         label = ttk.Label(tw, text=self.text, justify='left')
@@ -188,7 +188,7 @@ class ToolTipTtk(ToolTip):
         tw.deiconify()
 
 
-class NavigationToolbarTtk(NavigationToolbar2Tk):
+class NavigationToolbar2Ttk(NavigationToolbar2Tk):
     def __init__(self, canvas, window=None, *, pack_toolbar: bool = True):
         from matplotlib import cbook
         from matplotlib.backend_bases import NavigationToolbar2
@@ -271,7 +271,7 @@ class NavigationToolbarTtk(NavigationToolbar2Tk):
             )
             b.var = var
         b._image_file = image_file
-        b.pack(side='left')
+        b.pack(side='left', padx=[0, 3])
         
         style = ttk.Style()
         style_name = f'{text}.NavigationToolbar.{b["style"]}'
@@ -455,7 +455,7 @@ class BasePlotter(UndockedFrame):
         canvas = self._figurecanvas.get_tk_widget()
         canvas.pack(side='top', fill='both', expand=1)
         
-        self._toolbar = NavigationToolbarTtk(
+        self._toolbar = NavigationToolbar2Ttk(
             self._figurecanvas, self, pack_toolbar=False)
         self._toolbar.pack(side='bottom', anchor='w', fill='x')
         self._toolbar.update()
