@@ -589,7 +589,7 @@ if __name__ == '__main__':
     window.lift()
     window.after(300, window.focus_set)
     container = TriggerOrderlyContainer(window)
-    container.pack(fill='both', expand=1)
+    container.pack(fill='both', expand=True)
     frames = list()
     for r in range(4):
         frames.append(list())

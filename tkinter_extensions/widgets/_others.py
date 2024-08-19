@@ -36,7 +36,7 @@ class OptionMenu(ttk.OptionMenu):
                  default=None,
                  command=None,
                  direction='below',
-                 takefocus=0,
+                 takefocus=False,
                  style=None,
                  **kwargs):
         super().__init__(master,

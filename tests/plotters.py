@@ -28,7 +28,7 @@ ax.set_ylabel("f(t)")
 ax.legend(loc='upper right')
 
 plotter = te.widgets.BasePlotter(root, fig)
-plotter.pack(side='top', fill='both', expand=1)
+plotter.pack(side='top', fill='both', expand=True)
 
 def _update_frequency(new_val):
     f = float(new_val)
@@ -46,7 +46,7 @@ slider = ttk.Scale(root,
 slider.pack(side='bottom', pady=10)
 
 # Switch theme
-def _change_to_light_theme():
+def _switch_theme():
     style = root.style
     if style.theme_use() == 'morph':
         new_rc = RC["dark"]
@@ -57,7 +57,7 @@ def _change_to_light_theme():
     plt.rcParams.update(new_rc)
     style.theme_use(new_theme)
 
-bt = ttk.Button(root, text='Switch theme', command=_change_to_light_theme)
+bt = ttk.Button(root, text='Switch theme', command=_switch_theme)
 bt.pack(side='bottom', pady=10)
 
 root.mainloop()

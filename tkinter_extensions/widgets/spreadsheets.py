@@ -315,7 +315,7 @@ class Sheet(ttk.Frame):
         
         # Create an entry widget
         self._entry = entry = tk.Entry(
-            self, textvariable=self._focus_value, takefocus=0)
+            self, textvariable=self._focus_value, takefocus=False)
         entry.place(x=0, y=0)
         entry.lower()
         entry.bind('<KeyPress>', self._on_entry_key_press)
@@ -331,7 +331,7 @@ class Sheet(ttk.Frame):
         self.bind('<<Paste>>', self._on_paste)
         canvas.bind('<Configure>', self._on_canvas_configured)
         for widget in [canvas, rowcanvas, colcanvas, entry]:
-            widget.configure(takefocus=0)
+            widget.configure(takefocus=False)
             for scrollseq in MOUSESCROLL:
                 widget.bind(scrollseq, self._on_mousewheel_scroll)
         
@@ -2831,14 +2831,14 @@ class Book(ttk.Frame):
             style=self._button_style,
             text='[Sidebar]',
             command=self._toggle_sidebar,
-            takefocus=0
+            takefocus=False
         )
         self._sidebar_toggle.pack(side='left')
         
         ## Separator
         sep_fm = ttk.Frame(tb, width=3)
         sep_fm.pack(side='left', fill='y', padx=9, ipady=9)
-        sep = ttk.Separator(sep_fm, orient='vertical', takefocus=0)
+        sep = ttk.Separator(sep_fm, orient='vertical', takefocus=False)
         sep.place(relx=0.5, y=0, relheight=1.)
         
         ## Undo button
@@ -2847,7 +2847,7 @@ class Book(ttk.Frame):
             style=self._button_style,
             text='↺ Undo',
             command=lambda: self.sheet.undo(),
-            takefocus=0
+            takefocus=False
         )
         self._undo_btn.pack(side='left')
         
@@ -2857,7 +2857,7 @@ class Book(ttk.Frame):
             style=self._button_style,
             text='↻ Redo',
             command=lambda: self.sheet.redo(),
-            takefocus=0
+            takefocus=False
         )
         self._redo_btn.pack(side='left', padx=[5, 0])
         
@@ -2904,7 +2904,7 @@ class Book(ttk.Frame):
         en.bind('<KeyPress>', lambda e: self.sheet._on_entry_key_press(e))
         
         # Separator
-        ttk.Separator(self, takefocus=0).pack(fill='x')
+        ttk.Separator(self, takefocus=False).pack(fill='x')
         
         # Build sidebar and sheet frame
         def _init_sidebar(event=None):
@@ -2913,7 +2913,7 @@ class Book(ttk.Frame):
             self._toggle_sidebar()
         
         self._panedwindow = pw = ttk.Panedwindow(self, orient='horizontal')
-        self._panedwindow.pack(fill='both', expand=1)
+        self._panedwindow.pack(fill='both', expand=True)
         pw.bind('<Map>', _init_sidebar)
         
         ## Sidebar
@@ -2928,13 +2928,13 @@ class Book(ttk.Frame):
             style=self._bold_button_style,
             text='  ＋',
             command=lambda: self.insert_sheet(dialog=True),
-            takefocus=0
+            takefocus=False
         )
         self._sidebar_add.pack(anchor='e')
         
         ### Sheet labels
         self._sidebar = sb = TriggerOrderlyContainer(sbfm, cursor='arrow')
-        self._sidebar.pack(fill='both', expand=1)
+        self._sidebar.pack(fill='both', expand=True)
         self._sidebar.set_dnd_end_callback(self._on_dnd_end)
         
         ## Frame to contain sheets
@@ -2958,12 +2958,12 @@ class Book(ttk.Frame):
         self._sheets_props: dict[int, list] = self.insert_sheet(0)
         
         # Sizegrip
-        ttk.Separator(self, takefocus=0).pack(fill='x')
+        ttk.Separator(self, takefocus=False).pack(fill='x')
         
         # Focus on current sheet if any of the frames or canvas is clicked
         for widget in [self, tb, ib, R_label, r_label, s_label, C_label, c_label,
                        sbfm, sbfm.canvas, sb]:
-            widget.configure(takefocus=0)
+            widget.configure(takefocus=False)
             widget.bind('<ButtonPress-1>', self._focus_on_sheet)
         
         self.bind('<<ThemeChanged>>', self._create_styles)
@@ -3061,7 +3061,7 @@ class Book(ttk.Frame):
             old_sheet.pack_forget()
             old_sheet._history.remove_callback()
         
-        new_sheet.pack(fill='both', expand=1)
+        new_sheet.pack(fill='both', expand=True)
         new_sheet._focus()
         new_sheet._history.set_callback(self._refresh_undo_redo_buttons)
         self._refresh_undo_redo_buttons()
@@ -3122,7 +3122,7 @@ class Book(ttk.Frame):
             
             # Body
             body = ttk.Frame(top, padding=12)
-            body.pack(fill='both', expand=1)
+            body.pack(fill='both', expand=True)
             for c in range(3):
                 body.grid_rowconfigure(c, pad=6)
             body.grid_columnconfigure(0, pad=20)
@@ -3198,7 +3198,7 @@ class Book(ttk.Frame):
             
             # Buttonbox
             buttonbox = ttk.Frame(top, padding=[12, 18])
-            buttonbox.pack(fill='both', expand=1)
+            buttonbox.pack(fill='both', expand=True)
             
             ## Submit/Cancel buttons
             ttk.Button(
@@ -3240,7 +3240,7 @@ class Book(ttk.Frame):
             frame,
             style=self._button_style,
             text='::',
-            takefocus=0
+            takefocus=False
         )
         bt.pack(side='left', padx=[3, 6])
         bt._dnd_trigger = True
@@ -3250,9 +3250,9 @@ class Book(ttk.Frame):
             text=name,
             value=key,
             variable=self._sheet_var,
-            takefocus=0
+            takefocus=False
         )
-        switch.pack(side='left', fill='x', expand=1)
+        switch.pack(side='left', fill='x', expand=True)
         switch.bind(RIGHTCLICK, lambda e: self._post_switch_menu(e, key))
         
         # Modify the sheet dict
@@ -3405,7 +3405,7 @@ if __name__ == '__main__':
     
     
     book = Book(root, scrollbar_bootstyle='round-light')
-    book.pack(fill='both', expand=1)
+    book.pack(fill='both', expand=True)
     
     book.insert_sheet(1, name='index = 1')
     book.insert_sheet(0, name='index = 0')
@@ -3418,7 +3418,7 @@ if __name__ == '__main__':
     win = ttk.Toplevel(title='Sheet', position=(100, 100), size=(800, 500))
     
     ss = Sheet(win, scrollbar_bootstyle='light-round')
-    ss.pack(fill='both', expand=1)
+    ss.pack(fill='both', expand=True)
     
     ss.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)
     ss.set_backgroundcolors(5, 3, 5, 3, colors='#2A7AD5', undo=True)

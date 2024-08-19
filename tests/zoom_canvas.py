@@ -29,7 +29,7 @@ bt = ttk.Button(root, text='scale', command=_scale)
 bt.pack(pady=10)
 
 canvas = tk.Canvas(root)
-canvas.pack(fill='both', expand=1)
+canvas.pack(fill='both', expand=True)
 
 canvas.create_rectangle(0, 0, 300, 200, fill='gray', width=0, outline='cyan', tags='cyan-rect')
 canvas.create_rectangle(150, 100, 500, 250, fill='magenta', width=1, tags='magenta-rect')

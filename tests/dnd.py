@@ -13,7 +13,7 @@ import tkinter_extensions as te
 root = ttk.Window(title='Drag and Drop', themename='cyborg')
 
 container = te.widgets.OrderlyContainer(root)
-container.pack(fill='both', expand=1)
+container.pack(fill='both', expand=True)
 buttons = list()
 for r in range(6):
     buttons.append(list())
@@ -34,7 +34,7 @@ window = ttk.Toplevel(title='Button Trigger Drag and Drop', topmost=True)
 window.lift()
 window.after(300, window.focus_set)
 container = te.widgets.TriggerOrderlyContainer(window)
-container.pack(fill='both', expand=1)
+container.pack(fill='both', expand=True)
 frames = list()
 for r in range(4):
     frames.append(list())

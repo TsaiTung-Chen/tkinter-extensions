@@ -34,7 +34,7 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
         self.undock_bt = bt = ttk.Button(
             self,
             text='Undock',
-            takefocus=0,
+            takefocus=False,
             bootstyle='link-primary',
             command=self.undock
         )

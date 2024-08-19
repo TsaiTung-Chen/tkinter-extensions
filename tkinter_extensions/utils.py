@@ -257,7 +257,7 @@ def contrast_color(color: str):
     return colorutils.contrast_color(ImageColor.getrgb(color), model='rgb')
 
 
-def recolor_black(image:Image.Image,
+def recolor_black(image: Image.Image,
                   new_color: tuple,   # RGB
                   photoimage: bool = False,
                   master: Union[tk.Tk, tk.BaseWidget, None] = None):
@@ -266,7 +266,7 @@ def recolor_black(image:Image.Image,
     
     data = np.array(image.convert('RGBA'), copy=True)
     is_rgb = slice(3)  # channel 0, 1, 2
-    is_black = (data[..., is_rgb] == 0).all(axis=-1)  # get 2D pixels (rgb all 0)
+    is_black = (data[..., is_rgb] == 0).all(axis=-1)  # 2D pixels (rgb all 0)
     data[is_black, is_rgb] = new_color  # replace black with `new_color`
     img_converted = Image.fromarray(data, mode='RGBA')
     
@@ -275,10 +275,12 @@ def recolor_black(image:Image.Image,
     return img_converted
 
 
-def create_image_pair(image: Image.Image,
-                      widget: tk.BaseWidget,
-                      photoimage: bool = False,
-                      master: Union[tk.Tk, tk.BaseWidget, None] = None):
+def create_image_pair(
+        image: Image.Image,
+        widget: tk.BaseWidget,
+        photoimage: bool = False,
+        master: Union[tk.Tk, tk.BaseWidget, None] = None
+) -> tuple:
     _convert_bitdepth = lambda x: round((255./65535.) * x)
     
     style = ttk.Style()

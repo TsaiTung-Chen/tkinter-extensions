@@ -14,13 +14,14 @@ from contextlib import contextmanager
 
 from PIL import Image
 import ttkbootstrap as ttk
+from matplotlib import cbook
 import matplotlib.pyplot as plt
-from matplotlib.backend_bases import _Mode
+from matplotlib.backend_bases import _Mode, NavigationToolbar2
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends._backend_tk import NavigationToolbar2Tk, ToolTip
 
 from .. import variables as vrb
-from ..utils import create_image_pair, unbind, quit_if_all_closed, defer
+from ..utils import create_image_pair, quit_if_all_closed, defer
 from .undocked import UndockedFrame
 from ._matplotlib_config import RC
 # =============================================================================
@@ -98,7 +99,7 @@ def show_figs(*figs, reverse: bool = False):  # convenience function
         
         canvas = PlotterFigureCanvasTkAgg(fig, master=frame)
         canvas.draw_idle()
-        canvas.get_tk_widget().pack(side='bottom', fill='both', expand=1)
+        canvas.get_tk_widget().pack(side='bottom', fill='both', expand=True)
         
         toolbar = NavigationToolbar2Ttk(canvas, frame, pack_toolbar=False)
         toolbar.pack(side='top', anchor='w', fill='x')
@@ -190,9 +191,6 @@ class ToolTipTtk(ToolTip):
 
 class NavigationToolbar2Ttk(NavigationToolbar2Tk):
     def __init__(self, canvas, window=None, *, pack_toolbar: bool = True):
-        from matplotlib import cbook
-        from matplotlib.backend_bases import NavigationToolbar2
-        
         if window is None:
             window = canvas.get_tk_widget().master
         tk.Frame.__init__(
@@ -286,8 +284,6 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
         return b
     
     def _set_image_for_button(self, button):
-        from matplotlib import cbook
-        
         if button._image_file is None:
             return
         
@@ -415,16 +411,20 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
 
 class BasePlotter(UndockedFrame):
     @property
+    def delete_on_destroy(self) -> list:
+        return self._delete_on_destroy
+    
+    @property
     def toolbar(self):
         return self._toolbar
     
     @property
-    def canvas(self):
-        return self._figurecanvas.get_tk_widget()
-    
-    @property
     def figurecanvas(self):
         return self._figurecanvas
+    
+    @property
+    def canvas(self):
+        return self._figurecanvas.get_tk_widget()
     
     @property
     def figure(self):
@@ -434,39 +434,35 @@ class BasePlotter(UndockedFrame):
     def axes(self) -> list:
         return self._figurecanvas.figure.axes
     
-    def __init__(self, master, figure, dnd_trigger: bool = False, **kw):
+    def __init__(self, master, figure, **kw):
         kw["place_button"] = False
-        kw.setdefault("window_title", 'Plotting Pad')
+        kw.setdefault("window_title", 'Figure')
         super().__init__(master, **kw)
         self._delete_on_destroy = list()
         self._rc = self._fetch_rc()
         self._refresh_on_map: bool = False
         
-        if dnd_trigger:
-            dnd_trigger = ttk.Button(self,
-                                     text=' '.join(':'*3000),
-                                     takefocus=False,
-                                     bootstyle='link-primary')
-            dnd_trigger.pack(side='top', fill='x', expand=1)
-            dnd_trigger._dnd_trigger = True
+        # Use grid layout manager to ensure the toolbar and the canvas are
+        # always shown even if the container frame is in very small size
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
         
         self._figurecanvas = PlotterFigureCanvasTkAgg(figure, master=self)
         self._delete_on_destroy.append(self._figurecanvas)
         canvas = self._figurecanvas.get_tk_widget()
-        canvas.pack(side='top', fill='both', expand=1)
+        canvas.grid(row=0, column=0, sticky='nesw')
+        canvas.bind('<<DrawStarted>>', self._on_draw_started, add=True)
+        canvas.bind('<<DrawEnded>>', self._on_draw_ended, add=True)
         
         self._toolbar = NavigationToolbar2Ttk(
             self._figurecanvas, self, pack_toolbar=False)
-        self._toolbar.pack(side='bottom', anchor='w', fill='x')
+        self._toolbar.grid(row=1, column=0, sticky='we')
         self._toolbar.update()
         self._delete_on_destroy.append(self._toolbar)
         
         self.place_undock_button(anchor='ne', relx=1., rely=0., x=0, y=-6)
-        self._init_id = canvas.bind('<Map>', self._on_first_map, add=True)
-        canvas.bind('<Map>', self._on_map, add=True)
-        canvas.bind('<<DrawStarted>>', self._on_draw_started, add=True)
-        canvas.bind('<<DrawEnded>>', self._on_draw_ended, add=True)
-        canvas.bind('<<ThemeChanged>>', self._on_theme_changed, add=True)
+        self.bind('<Map>', self._on_map, add=True)
+        self.bind('<<ThemeChanged>>', self._on_theme_changed, add=True)
         self.bind('<Destroy>', self._on_destroy, add=True)
     
     def __del__(self):
@@ -484,12 +480,6 @@ class BasePlotter(UndockedFrame):
             if attr in self._delete_on_destroy:
                 delattr(self, name)
         self._delete_on_destroy.clear()
-    
-    def _on_first_map(self, event=None):
-        unbind(self.canvas, '<Map>', self._init_id)
-        del self._init_id
-        self._on_theme_changed()
-        self.draw_idle()
     
     def _on_map(self, event=None):
         if self._refresh_on_map:
@@ -557,7 +547,7 @@ if __name__ == '__main__':
     ax.legend(loc='upper right')
     
     plotter = BasePlotter(root, fig)
-    plotter.pack(side='top', fill='both', expand=1)
+    plotter.pack(side='top', fill='both', expand=True)
     
     def _update_frequency(new_val):
         f = float(new_val)
@@ -575,7 +565,7 @@ if __name__ == '__main__':
     slider.pack(side='bottom', pady=10)
     
     # Switch theme
-    def _change_to_light_theme():
+    def _switch_theme():
         style = root.style
         if style.theme_use() == 'morph':
             new_rc = RC["dark"]
@@ -586,7 +576,7 @@ if __name__ == '__main__':
         plt.rcParams.update(new_rc)
         style.theme_use(new_theme)
     
-    bt = ttk.Button(root, text='Switch theme', command=_change_to_light_theme)
+    bt = ttk.Button(root, text='Switch theme', command=_switch_theme)
     bt.pack(side='bottom', pady=10)
     
     root.mainloop()

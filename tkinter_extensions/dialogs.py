@@ -165,7 +165,7 @@ class FontDialog(_Positioned, dialogs.FontDialog):
     
     def _font_families_selector(self, master):
         container = ttk.Frame(master)
-        container.pack(fill='both', expand=1, side='left')
+        container.pack(fill='both', expand=True, side='left')
         
         header = ttk.Label(
             container,
@@ -183,7 +183,7 @@ class FontDialog(_Positioned, dialogs.FontDialog):
             bootstyle='outline',
             command=lambda value: om_font.configure(family=value)
         )
-        om.pack(fill='x', expand=1)
+        om.pack(fill='x', expand=True)
         
         om_menu = om['menu']
         for idx, family in enumerate(self._families):
@@ -265,7 +265,7 @@ class FontDialog(_Positioned, dialogs.FontDialog):
         weight_lframe = ttk.Labelframe(
             container, text=MessageCatalog.translate('Weight'), padding=5
         )
-        weight_lframe.pack(side='left', fill='x', expand=1)
+        weight_lframe.pack(side='left', fill='x', expand=True)
         opt_normal = ttk.Radiobutton(
             master=weight_lframe,
             text=MessageCatalog.translate('normal'),
@@ -285,7 +285,7 @@ class FontDialog(_Positioned, dialogs.FontDialog):
         slant_lframe = ttk.Labelframe(
             container, text=MessageCatalog.translate('Slant'), padding=5
         )
-        slant_lframe.pack(side='left', fill='x', padx=10, expand=1)
+        slant_lframe.pack(side='left', fill='x', padx=10, expand=True)
         opt_roman = ttk.Radiobutton(
             master=slant_lframe,
             text=MessageCatalog.translate('roman'),
@@ -305,7 +305,7 @@ class FontDialog(_Positioned, dialogs.FontDialog):
         effects_lframe = ttk.Labelframe(
             container, text=MessageCatalog.translate('Effects'), padding=5
         )
-        effects_lframe.pack(side='left', padx=(2, 0), fill='x', expand=1)
+        effects_lframe.pack(side='left', padx=(2, 0), fill='x', expand=True)
         opt_underline = ttk.Checkbutton(
             master=effects_lframe,
             text=MessageCatalog.translate('underline'),
@@ -323,7 +323,7 @@ class FontDialog(_Positioned, dialogs.FontDialog):
         #EDITED: don't turn off `pack_propagate` and set a small width
         
         container = ttk.Frame(master, padding=padding)
-        container.pack(fill='both', expand=1, anchor='n')
+        container.pack(fill='both', expand=True, anchor='n')
 
         header = ttk.Label(
             container,
@@ -343,7 +343,7 @@ class FontDialog(_Positioned, dialogs.FontDialog):
             highlightbackground=self._style.colors.primary
         )
         self._preview_text.insert('end', content)
-        self._preview_text.pack(fill='both', expand=1)
+        self._preview_text.pack(fill='both', expand=True)
         #EDITED: container.pack_propagate(False)
     
     def _update_font_preview(self, *_):

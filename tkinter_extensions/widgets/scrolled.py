@@ -719,14 +719,14 @@ if __name__ == '__main__':
     
     st = ScrolledText(win1, autohide=True, wrap='none', readonly=True)
     st.insert('end', ttk.tk.__doc__)
-    st.pack(fill='both', expand=1)
+    st.pack(fill='both', expand=True)
     
     
     win2 = ttk.Toplevel(title='ScrolledFrame')
     win2.lift()
     
     sf = ScrolledFrame(win2, autohide=False, scroll_orient='vertical')
-    sf.pack(fill='both', expand=1)
+    sf.pack(fill='both', expand=True)
     for i in range(20):
         text = str(i) + ': ' + '_'.join(str(i) for i in range(30))
         ttk.Button(sf, text=text).pack(anchor='e')
@@ -737,7 +737,7 @@ if __name__ == '__main__':
     
     sc = ScrolledCanvas(
         win3, scroll_orient='vertical', autohide=False, vbootstyle='round-light')
-    sc.pack(fill='both', expand=1)
+    sc.pack(fill='both', expand=True)
     sc.create_polygon((10, 5), (600, 300), (900, 600), (300, 600), (300, 600),
                       outline='red', stipple='gray25')
     sc.configure(bg='gray')
