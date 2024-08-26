@@ -327,10 +327,10 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
         is_navigating_after = self.mode != _Mode.NONE
         
         if not is_navigating_before and is_navigating_after:  # start navigating
-            self._autoscales_map = self._get_autoscales_on()  # save the settings
+            self._autoscales = self._get_autoscales_on()  # save the settings
             self._set_autoscales_on(False)
         elif is_navigating_before and not is_navigating_after:  # stop navigating
-            self._set_autoscales_on(self._autoscales_map)  # restore the settings
+            self._set_autoscales_on(self._autoscales)  # restore the settings
     
     def zoom(self, *args):  # on tk Button pressed
         is_navigating_before = self.mode != _Mode.NONE
@@ -338,10 +338,10 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
         is_navigating_after = self.mode != _Mode.NONE
         
         if not is_navigating_before and is_navigating_after:  # start navigating
-            self._autoscales_map = self._get_autoscales_on()  # save the settings
+            self._autoscales = self._get_autoscales_on()  # save the settings
             self._set_autoscales_on(False)
         elif is_navigating_before and not is_navigating_after:  # stop navigating
-            self._set_autoscales_on(self._autoscales_map)  # restore the settings
+            self._set_autoscales_on(self._autoscales)  # restore the settings
     
     def home(self, *args):
         """We overwrite the original `home` method. Instead of restoring the 
@@ -352,14 +352,14 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
         if self.mode != _Mode.NONE:  # is navigating
             # Temporarily restore the original autoscaling settings to perform 
             # the autoscaling
-            navigating_autoscales_map = self._get_autoscales_on()
+            autoscales = self._get_autoscales_on()
             try:
-                self._set_autoscales_on(self._autoscales_map)
+                self._set_autoscales_on(self._autoscales)
                 # Autoscale the figure
                 for ax in self.canvas.figure.get_axes():
                     autoscale(ax)
             finally:
-                self._set_autoscales_on(navigating_autoscales_map)
+                self._set_autoscales_on(autoscales)
         else:  # not navigating
             # Autoscale the figure
             for ax in self.canvas.figure.get_axes():
@@ -371,11 +371,11 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
         Update the viewlim and position from the view and position stack for
         each Axes.
         """
-        autoscales_map = self._get_autoscales_on()  # save the settings
+        autoscales = self._get_autoscales_on()  # save the settings
         try:
             super()._update_view()
         finally:
-            self._set_autoscales_on(autoscales_map)  # restore the settings
+            self._set_autoscales_on(autoscales)  # restore the settings
     
     def _get_autoscales_on(self) -> dict:
         """Save the states of autoscales for each axes when pan or zoom starts
@@ -388,17 +388,17 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
             for ax in axes
         }
     
-    def _set_autoscales_on(self, autoscales_map:Union[dict, bool]):
+    def _set_autoscales_on(self, autoscales: Union[dict, bool]):
         """Restore the states of autoscales for each axes. This prevents 
-        the autoscaling from always being turned off after setting axis' limits 
+        the autoscaling from always being off after setting axis' limits 
         while navigating
         """
         axes = [ ax for ax in self.canvas.figure.get_axes()
                  if ax.can_pan() or ax.can_zoom() ]
         for ax in axes:
             for axis_name in ax._axis_names:
-                new_value = autoscales_map[ax][axis_name] if isinstance(
-                    autoscales_map, dict) else autoscales_map
+                new_value = autoscales[ax][axis_name] if isinstance(
+                    autoscales, dict) else autoscales
                 getattr(ax, f"set_autoscale{axis_name}_on")(new_value)
     
     def save_figure(self, *args, **kw):

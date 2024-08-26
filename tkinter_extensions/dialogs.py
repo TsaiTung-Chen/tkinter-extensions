@@ -74,7 +74,11 @@ class QueryDialog(_Positioned, dialogs.QueryDialog):
     def on_submit(self, *_):
         #EDITED: save the result only if valid
         original_result = self._result
-        self._result = self._initial_focus.get()
+        try:
+            self._result = self._initial_focus.get()
+        except:
+            pass
+        
         valid = False
         try:
             valid = self.validate()
