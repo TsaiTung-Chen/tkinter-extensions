@@ -16,7 +16,7 @@ root = ttk.Window(title='Book (Root)',
                   size=(800, 500))
 
 
-book = te.Book(root, scrollbar_bootstyle='round-light')
+book = te.widgets.Book(root, scrollbar_bootstyle='round-light')
 book.pack(fill='both', expand=True)
 
 book.insert_sheet(1, name='index = 1')
@@ -29,7 +29,7 @@ book.after(4000, lambda: root.style.theme_use('cyborg'))
 
 win = ttk.Toplevel(title='Sheet', position=(100, 100), size=(800, 500))
 
-ss = te.Sheet(win, scrollbar_bootstyle='light-round')
+ss = te.widgets.Sheet(win, scrollbar_bootstyle='light-round')
 ss.pack(fill='both', expand=True)
 
 ss.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)
