@@ -7,6 +7,7 @@ Created on Sun Dec 11 19:18:31 2022
 """
 
 import tkinter as tk
+import tkinter.font
 from typing import Union, Callable, Optional
 
 import ttkbootstrap as ttk
@@ -17,7 +18,7 @@ from ttkbootstrap.localization import MessageCatalog as MessageCatalog
 
 from . import utils
 from . import variables as vrb
-from .widgets import Combobox
+from .widgets import Combobox, WrapLabel
 # =============================================================================
 # ---- Classes
 # =============================================================================
@@ -67,9 +68,33 @@ class MessageDialog(_Positioned, dialogs.MessageDialog):
 
 
 class QueryDialog(_Positioned, dialogs.QueryDialog):
+    def __init__(self, *args, width: int = 80, **kwargs):
+        super().__init__(*args, width=width, **kwargs)
+    
     def create_body(self, master):
-        super().create_body(master=master)
+        #EDITED: create prompt message from another function
+        self._container = ttk.Frame(master, padding=self._padding)
+        self._container.pack(fill='x', expand=True)
+        
+        if self._prompt:
+            self._add_prompt(self._container)
+        
+        entry = ttk.Entry(master=self._container)
+        entry.insert('end', self._initialvalue)
+        entry.pack(pady=(0, 5), fill='x')
+        entry.bind('<Return>', self.on_submit)
+        entry.bind('<KP_Enter>', self.on_submit)
+        entry.bind('<Escape>', self.on_cancel)
+        
+        self._initial_focus = entry
         self._initial_focus.select_range(0, 'end')
+    
+    def _add_prompt(self, master) -> WrapLabel:
+        self._prompt_label = WrapLabel(
+            master, text=self._prompt, width=self._width)
+        self._prompt_label.pack(pady=(0, 5), fill='x')
+        
+        return self._prompt_label
     
     def on_submit(self, *_):
         #EDITED: save the result only if valid

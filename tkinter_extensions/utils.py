@@ -86,9 +86,9 @@ def unbind(widget, sequence, funcid=None):
     widget.unbind(sequence)  # remove bindings but does not `widget.deletecommand`
     
     # Rebind the other functions
-    new_cmds = [ c for c in cmds[::2] if funcid not in c ]  # [cmd, cmd, ...]
-    if new_cmds:
-        widget.bind(sequence, '\n'.join([ c + '\n' for c in new_cmds ]))
+    other_cmds = [ c for c in cmds[::2] if funcid not in c ]  # [cmd, cmd, ...]
+    if other_cmds:
+        widget.bind(sequence, '\n'.join([ c + '\n' for c in other_cmds ]))
 
 
 def bind_recursively(widget, seqs, funcs, add='', *, key, skip_top_children=True):
@@ -202,7 +202,7 @@ def create_font(new_name: str = None,
 def get_font(class_name, default='TkDefaultFont'):
     assert isinstance(class_name, str), class_name
     style = ttk.Style.get_instance()
-    font_name = style.lookup(class_name, 'font') or default
+    font_name = style.lookup(class_name, 'font',  default=default)
     return tk.font.nametofont(font_name)
 
 

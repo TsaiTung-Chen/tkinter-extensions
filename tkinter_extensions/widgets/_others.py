@@ -154,6 +154,12 @@ class ColorButton(ttk.Button):
         return self._background
 
 
+class WrapLabel(ttk.Label):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bind('<Configure>', lambda e: self.configure(wraplength=e.width))
+
+
 # =============================================================================
 # ---- Main
 # =============================================================================

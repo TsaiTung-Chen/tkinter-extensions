@@ -18,7 +18,7 @@ with open(r'./LICENSE') as file:
 
 setup(
     name='tkinter-extensions',
-    version='0.0.4',
+    version='0.0.5',
     author='Tung-Chen Tsai',
     author_email='tungchentsai1753@gmail.com',
     description='Some tkinter extensions that allow you to build GUI apps with '
@@ -32,10 +32,12 @@ setup(
         'Operating System :: OS Independent'
     ],
     url='https://github.com/TsaiTung-Chen/tkinter-extensions',
-    packages=find_packages(include=['tkinter_extensions',
-                                    'tkinter_extensions.*']),
+    packages=find_packages(include=[
+        'tkinter_extensions',
+        'tkinter_extensions.*'
+    ]),
     install_requires=['matplotlib==3.8.*', 'ttkbootstrap', 'pandas'],
-    python_requires='>=3.9',
+    python_requires='>=3.10',
     package_data={'': ['*.json']}
 )
 

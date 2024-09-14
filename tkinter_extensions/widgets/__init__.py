@@ -15,7 +15,8 @@ from .undocked import UndockedFrame
 from .plotters import BasePlotter
 from .spreadsheets import Sheet, Book
 from ._others import (
-    ErrorCatchingWindow, OptionMenu, Combobox, ColorButton)
+    ErrorCatchingWindow, OptionMenu, Combobox, ColorButton, WrapLabel
+)
 
 
 __all__ = [
@@ -24,6 +25,6 @@ __all__ = [
     'ScrolledWidget', 'ScrolledTkFrame', 'ScrolledFrame', 'ScrolledLabelframe',
     'ScrolledText', 'ScrolledTreeview', 'ScrolledCanvas', 'UndockedFrame',
     'BasePlotter', 'Sheet', 'Book', 'ErrorCatchingWindow', 'OptionMenu',
-    'Combobox', 'ColorButton'
+    'Combobox', 'ColorButton', 'WrapLabel'
 ]
 
