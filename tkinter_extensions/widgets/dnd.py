@@ -1,619 +1,678 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon May 22 22:35:24 2023
+Created on Thu Sep  5 22:48:41 2024
 
 @author: tungchentsai
 """
 
+from __future__ import annotations
+from typing import Callable
 import tkinter as tk
-import tkinter.dnd
-from weakref import proxy
-from typing import Union, Optional, Callable
 
 import ttkbootstrap as ttk
 
-from ..utils import unbind
+from tkinter_extensions.utils import unbind
 # =============================================================================
-# ---- Classes
+# ---- Drag and Drop
 # =============================================================================
-class OrderlyContainer(tk.Canvas):
-    """This container allows a drag-and-drop feature which is very useful when 
-    one would like to reorder some widgets in the container. This can be 
-    achieved intuitively by drag-and-drop with the mouse cursor
-    """
-    
-    def __init__(self,
-                 *args,
-                 border_bootstyle: str = 'warning',
-                 **kwargs):
+class DnDItem(tk.Frame):
+    def __init__(
+            self,
+            *args,
+            dnd_bordercolor: str = 'yellow',
+            dnd_borderwidth: int = 1,
+            start_callback: Callable | None = None,
+            end_callback: Callable | None = None,
+            **kwargs
+    ):
         super().__init__(*args, **kwargs)
-        self._border_bootstyle = border_bootstyle
-        self._dnd_container_id = id(self)
-        self._dnd_start_callback = None
-        self._dnd_commit_callback = None
-        self._dnd_end_callback = None
+        if not isinstance(self.master, DnDContainer):
+            raise ValueError(
+                "A `DnDItem` must have a parent of type `DnDContainer` "
+                f"but got {repr(self.master)} of type `{type(self.master)}`."
+            )
         
-        self._dnd_place_info = list()
-        self._dnd_widgets = list()
-        self._dnd_ids = dict()
-        self._dnd_grid_size = tuple()
-        self._dnd = dict()
+        # Make a background frame above `self` but below other children
+        self._background_fm = tk.Frame(self)
+        self._background_fm.place(relwidth=1.0, relheight=1.0)
+        self._background_fm.bind('<Map>', self._on_background_map)
+        
+        # Add padding to `self` later to make it work like a border
+        self._dnd_bordercolor = dnd_bordercolor
+        self._dnd_borderwidth = dnd_borderwidth
+        self._dnd_container: DnDContainer = self.master
+        
+        self._start_callback = start_callback
+        self._end_callback = end_callback
+    
+    def set_start_callback(self, callback: Callable | None):
+        """
+        The callback function will be executed once DnD starts.
+        This callback function will then receive two arguments. The first
+        argument, namely event, has a type of `tk.Event`. The second arguemnt,
+        namely source, has a type of `DnDItem`.
+        """
+        assert callable(callback) or callback is None, callback
+        self._start_callback = callback
+    
+    def set_end_callback(self, callback: Callable | None):
+        """
+        The callback function will be executed once DnD ends.
+        This callback function will then receive two arguments. The first
+        argument, namely event, has a type of `tk.Event`. The second arguemnt,
+        namely target, has a type of `DnDItem` or `None`.
+        """
+        assert callable(callback) or callback is None, callback
+        self._end_callback = callback
+    
+    def _on_background_map(self, event: tk.Event):
+        if getattr(self, '__root', None):
+            self._background_fm.configure(background=self["background"])
+    
+    def _on_motion(self, event: tk.Event):
+        self.dnd_motion(event)
+        
+        # Update target
+        x = event.x_root - self._container_x
+        y = event.y_root - self._container_y
+        oids = self._dnd_container.dnd_oids
+        new_target = None
+        for oid in self._dnd_container.find_overlapping(x, y, x, y):
+            try:
+                hover = oids[oid]
+            except KeyError:
+                continue
+            try:
+                dnd_accept = hover.dnd_accept
+            except AttributeError:
+                continue
+            
+            if (new_target := dnd_accept(event, self)) is not None:
+                break
+        
+        # Call `dnd_leave` if we are leaving the old target, or call `dnd_enter`
+        # if we are entering a new target
+        old_target = self._target
+        if old_target is not new_target:
+            if old_target is not None:  # leaving the old target
+                self._target = None
+                old_target.dnd_leave(event, self, new_target)
+            if new_target is not None:  # entering a new target
+                new_target.dnd_enter(event, self, old_target)
+                self._target = new_target
+    
+    def _on_release(self, event: tk.Event | None):
+        self._finish(event, commit=True)
+    
+    def _finish(self, event: tk.Event | None, commit: bool):
+        target = self._target
+        widget = self._initial_widget
+        try:
+            unbind(widget, self._motion_pattern, self._motion_id)
+            unbind(widget, self._release_pattern, self._release_id)
+            
+            # Remove border
+            self.configure(
+                background=self._initial_background,
+                padx=self._initial_padx,
+                pady=self._initial_pady
+            )
+            
+            self._target = self._initial_widget = self.__root = None
+            
+            if target is not None:
+                if commit:
+                    target.dnd_commit(event, self)
+                else:
+                    target.dnd_leave(event, self)
+        finally:
+            self.dnd_end(event, target)
+    
+    def cancel(self, event: tk.Event | None = None):
+        self._finish(event, commit=False)
+    
+    def dnd_start(self, event: tk.Event):
+        assert isinstance(button := event.num, int), button
+        
+        if self._start_callback:
+            self._start_callback(event, self)
+        
+        x, y = self.winfo_rootx(), self.winfo_rooty()
+        w, h = self.winfo_width(), self.winfo_height()
+        
+        self.__root: tk.Tk = self._root()
+        self._target: DnDItem | None = None
+        self._offset_x: int = x - event.x_root
+        self._offset_y: int = y - event.y_root
+        self._motion_pattern = f'<B{button}-Motion>'
+        self._release_pattern = f'<ButtonRelease-{button}>'
+        self._initial_widget = widget = event.widget
+        self._initial_background: str = self["background"]
+        self._initial_padx: int = self["padx"]
+        self._initial_pady: int = self["pady"]
+        self._container_x: int = self.master.winfo_rootx()
+        self._container_y: int = self.master.winfo_rooty()
+        
+        focus_widget: tk.BaseWidget | None = self.focus_get()
+        tk.Wm.wm_manage(self, self)  # make self frame become a toplevel
+        tk.Wm.wm_overrideredirect(self, True)
+        tk.Wm.wm_attributes(self, '-topmost', True)
+        tk.Wm.wm_geometry(self, f'{w}x{h}+{x}+{y}')
+        if focus_widget:
+            self.after_idle(focus_widget.focus_set)
+        
+        self.configure(
+            background=self._dnd_bordercolor,
+            padx=self._dnd_borderwidth,
+            pady=self._dnd_borderwidth
+        )
+        
+        self._motion_id = widget.bind(
+            self._motion_pattern, self._on_motion, add=True)
+        self._release_id = widget.bind(
+            self._release_pattern, self._on_release, add=True)
+    
+    def dnd_motion(self, event: tk.Event):
+        # Move the source widget
+        x, y = (event.x_root + self._offset_x, event.y_root + self._offset_y)
+        tk.Wm.wm_geometry(self, f'+{x}+{y}')
+    
+    def dnd_accept(
+            self,
+            event: tk.Event,
+            source: DnDItem
+    ) -> DnDItem | None:
+        assert isinstance(source, DnDItem), source
+        
+        if self != source and self.master == source.master:  # are siblings
+            return self
+    
+    def dnd_enter(
+            self,
+            event: tk.Event,
+            source: DnDItem,
+            old_target: DnDItem
+    ):
+        assert isinstance(source, DnDItem), source
+    
+    def dnd_leave(
+            self,
+            event: tk.Event,
+            source: DnDItem,
+            new_target: DnDItem
+    ):
+        assert isinstance(source, DnDItem), source
+    
+    def dnd_commit(
+            self,
+            event: tk.Event,
+            source: DnDItem
+    ):
+        assert isinstance(source, DnDItem), source
+    
+    def dnd_end(self, event: tk.Event | None, target: DnDItem | None):
+        assert isinstance(target, (DnDItem, type(None))), target
+        
+        container = self._dnd_container
+        
+        # Restore `self` to become a regular widget
+        tk.Wm.wm_forget(self, self)
+        
+        # Remove and then put the widget onto the canvas again
+        container.delete(self._oid)
+        self._oid = container.create_window(0, 0, window=self, tags='dnd-item')
+        container.dnd_oids.clear()
+        container.dnd_oids.update({w._oid: w for w in container.dnd_widgets})
+        container._put(self)
+        container._resize(self)
+        
+        if self._end_callback:
+            self._end_callback(event, target)
+
+
+class OrderlyDnDItem(DnDItem):
+    def dnd_enter(
+            self,
+            event: tk.Event,
+            source: DnDItem,
+            old_target: DnDItem
+    ):
+        super().dnd_enter(event, source, old_target)
+        
+        container = self._dnd_container
+        widgets = container.dnd_widgets
+        new_source_idx = widgets.index(self)
+        new_target_idx = widgets.index(source)
+        
+        # Exchange the indices of target (`self`) and `source` widgets
+        widgets[new_target_idx] = self
+        widgets[new_source_idx] = source
+        
+        # Update the oid dictionary
+        oids = container.dnd_oids
+        oids.clear()
+        oids.update({ w._oid: w for w in widgets })
+        
+        # Exchange the geometries
+        geometries = container._dnd_geometries
+        old_source_geo = geometries[new_target_idx]
+        old_target_geo = geometries[new_source_idx]
+        new_source_geo = geometries[new_source_idx].copy()
+        new_target_geo = geometries[new_target_idx].copy()
+        new_source_geo.update({
+            "width": old_source_geo["width"],
+            "height": old_source_geo["height"],
+            "relwidth": old_source_geo["relwidth"],
+            "relheight": old_source_geo["relheight"],
+        })
+        new_target_geo.update({
+            "width": old_target_geo["width"],
+            "height": old_target_geo["height"],
+            "relwidth": old_target_geo["relwidth"],
+            "relheight": old_target_geo["relheight"],
+        })
+        geometries[new_source_idx] = new_source_geo
+        geometries[new_target_idx] = new_target_geo
+        
+        # Update the UI
+        container._put(self, new_target_geo)
+        container._resize(self, new_target_geo)
+
+
+class DnDContainer(tk.Canvas):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bind('<Configure>', self._on_configure)
+        self._canvas_w: int = 0
+        self._canvas_h: int = 0
+        self._dnd_widgets: list[DnDItem] = []
+        self._dnd_oids: dict[DnDItem] = {}
     
     @property
-    def dnd_widgets(self):
+    def dnd_widgets(self) -> list[DnDItem]:
         return self._dnd_widgets
     
-    def dnd_put(self,
-                widgets: list,
-                orient: Optional[str] = None,
-                sticky: Optional[str] = None,
-                expand: Union[tuple, list, bool, int] = False,
-                padding: Union[tuple[int], list[int], int] = 0,
-                ipadding: Union[tuple[int], list[int], int] = 0):
-        """Use this function to put `widgets` into the container (canvas).
+    @property
+    def dnd_oids(self) -> dict[int, DnDItem]:
+        return self._dnd_oids
+    
+    def _on_configure(self, event: tk.Event | None = None):
+        if event is None:
+            self.update_idletasks()
+            self._canvas_w: int = self.winfo_width()
+            self._cnavas_h: int = self.winfo_height()
+        else:
+            self._canvas_w: int = event.width
+            self._canvas_h: int = event.height
         
-        `widgets` must be a list of widgets or a list of lists of 
-        widgets. If `widgets` is a list of lists of widgets (a 2-D array of 
-        widgets), the result layout will be in the same order as in the 
-        `widgets`. Otherwise, one can specify the orientation by `orient`, e.g., 
+        if self._dnd_widgets:
+            for widget, geo in zip(self._dnd_widgets, self._dnd_geometries):
+                self._put(widget, geo)
+                self._resize(widget, geo)
+    
+    def dnd_put(
+            self,
+            items: list[list[DnDItem]] | list[DnDItem],
+            orient: str = 'vertical',
+            sticky: str = '',
+            expand: tuple[bool, bool] | list[bool] | bool = False,
+            padding: tuple[int, int] | list[int] | int = 0,
+            ipadding: tuple[int, int] | list[int] | int = 0
+    ):
+        """
+        Use this function to put `items` onto the canvas container.
+        
+        `items` must be a list of `DnDItem`s or a list of lists of 
+        `DnDItem`s. If `items` is a list of lists of `DnDItem`s (a 2-D array of 
+        `DnDItem`s), the result layout will be in the same order as in the 
+        `items`. Otherwise, one can specify the orientation by `orient`, e.g., 
         'vertical' (default) or 'horizontal'.
         
-        Other arguments work like the arguments in the grid layout manager.
+        Other arguments work like the arguments for the grid layout manager.
         """
-        assert isinstance(widgets, list), widgets
+        assert isinstance(items, list), items
         assert isinstance(expand, (tuple, list, bool, int)), expand
         assert isinstance(padding, (tuple, list, int)), padding
         assert isinstance(ipadding, (tuple, list, int)), ipadding
-        assert orient in ['horizontal', 'vertical', None], orient
+        assert orient in ('horizontal', 'vertical'), orient
         
-        if not isinstance(widgets[0], list):
+        if not isinstance(items[0], list):
             if orient == 'horizontal':
-                widgets = [widgets]
+                items = [items]
             else:  # vertical
-                widgets = [ [w] for w in widgets ]
-        nrows, ncols = len(widgets), len(widgets[0])
+                items = [ [w] for w in items ]
+        R, C = len(items), len(items[0])
         
         pairs = list()
         for arg in [expand, padding, ipadding]:
             if isinstance(arg, (tuple, list)):
+                assert len(arg) == 2, arg
                 arg = tuple(arg)
-                if len(arg) == 1:
-                    arg *= 2
-                else:
-                    assert len(arg) == 2, arg
             else:
-                arg = (arg,) * 2
+                arg = (arg, arg)
             pairs.append(arg)
         expand, (padx, pady), (ipadx, ipady) = pairs
-        params = {"expand": expand,
-                  "padding": (padx, pady),
-                  "ipadding": (ipadx, ipady),
-                  "grid_size": (nrows, ncols),
-                  "sticky": sticky}
+        assert isinstance(sticky, str), (type(sticky), sticky)
+        assert set(sticky).issubset('nesw'), sticky
+        assert all( isinstance(p, int) for p in (padx, pady) ), (padx, pady)
+        assert all( p >= 0 for p in (padx, pady) ), (padx, pady)
+        assert all( isinstance(p, int) for p in (ipadx, ipady) ), (ipadx, ipady)
+        assert all( p >= 0 for p in (ipadx, ipady) ), (ipadx, ipady)
         
-        # Calculate canvas size and place widgets onto the canvas
-        try:
-            widgets_flat = [ proxy(w) for row in widgets for w in row ]
-        except TypeError:
-            widgets_flat = [ w for row in widgets for w in row ]
-        widget_ids = [ self.create_window(0, 0, anchor='nw', window=widget)
-                       for widget in widgets_flat ]
+        # Calculate canvas size and place items onto the canvas
+        widgets_flat = [ w for row in items for w in row ]
+        assert all([ isinstance(w, DnDItem) for w in widgets_flat]), items
+        oids = [
+            self.create_window(0, 0, anchor='nw', window=widget, tags='dnd-item')
+            for widget in widgets_flat
+        ]
+        
         self.update_idletasks()
         widths, heights = list(), list()
-        for widget, id_ in zip(widgets_flat, widget_ids):
-            widget._dnd_id = id_
-            widths.append(widget.winfo_reqwidth() + 1)
-            heights.append(widget.winfo_reqheight() + 1)
-        width_cell = max(widths)
-        width_canvas = ncols*width_cell + 2*padx + 2*(ncols - 1)*ipadx
-        height_cell = max(heights)
-        height_canvas = nrows*height_cell + 2*pady + 2*(nrows - 1)*ipady
-        self.configure(width=width_canvas, height=height_canvas)
-        params.update({
-            "width_cell": width_cell, "height_cell": height_cell,
-            "width_canvas": width_canvas, "height_canvas": height_canvas
-        })
+        for oid, widget in zip(oids, widgets_flat):
+            widget._oid: int = oid
+            widths.append(widget.winfo_reqwidth())
+            heights.append(widget.winfo_reqheight())
+        cell_w, cell_h = max(widths), max(heights)
+        canvas_w: int = C*cell_w + 2*padx + (C - 1)*ipadx
+        canvas_h: int = R*cell_h + 2*pady + (R - 1)*ipady
+        self._dnd_geometry_params = {
+            "shape": (R, C),
+            "expand": expand,
+            "padding": (padx, pady),
+            "ipadding": (ipadx, ipady),
+            "sticky": sticky,
+            "natural_canvas_size": (canvas_w, canvas_h)
+        }
         
-        # Calculate place_info and update widgets' position and size
-        place_info_list = list()
-        i = 0
-        for r, row in enumerate(widgets):
-            for c, widget in enumerate(row):
-                place_info_list.append(
-                    self._calculate_place_info(
-                        r, c, widths[i], heights[i], **params
-                    )
-                )
-                i += 1
+        # Calculate geometry and update items' position and size
+        geometries = []
+        for i, widget in enumerate(widgets_flat):
+            geometries.append(
+                self._calculate_geometry(i, widths[i], heights[i])
+            )
+            
+            # Setup widget's dnd functions
+            self.rebind_dnd_start(widget)
         
-        # Setup widget's dnd functions
-        for widget in widgets_flat:
-            self.bind_dnd_start(widget)
-            widget.dnd_widget_accept = self._get_dnd_widget_accept(widget)
-            widget.dnd_widget_enter = self._get_dnd_widget_enter(widget)
-            widget.dnd_widget_leave = self._get_dnd_widget_leave(widget)
-            widget.dnd_end = self._get_dnd_end(widget)
-            widget._dnd_container_id = self._dnd_container_id
-        
-        self._dnd_configure_id = self.bind('<Configure>', self._update_layout)
-        self._dnd_place_info = place_info_list
-        self._dnd_widgets = widgets_flat
-        self._dnd_ids = dict(zip(widget_ids, widgets_flat))
-        self._dnd_grid_size = params["grid_size"]
-        self._dnd = dict()
-        self._update_layout()
+        self._dnd_geometries: list[dict] = geometries
+        self._dnd_widgets: list[DnDItem] = widgets_flat
+        self._dnd_oids: dict[int, DnDItem] = dict(zip(oids, widgets_flat))
+        self.configure(width=canvas_w, height=canvas_h)
+        self._on_configure()
     
     def dnd_forget(self, destroy: bool = True):
-        for id_ in self._dnd_ids:
-            self.delete(id_)
+        if not self._dnd_widgets:
+            return
+        
+        self.delete('dnd-item')
         
         if destroy:
-            for widget in self.dnd_widgets:
+            for widget in self._dnd_widgets:
                 widget.destroy()
         
-        unbind(self, '<Configure>', self._dnd_configure_id)
-        self._dnd_place_info.clear()
+        self._dnd_geometries.clear()
         self._dnd_widgets.clear()
-        self._dnd_ids.clear()
-        self._dnd_grid_size = tuple()
-        self._dnd.clear()
+        self._dnd_oids.clear()
+        self._dnd_geometry_params.clear()
     
-    def bind_dnd_start(self, moved: tk.BaseWidget):
-        """Overwrite this method to customize the trigger widget
+    def _put(self, widget: DnDItem, geo: dict | None = None):
+        geo = geo or self._dnd_geometries[self._dnd_widgets.index(widget)]
+        x = max(int(geo["relx"] * self._canvas_w + geo["x"]), 0)
+        y = max(int(geo["rely"] * self._canvas_h + geo["y"]), 0)
+        
+        self.itemconfigure(widget._oid, anchor=geo["anchor"])
+        self.coords(widget._oid, x, y)
+    
+    def _resize(self, widget: DnDItem, geo: dict | None = None):
+        geo = geo or self._dnd_geometries[self._dnd_widgets.index(widget)]
+        w = max(int(geo["relwidth"] * self._canvas_w + geo["width"]), 0)
+        h = max(int(geo["relheight"] * self._canvas_h + geo["height"]), 0)
+        
+        self.itemconfigure(widget._oid, width=w, height=h)
+    
+    def _calculate_geometry(self, idx, natural_width, natural_height) -> dict:
         """
-        self._bind_dnd_start(trigger=moved, moved=moved)
-    
-    def _bind_dnd_start(self, *, trigger: tk.BaseWidget, moved: tk.BaseWidget):
-        trigger.configure(cursor='hand2')
-        trigger._dnd_start_id = trigger.bind(
-            '<ButtonPress-1>', self._get_dnd_start(moved))
-    
-    def set_dnd_start_callback(self, func: Callable):
-        """`func` will be executed when `dnd_start` runs. `func` should 
-        accept `source` and `event` arguments
+        This function mimics the grid layout manager by calculating the 
+        position and size of each widget in the cell.
         """
-        assert callable(func), func
-        self._dnd_start_callback = func
-    
-    def remove_dnd_start_callback(self):
-        self._dnd_start_callback = None
-    
-    def set_dnd_commit_callback(self, func: Callable):
-        """`func` will be executed when `dnd_commit` runs. `func` should 
-        accept `source` and `event` arguments
-        """
-        assert callable(func), func
-        self._dnd_commit_callback = func
-    
-    def remove_dnd_commit_callback(self):
-        self._dnd_commit_callback = None
-    
-    def set_dnd_end_callback(self, func: Callable):
-        """`func` will be executed when `dnd_end` runs. `func` should 
-        accept `target` and `event` arguments
-        """
-        assert callable(func), func
-        self._dnd_end_callback = func
-    
-    def remove_dnd_end_callback(self):
-        self._dnd_end_callback = None
-    
-    def _calculate_place_info(self,
-                              r,
-                              c,
-                              width,
-                              height,
-                              width_canvas,
-                              height_canvas,
-                              width_cell,
-                              height_cell,
-                              grid_size,
-                              sticky,
-                              expand,
-                              padding,
-                              ipadding):
-        """This function simulates the grid layout manager by calculating the 
-        position and size of each widget in the cell
-        """
-        def _calc(xy, dim, dimension, L, dimension_cell, n, N,
-                  _sticky, expand, pad, ipad):
-            xy_cell = n*L + (N - 2*n)*pad + 2*n*ipad
-            dimension_cell *= N
-            if expand:
-                if _sticky == (True, True):  # fill
-                    place_info.update({
-                        f"rel{xy}": n/N + 1./(2.*N),
-                        xy: (xy_cell - n*L)//N + (dimension_cell - L)//(2*N),
-                        f"rel{dim}": 1. / N,
-                        dim: (dimension_cell - L) // N
-                    })
-                    return ''  # center
-                
-                place_info.update({dim: dimension})
-                if _sticky == (True, False):
-                    place_info.update({
-                        f"rel{xy}": n / N,
-                        xy: (xy_cell - n*L) // N
-                    })
-                    return 'w' if xy == 'x' else 'n'  # lower bound
-                elif _sticky == (False, True):
-                    place_info.update({
-                        f"rel{xy}": n/N + 1./N,
-                        xy: (xy_cell - n*L)//N + (dimension_cell - L)//N
-                    })
-                    return 'e' if xy == 'x' else 's'  # higher bound
-                # (False, False) => center
-                place_info.update({
-                    f"rel{xy}": n/N + 1./(2.*N),
-                    xy: (xy_cell - n*L)//N + (dimension_cell - L)//(2*N)
-                })
-                return ''  # center
+        def _calc(
+                i, I, size, natural_L, stick, exp, pad, ipad
+        ) -> dict:
+            # Cell size (size_c) = L/I + (-2*pad - (I-1)*ipad)/I
+            r = 1. / I  # relative part
+            f = (-2*pad - (I - 1)*ipad)/I  # fixed part
+            nat_cell_size = natural_L*r + f
             
-            # Don't expand
-            if _sticky == (True, True):
-                place_info.update({
-                    xy: xy_cell//N + dimension_cell//(2*N),
-                    dim: dimension_cell // N
-                })
-                return ''  # center
-            
-            place_info.update({dim: dimension})
-            if _sticky == (True, False):
-                place_info[xy] = xy_cell // N
-                return 'w' if xy == 'x' else 'n'  # lower bound
-            if _sticky == (False, True):
-                place_info[xy] = xy_cell//N + dimension_cell//N
-                return 'e' if xy == 'x' else 's'  # higher bound
-            # (False, False) => center
-            place_info[xy] = xy_cell//N + dimension_cell//(2*N)
-            return ''  # center
+            if exp:  # expand => use variable position and size
+                if stick == (True, True):  # fill
+                    return {
+                        "relpos": (2*i + 1)*r / 2,
+                        "pos": ((2*i + 1)*f + 2*i*ipad) / 2 + pad,
+                        "relsize": r,
+                        "size": f
+                    }
+                elif stick == (True, False):
+                    return {
+                        "relpos": i*r,
+                        "pos": i*f + i*ipad + pad,
+                        "relsize": 0.,
+                        "size": size
+                    }
+                elif stick == (False, True):
+                    return {
+                        "relpos": (i + 1)*r,
+                        "pos": (i + 1)*f + i*ipad + pad,
+                        "relsize": 0.,
+                        "size": size
+                    }
+                else:  # stick == (False, False)
+                    return {
+                        "relpos": (2*i + 1)*r / 2,
+                        "pos": ((2*i + 1)*f + 2*i*ipad) / 2 + pad,
+                        "relsize": 0.,
+                        "size": size
+                    }
+            else:  # don't expand => use fixed position and size
+                if stick == (True, True):  # fill
+                    return {
+                        "relpos": 0.,
+                        "pos": ((2*i + 1)*nat_cell_size + 2*i*ipad) / 2 + pad,
+                        "relsize": 0.,
+                        "size": natural_L*r + f
+                    }
+                elif stick == (True, False):
+                    return {
+                        "relpos": 0.,
+                        "pos": i*nat_cell_size + i*ipad + pad,
+                        "relsize": 0.,
+                        "size": size
+                    }
+                elif stick == (False, True):
+                    return {
+                        "relpos": 0.,
+                        "pos": (i + 1)*nat_cell_size + i*ipad + pad,
+                        "relsize": 0.,
+                        "size": size
+                    }
+                else:  # stick == (False, False)
+                    return {
+                        "relpos": 0.,
+                        "pos": ((2*i + 1)*nat_cell_size + 2*i*ipad) / 2 + pad,
+                        "relsize": 0.,
+                        "size": size
+                    }
         #
         
-        place_info = dict.fromkeys(
-            ["relx", "x",
-             "rely", "y",
-             "relwidth", "width",
-             "relheight", "height"],
-            0.
-        )
-        nrows, ncols = grid_size
-        sticky = sticky or ''
+        params = self._dnd_geometry_params
+        R, C = params["shape"]
+        expx, expy = params["expand"]
+        padx, pady = params["padding"]
+        ipadx, ipady = params["ipadding"]
+        sticky = params["sticky"]
+        natural_w, natural_h = params["natural_canvas_size"]
+        
+        r, c = divmod(idx, C)
         sticky_x = ('w' in sticky, 'e' in sticky)
         sticky_y = ('n' in sticky, 's' in sticky)
+        anchor_x = '' if sticky_x[0] == sticky_x[1] else \
+                   'w' if sticky_x[0] else 'e'
+        anchor_y = '' if sticky_y[0] == sticky_y[1] else \
+                   'n' if sticky_y[0] else 's'
         
-        anchor_x = _calc('x', 'width', width, width_canvas, width_cell,
-            c, ncols, sticky_x, expand[0], padding[0], ipadding[0])
-        anchor_y = _calc('y', 'height', height, height_canvas, height_cell,
-            r, nrows, sticky_y, expand[1], padding[1], ipadding[1])
-        
-        place_info["anchor"] = (anchor_x + anchor_y) or 'center'
-        
-        return place_info
-    
-    def _update_layout(self, event=None):
-        self.update_idletasks()
-        width_canvas, height_canvas = self.winfo_width(), self.winfo_height()
-        for widget, info in zip(self._dnd_widgets, self._dnd_place_info):
-            self._put(widget, info, width_canvas, height_canvas)
-            self._resize(widget, info, width_canvas, height_canvas)
-    
-    def _put(self, widget, info=None, width_canvas=None, height_canvas=None):
-        info = info or self._dnd_place_info[self._dnd_widgets.index(widget)]
-        width_canvas = width_canvas or self._dnd["width_canvas"]
-        height_canvas = height_canvas or self._dnd["height_canvas"]
-        
-        x = max(int(info["relx"] * width_canvas + info["x"]), 0)
-        y = max(int(info["rely"] * height_canvas + info["y"]), 0)
-        
-        self.itemconfigure(widget._dnd_id, anchor=info["anchor"])
-        self.coords(widget._dnd_id, x, y)
-    
-    def _resize(self, widget, info, width_canvas=None, height_canvas=None):
-        info = info or self._dnd_place_info[self._dnd_widgets.index(widget)]
-        width_canvas = width_canvas or self._dnd["width_canvas"]
-        height_canvas = height_canvas or self._dnd["height_canvas"]
-        
-        w = max(int(info["relwidth"] * width_canvas + info["width"]), 0)
-        h = max(int(info["relheight"] * height_canvas + info["height"]), 0)
-        
-        self.itemconfigure(widget._dnd_id, width=w, height=h)
-    
-    def _get_dnd_start(self, source):
-        """Get the dnd init function that will be called when drag starts.
-        This init function should be bound to the trigger widgets
-        """
-        def _dnd_start(event):
-            dnd_handler = tk.dnd.dnd_start(source, event)
-            if not dnd_handler:
-                return
-            
-            canvas_x, canvas_y = self.winfo_rootx(), self.winfo_rooty()
-            source_x, source_y = source.winfo_x(), source.winfo_y()
-            source_w, source_h = source.winfo_width(), source.winfo_height()
-            mouse_x, mouse_y = event.x_root, event.y_root
-            source_anchor = self.itemconfigure(source._dnd_id, 'anchor')
-            source_anchor = '' if source_anchor == 'center' else source_anchor
-            
-            # Calculate the initial, relative mouse position
-            if 'w' in source_anchor:  # left
-                offset_x = 0
-            elif 'e' in source_anchor:  # right
-                offset_x = source_w
-            else:  # middle
-                offset_x = source_w // 2
-            
-            if 'n' in source_anchor:  # top
-                offset_y = 0
-            elif 's' in source_anchor:  # bottom
-                offset_y = source_h
-            else:  # middle
-                offset_y = source_h // 2
-            offset_x = mouse_x - (source_x + offset_x)
-            offset_y = mouse_y - (source_y + offset_y)
-            
-            source.lift()
-            source.focus_set()
-            
-            # Create a temp border frame surrounding the source widget
-            border_fm = ttk.Frame(self, bootstyle=self._border_bootstyle)
-            border_fm._dnd_id = self.create_window(
-                source_x - 1,
-                source_y - 1,
-                anchor='nw',
-                width=source_w + 2,
-                height=source_h + 2,
-                window=border_fm
-            )
-            border_fm.lower(source)
-            
-            # Save the initial state for future use
-            self._dnd = {
-                "handler": dnd_handler,
-                "event": None,
-                "source": source,
-                "target": None,
-                "mouse_x": mouse_x,
-                "mouse_y": mouse_y,
-                "canvas_x": canvas_x,
-                "canvas_y": canvas_y,
-                "width_canvas": self.winfo_width(),
-                "height_canvas": self.winfo_height(),
-                "offset_x": offset_x,
-                "offset_y": offset_y,
-                "border_frame": proxy(border_fm)
-            }
-            
-            if self._dnd_start_callback:
-                self._dnd_start_callback(source, event)
-        #
-        
-        try:
-            source = proxy(source)
-        except TypeError:
-            pass
-        
-        return _dnd_start
-    
-    def dnd_accept(self, source, event):
-        """This will return a cross-window dragging function
-        """
-        return self
-    
-    def dnd_enter(self, source, event):
-        """This will return a cross-window dragging function
-        """
-        pass
-    
-    def dnd_motion(self, source, event):
-        """This will return a cross-window dragging function
-        """
-        def _find_target(widget):
-            dummy = lambda *args: None
-            target = getattr(widget, 'dnd_widget_accept', dummy)(source, event)
-            if target is not None:
-                return target
-            
-            for w in widget.winfo_children():
-                target = _find_target(w)
-                if target is not None:
-                    return target
-        #
-        if source._dnd_container_id != self._dnd_container_id:
-            return
-        old_event, self._dnd["event"] = self._dnd.pop("event"), event
-        if old_event is event:  # `source` has been moved before
-            return
-        
-        # Move the source widget according to the cursor position
-        self.coords(
-            source._dnd_id,
-            event.x_root - self._dnd["offset_x"],
-            event.y_root - self._dnd["offset_y"]
+        geometry_x = _calc(
+            c, C, natural_width, natural_w, sticky_x, expx, padx, ipadx
+        )
+        geometry_y = _calc(
+            r, R, natural_height, natural_h, sticky_y, expy, pady, ipady
         )
         
-        # Move the border frame according to the source widget position
-        source_x, source_y, _, _ = self.bbox(source._dnd_id)
-        self.coords(
-            self._dnd["border_frame"]._dnd_id,
-            source_x - 1,
-            source_y - 1
-        )
+        geometry = {
+            "anchor": (anchor_x + anchor_y) or 'center',
+            "relx": geometry_x["relpos"],
+            "x": geometry_x["pos"],
+            "relwidth": geometry_x["relsize"],
+            "width": geometry_x["size"],
+            "rely": geometry_y["relpos"],
+            "y": geometry_y["pos"],
+            "relheight": geometry_y["relsize"],
+            "height": geometry_y["size"]
+        }
         
-        # Find the target under mouse cursor
-        x = event.x_root - self._dnd["canvas_x"]
-        y = event.y_root - self._dnd["canvas_y"]
-        new_target = None
-        for widget_id in self.find_overlapping(x, y, x, y):
-            if (widget := self._dnd_ids.get(widget_id, None)) is None:
-                continue
-            new_target = _find_target(widget)
-            if new_target is not None:
-                break
+        return geometry
+    
+    def rebind_dnd_start(self, moved: DnDItem):
+        """
+        Overwrite this method to customize the trigger widget.
+        """
+        self._rebind_dnd_start('<ButtonPress-1>', trigger=moved, moved=moved)
+    
+    def _rebind_dnd_start(
+            self,
+            sequence: str,
+            *,
+            trigger: tk.BaseWidget,
+            moved: DnDItem
+    ):
+        """
+        Bind the `moved.dnd_start` method to `trigger` widget and its
+        descendants with `sequence` events.
+        """
+        assert isinstance(moved, DnDItem), (type(moved), moved)
         
-        old_target = self._dnd["target"]
-        if new_target is old_target:  # in the same target
-            return
+        trigger.configure(cursor='hand2')
+        if hasattr(trigger, '_dnd_start_id'):
+            unbind(trigger, sequence, trigger._dnd_start_id)
+        trigger._dnd_start_id = trigger.bind(sequence, moved.dnd_start, add=True)
         
-        # Mouse has left `old_target` and entered `new_target`
-        self._dnd["target"] = None
-        if old_target:
-            old_target.dnd_widget_leave(source, event)
-        if new_target:
-            new_target.dnd_widget_enter(source, event)
-        self._dnd["target"] = new_target
+        for child in trigger.winfo_children():
+            self._rebind_dnd_start(sequence, trigger=child, moved=moved)
     
-    def dnd_leave(self, source, event):
-        """This will return a cross-window dragging function
+    def set_start_callback(self, callback: Callable | None):
         """
-        if source._dnd_container_id == self._dnd_container_id:
-            self.dnd_commit(source, event)
+        The callback function will be executed once DnD starts.
+        This callback function will then receive two arguments. The first
+        argument, namely event, has a type of `tk.Event`. The second arguemnt,
+        namely `source`, has a type of `DnDItem`.
+        """
+        for widget in self._dnd_widgets:
+            widget.set_start_callback(callback)
     
-    def dnd_commit(self, source, event):
-        """This will return a cross-window dragging function
+    def set_end_callback(self, callback: Callable | None):
         """
-        if source._dnd_container_id != self._dnd_container_id:
-            return
-        
-        # Put the source widget according to the place info
-        self._put(source)
-        
-        # Move the border frame according to the source widget position
-        source_x, source_y, _, _ = self.bbox(source._dnd_id)
-        self.coords(
-            self._dnd["border_frame"]._dnd_id,
-            source_x - 1,
-            source_y - 1
-        )
-        
-        if self._dnd_commit_callback:
-            self._dnd_commit_callback(source, event)
-    
-    def _get_dnd_end(self, widget=None):
-        """This will return a cross-window dragging function
+        The callback function will be executed once DnD ends.
+        This callback function will then receive two arguments. The first
+        argument, namely event, has a type of `tk.Event`. The second arguemnt,
+        namely `target`, has a type of `DnDItem` or `None`.
         """
-        def _dnd_end(target, event):
-            if target is None:
-                self.winfo_toplevel().focus_set()
-            else:
-                target.winfo_toplevel().focus_set()
-            
-            if self._dnd_end_callback:
-                self._dnd_end_callback(target, event)
-            
-            # Clean up the temp info for this round
-            if self._dnd:
-                self._dnd["border_frame"].destroy()
-                self._dnd.clear()
-        #
-        return _dnd_end
-    
-    def _get_dnd_widget_accept(self, target):
-        """This will return a function for dragging a widget inside a window
-        """
-        def _get_target(source, event):
-            if source is not target:
-                return target
-        #
-        return _get_target
-    
-    def _get_dnd_widget_enter(self, target):
-        """This will return a function for dragging a widget inside a window
-        """
-        def _exchange_order_indices(source, event):
-            # Exchange the order indices of `source` and `target`
-            neworder_src = oldorder_tar = self.dnd_widgets.index(target)
-            neworder_tar = oldorder_src = self.dnd_widgets.index(source)
-            
-            for widget, neworder in [(source, neworder_src),
-                                     (target, neworder_tar)]:
-                self.dnd_widgets.pop(neworder)
-                self.dnd_widgets.insert(neworder, widget)
-            
-            # Exchange the dimensions of `source` and `target`
-            newinfo_src = self._dnd_place_info[oldorder_tar]
-            newinfo_tar = self._dnd_place_info[oldorder_src]
-            oldinfo_src, oldinfo_tar = newinfo_tar.copy(), newinfo_src.copy()
-            
-            for oldinfo, newinfo in [(oldinfo_src, newinfo_src),
-                                     (oldinfo_tar, newinfo_tar)]:
-                newinfo.update({ key: oldinfo[key] for key in
-                    ["width", "height", "relwidth", "relheight"] })
-            
-            # Update position of `target`
-            self._put(target)
-        #
-        return _exchange_order_indices
-    
-    def _get_dnd_widget_leave(self, target=None):
-        """This will return a function for dragging a widget inside a window
-        """
-        def _none(source, event): pass
-        return _none
+        for widget in self._dnd_widgets:
+            widget.set_end_callback(callback)
 
 
-class TriggerOrderlyContainer(OrderlyContainer):
-    def bind_dnd_start(self, moved: tk.BaseWidget):
+class TriggerDnDContainer(DnDContainer):
+    def rebind_dnd_start(self, moved: DnDItem):
+        bound = False
         for child in moved.winfo_children():
-            if getattr(child, '_dnd_trigger', None):
-                self._bind_dnd_start(moved=moved, trigger=child)
+            if hasattr(child, 'dnd_trigger') and child.dnd_trigger:
+                self._rebind_dnd_start(
+                    '<ButtonPress-1>', trigger=child, moved=moved
+                )
+                bound = True
+        
+        if not bound:
+            raise ValueError(
+                "DnD trigger not found. Please assign a value of `True` to an "
+                "child widget's attribute with name 'dnd_trigger'."
+            )
 
 
 # =============================================================================
-# ---- Main
+# ---- Test
 # =============================================================================
 if __name__ == '__main__':
     import random
     
     root = ttk.Window(title='Drag and Drop', themename='cyborg')
     
-    container = OrderlyContainer(root)
+    container = DnDContainer(root)
     container.pack(fill='both', expand=1)
-    buttons = list()
+    items = []
     for r in range(6):
-        buttons.append(list())
+        items.append([])
         for c in range(3):
             dash = '----' * random.randint(1, 5)
-            button = ttk.Button(container,
-                                text=f'|<{dash} ({r}, {c}) {dash}>|',
-                                takefocus=True,
-                                bootstyle='outline')
-            buttons[-1].append(button)
-    container.dnd_put(buttons,
-                      sticky='nse',
-                      expand=True,
-                      padding=10,
-                      ipadding=6)
+            item = OrderlyDnDItem(container)
+            ttk.Button(
+                item,
+                text=f'|<{dash} ({r}, {c}) {dash}>|',
+                takefocus=True,
+                bootstyle='outline'
+            ).pack(fill='both', expand=True)
+            items[-1].append(item)
+    container.dnd_put(
+        items,
+        sticky='nse',
+        expand=True,
+        padding=10,
+        ipadding=6
+    )
+    root.place_window_center()
     
-    window = ttk.Toplevel(title='Button Trigger Drag and Drop', topmost=True)
+    window = ttk.Toplevel(title='Button Trigger Drag and Drop')
     window.lift()
     window.after(300, window.focus_set)
-    container = TriggerOrderlyContainer(window)
+    container = TriggerDnDContainer(window)
     container.pack(fill='both', expand=True)
-    frames = list()
+    items = list()
     for r in range(4):
-        frames.append(list())
+        items.append([])
         for c in range(3):
             dash = '----' * random.randint(1, 5)
-            frame = ttk.Frame(container)
-            trigger = ttk.Button(frame,
-                                 text='::',
-                                 takefocus=True,
-                                 cursor='hand2',
-                                 bootstyle='success-link')
+            item = OrderlyDnDItem(container)
+            trigger = ttk.Button(
+                item,
+                text='::',
+                takefocus=True,
+                cursor='hand2',
+                bootstyle='success-link'
+            )
             trigger.pack(side='left')
-            trigger._dnd_trigger = True
-            ttk.Label(frame,
-                      text=f'|<{dash} ({r}, {c}) {dash}>|',
-                      bootstyle='success').pack(side='left')
-            frames[-1].append(frame)
-    container.dnd_put(frames,
-                      sticky='nsw',
-                      expand=(False, True),
-                      padding=10,
-                      ipadding=6)
+            trigger.dnd_trigger = True
+            ttk.Label(
+                item,
+                text=f'|<{dash} ({r}, {c}) {dash}>|',
+                bootstyle='success'
+            ).pack(side='left')
+            items[-1].append(item)
+    container.dnd_put(
+        items,
+        sticky='nsw',
+        expand=(False, True),
+        padding=10,
+        ipadding=6
+    )
     window.place_window_center()
     
-    root.place_window_center()
     root.mainloop()
 

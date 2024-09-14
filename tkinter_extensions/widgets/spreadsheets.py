@@ -25,7 +25,7 @@ from ..constants import (
 from ..utils import get_modifiers, center_window, modify_hsl
 from .. import dialogs
 from .. import variables as vrb
-from .dnd import TriggerOrderlyContainer
+from .dnd import OrderlyDnDItem, TriggerDnDContainer
 from .scrolled import AutoHiddenScrollbar, ScrolledFrame
 from ._others import OptionMenu
 # =============================================================================
@@ -2933,9 +2933,9 @@ class Book(ttk.Frame):
         self._sidebar_add.pack(anchor='e')
         
         ### Sheet labels
-        self._sidebar = sb = TriggerOrderlyContainer(sbfm, cursor='arrow')
+        self._sidebar = sb = TriggerDnDContainer(sbfm, cursor='arrow')
         self._sidebar.pack(fill='both', expand=True)
-        self._sidebar.set_dnd_end_callback(self._on_dnd_end)
+        self._sidebar.set_end_callback(self._on_dnd_end)
         
         ## Frame to contain sheets
         self._sheet_pane = sp = ttk.Frame(pw, padding=[1, 1, 0, 0])
@@ -3235,7 +3235,7 @@ class Book(ttk.Frame):
         
         # Build a new sheet widget and sidebar button
         sheet = Sheet(self._sheet_pane, **sheet_kw)
-        frame = ttk.Frame(self._sidebar)
+        frame = OrderlyDnDItem(self._sidebar)
         bt = ttk.Button(
             frame,
             style=self._button_style,
@@ -3243,7 +3243,7 @@ class Book(ttk.Frame):
             takefocus=False
         )
         bt.pack(side='left', padx=[3, 6])
-        bt._dnd_trigger = True
+        bt.dnd_trigger = True
         switch = ttk.Radiobutton(
             frame,
             style=self._rdbutton_style,
@@ -3274,13 +3274,13 @@ class Book(ttk.Frame):
         return self._sheets_props
     
     def _refresh_sidebar(self):
-        self._sidebar.delete('all')
+        self._sidebar.dnd_forget(destroy=False)
         self._sidebar.dnd_put(
             [ ps["switch_frame"] for ps in self._sheets_props.values() ],
             sticky='nwe',
             expand=(True, False),
             padding=[6, 3],
-            ipadding=1
+            ipadding=2
         )
         self._sidebar_fm.event_generate('<<MapChild>>')
     

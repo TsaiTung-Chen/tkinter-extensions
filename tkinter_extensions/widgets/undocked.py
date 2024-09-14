@@ -7,7 +7,7 @@ Created on Mon May 22 22:35:24 2023
 """
 
 import tkinter as tk
-from typing import Optional, Callable
+from typing import Callable
 
 import ttkbootstrap as ttk
 # =============================================================================
@@ -18,10 +18,11 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
                  master,
                  *args,
                  window_title: str = '',
-                 dock_callbacks: tuple[Optional[Callable],
-                                       Optional[Callable]] = (None, None),
-                 undock_callbacks: tuple[Optional[Callable],
-                                         Optional[Callable]] = (None, None),
+                 dock_callbacks: tuple[Callable | None,
+                                       Callable | None] = (None, None),
+                 undock_callbacks: tuple[Callable | None,
+                                         Callable | None] = (None, None),
+                 undock_button: bool = True,
                  place_button: bool = True,
                  **kwargs):
         super().__init__(master, *args, **kwargs)
@@ -31,24 +32,33 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
         self.set_dock_callbacks(dock_callbacks)
         self.set_undock_callbacks(undock_callbacks)
         
-        self.undock_bt = bt = ttk.Button(
-            self,
-            text='Undock',
-            takefocus=False,
-            bootstyle='link-primary',
-            command=self.undock
-        )
-        if place_button:
-            self.place_undock_button()
+        if undock_button:
+            self._undock_button = bt = ttk.Button(
+                self,
+                text='Undock',
+                takefocus=False,
+                bootstyle='link-primary',
+                command=self.undock
+            )
+            if place_button:
+                self.place_undock_button()
+            else:
+                bt._place_info = None
+            self.bind('<<MapChild>>', lambda e: bt.lift())
         else:
-            bt._place_info = None
-        self.bind('<<MapChild>>', lambda e: bt.lift())
+            self._undock_button = None
+    
+    @property
+    def undock_button(self):
+        return self._undock_button
     
     def place_undock_button(
             self, *, anchor='se', relx=1., rely=1., x=-2, y=-2, **kw):
-        self.undock_bt.place(anchor=anchor, relx=relx, rely=rely, x=x, y=y, **kw)
-        self.undock_bt._place_info = self.undock_bt.place_info()
-        self.undock_bt.lift()
+        assert self._undock_button is not None
+        
+        self._undock_button.place(
+            anchor=anchor, relx=relx, rely=rely, x=x, y=y, **kw)
+        self._undock_button._place_info = self._undock_button.place_info()
     
     def set_dock_callbacks(self, callbacks=(None, None)):
         if callbacks is None:
@@ -75,8 +85,8 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
         tk.Wm.wm_title(self, self._window_title)
         tk.Wm.wm_protocol(self, 'WM_DELETE_WINDOW', self.dock)
         
-        if self.undock_bt._place_info:
-            self.undock_bt.place_forget()
+        if self._undock_button and self._undock_button._place_info:
+            self._undock_button.place_forget()
         
         if callback_final:
             callback_final()
@@ -95,8 +105,8 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
         tk.Wm.wm_forget(self, self)
         getattr(self, self._layout_manager)(**self._layout_info)
         
-        if self.undock_bt._place_info:
-            self.undock_bt.place(**self.undock_bt._place_info)
+        if self._undock_button and self._undock_button._place_info:
+            self._undock_button.place(**self._undock_button._place_info)
         
         if callback_final:
             callback_final()
