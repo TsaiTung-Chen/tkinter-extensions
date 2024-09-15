@@ -2935,7 +2935,7 @@ class Book(ttk.Frame):
         ### Sheet labels
         self._sidebar = sb = TriggerDnDContainer(sbfm, cursor='arrow')
         self._sidebar.pack(fill='both', expand=True)
-        self._sidebar.set_end_callback(self._on_dnd_end)
+        self._sidebar.set_dnd_end_callback(self._on_dnd_end)
         
         ## Frame to contain sheets
         self._sheet_pane = sp = ttk.Frame(pw, padding=[1, 1, 0, 0])
@@ -3008,12 +3008,11 @@ class Book(ttk.Frame):
         sheets_props = self._sheets_props.copy()
         
         new_sheets_props = dict()
-        for sf in self._sidebar.dnd_widgets:
+        for sf in self._sidebar.dnd_items:  # new order
             for key, ps in sheets_props.items():
                 if ps["switch_frame"] == sf:
                     break
-            new_sheets_props[key] = ps
-            sheets_props.pop(key)
+            new_sheets_props[key] = sheets_props.pop(key)
         
         self._sheets_props = new_sheets_props
     

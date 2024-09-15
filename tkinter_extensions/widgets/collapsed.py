@@ -99,7 +99,7 @@ class CollapsedFrame(ttk.Frame):
         else:  # horizontal
             width = self.labelwidget.winfo_reqwidth() + 4
             height = self.container.winfo_reqheight()
-        self.container.grid_propagate(0)
+        self.container.grid_propagate(False)
         self.content_grid_remove()
         self.container.configure(width=width, height=height)
         self.container.master.event_generate('<<MapChild>>')
@@ -109,7 +109,7 @@ class CollapsedFrame(ttk.Frame):
             return
         
         self._collapsed = False
-        self.container.grid_propagate(1)
+        self.container.grid_propagate(True)
         self.content_grid()
         self.container.master.event_generate('<<MapChild>>')
     
