@@ -8,7 +8,7 @@ Created on Mon May 22 22:35:24 2023
 
 import gc
 import copy
-import random
+import time
 import tkinter as tk
 import tkinter.font
 from contextlib import contextmanager
@@ -2951,11 +2951,11 @@ class Book(ttk.Frame):
             "min_height": 10
         }
         self._sheet_kw.update(sheet_kw)
-        self._sheet_var = vrb.IntVar(self)
+        self._sheet_var = vrb.DoubleVar(self)
         self._sheet_var.trace_add('write', self._switch_sheet, weak=True)
         self._sheet: Optional[Sheet] = None
-        self._sheets_props: dict[int, list] = dict()
-        self._sheets_props: dict[int, list] = self.insert_sheet(0)
+        self._sheets_props: dict[float, list] = dict()
+        self._sheets_props = self.insert_sheet(0)
         
         # Sizegrip
         ttk.Separator(self, takefocus=False).pack(fill='x')
@@ -2997,8 +2997,9 @@ class Book(ttk.Frame):
         dummy_rdbutton.destroy()
         dummy_entry.destroy()
     
-    def _on_dnd_end(self, *_):
-        self._rearrange_sheets()
+    def _on_dnd_end(self, event, initial_items):
+        if initial_items != self._sidebar.dnd_items:
+            self._rearrange_sheets()
         self._focus_on_sheet()
     
     def _center_window(self, toplevel: tk.BaseWidget):
@@ -3227,10 +3228,8 @@ class Book(ttk.Frame):
             index = len(sheets_props)
         
         # Generate a unique key
-        generate_key = lambda: random.randint(int(-1e10), int(1e10))
-        key = generate_key()
-        while key in sheets_props:
-            key = generate_key()
+        while (key := time.time()) in sheets_props:
+            pass
         
         # Build a new sheet widget and sidebar button
         sheet = Sheet(self._sheet_pane, **sheet_kw)

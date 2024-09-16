@@ -116,13 +116,12 @@ class DnDItem(ttk.Frame):
         # Call `dnd_leave` if we are leaving the old target, or call `dnd_enter`
         # if we are entering a new target
         old_target = self._target
+        self._target = new_target
         if old_target is not new_target:
             if old_target is not None:  # leaving the old target
-                self._target = None
                 old_target.dnd_leave(event, self, new_target)
             if new_target is not None:  # entering a new target
                 new_target.dnd_enter(event, self, old_target)
-                self._target = new_target
     
     def _on_release(self, event: tk.Event | None):
         self._finish(event, commit=True)
@@ -136,7 +135,7 @@ class DnDItem(ttk.Frame):
                 else:
                     target.dnd_leave(event, self)
         finally:
-            self.dnd_end(event, target)
+            self.dnd_end(event)
     
     def cancel(self, event: tk.Event | None = None):
         self._finish(event, commit=False)
@@ -147,6 +146,7 @@ class DnDItem(ttk.Frame):
         
         assert isinstance(button := event.num, int), button
         
+        widget = event.widget
         container = self._container
         dnd_container = self._dnd_container
         
@@ -162,7 +162,8 @@ class DnDItem(ttk.Frame):
         self._offset_y: int = y - event.y_root
         self._motion_pattern = f'<B{button}-Motion>'
         self._release_pattern = f'<ButtonRelease-{button}>'
-        self._initial_widget = widget = event.widget
+        self._initial_widget: tk.BaseWidget | None = widget
+        self._initial_items: list[DnDItem] | None = dnd_container.dnd_items.copy()
         self._initial_background = container["background"]
         self._dnd_container_x: int = self._dnd_container.winfo_rootx()
         self._dnd_container_y: int = self._dnd_container.winfo_rooty()
@@ -226,9 +227,8 @@ class DnDItem(ttk.Frame):
     ):
         assert isinstance(source, DnDItem), source
     
-    def dnd_end(self, event: tk.Event | None, target: DnDItem | None):
-        assert isinstance(target, (DnDItem, type(None))), target
-        
+    def dnd_end(self, event: tk.Event | None):
+        initial_items = self._initial_items
         container = self._container
         dnd_container = self._dnd_container
         
@@ -252,13 +252,14 @@ class DnDItem(ttk.Frame):
         dnd_container._put(self)
         dnd_container._resize(self)
         
+        # Restore settings from `dnd_start`
         unbind(self._initial_widget, self._motion_pattern, self._motion_id)
         unbind(self._initial_widget, self._release_pattern, self._release_id)
-        self._target = self._initial_widget = None
+        self._target = self._initial_widget = self._initial_items = None
         self._dnd_active = False
         
         if dnd_container._dnd_end_callback:
-            dnd_container._dnd_end_callback(event, target)
+            dnd_container._dnd_end_callback(event, initial_items)
 
 
 class OrderlyDnDItem(DnDItem):
@@ -425,7 +426,7 @@ class DnDContainer(tk.Canvas):
         The callback function will be executed once DnD ends.
         This callback function will then receive two arguments. The first
         argument, namely `event`, has a type of `tk.Event`. The second arguemnt,
-        namely `target`, has a type of `DnDItem` or `None`.
+        namely `initial_items`, has a type of `list[DnDItem]`.
         """
         assert callable(callback) or callback is None, callback
         self._dnd_end_callback = callback
