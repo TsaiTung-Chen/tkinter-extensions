@@ -12,7 +12,7 @@ import time
 import tkinter as tk
 import tkinter.font
 from contextlib import contextmanager
-from typing import Union, Optional, Callable, Literal
+from typing import Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -21,11 +21,12 @@ from ttkbootstrap.icons import Icon
 from ttkbootstrap.colorutils import color_to_hsl
 
 from ..constants import (
-    RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK)
+    RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK
+)
 from ..utils import get_modifiers, center_window, modify_hsl
 from .. import dialogs
 from .. import variables as vrb
-from .dnd import OrderlyDnDItem, TriggerDnDContainer
+from .dnd import OrderlyDnDItem, RearrangedDnDContainer
 from .scrolled import AutoHiddenScrollbar, ScrolledFrame
 from ._others import OptionMenu
 # =============================================================================
@@ -49,21 +50,21 @@ class History:
     
     def __init__(
             self,
-            max_height: Optional[int] = None,
-            callback: Optional[Callable] = None
+            max_height: int | None = None,
+            callback: Callable | None = None
     ):
         assert isinstance(max_height, (type(None), int)), max_height
         assert callback is None or callable(callback), callback
         if isinstance(max_height, int):
             assert max_height >= 1, max_height
         
-        self._callback: Optional[Callable] = callback
-        self._sequence: Optional[dict[str, list[Callable]]] = None
+        self._callback: Callable | None = callback
+        self._sequence: dict[str, list[Callable]] | None = None
         self._stack = {"forward": list(), "backward": list()}
         self._max_height = max_height
         self._step = 0
     
-    def reset(self, callback: Optional[Callable] = None):
+    def reset(self, callback: Callable | None = None):
         self.__init__(callback=callback)
     
     def add(self, forward: Callable, backward: Callable):
@@ -144,10 +145,10 @@ class History:
         self._callback = func
         return self._callback
     
-    def get_callback(self) -> Optional[Callable]:
+    def get_callback(self) -> Callable | None:
         return self._callback
     
-    def remove_callback(self) -> Optional[Callable]:
+    def remove_callback(self) -> Callable | None:
         callback = self.get_callback()
         self._callback = None
         return callback
@@ -190,22 +191,24 @@ class Sheet(ttk.Frame):
     def shape(self) -> tuple:
         return self._values.shape
     
-    def __init__(self,
-                 master,
-                 shape: Union[tuple[int, int], list[int]] = (10, 10),
-                 cell_width: int = 80,
-                 cell_height: int = 25,
-                 min_width: int = 20,
-                 min_height: int = 10,
-                 get_style: Optional[Callable] = None,
-                 max_undo: Union[int, None] = 20,
-                 autohide_scrollbar: bool = True,
-                 scrollbar_bootstyle='round',
-                 lock_number_of_rows: bool = False,
-                 lock_number_of_cols: bool = False,
-                 mousewheel_sensitivity: float = 2.,
-                 _reset: bool = False,
-                 **kw):
+    def __init__(
+            self,
+            master,
+            shape: tuple[int, int] | list[int] = (10, 10),
+            cell_width: int = 80,
+            cell_height: int = 25,
+            min_width: int = 20,
+            min_height: int = 10,
+            get_style: Callable | None = None,
+            max_undo: int | None = 20,
+            autohide_scrollbar: bool = True,
+            scrollbar_bootstyle='round',
+            lock_number_of_rows: bool = False,
+            lock_number_of_cols: bool = False,
+            mousewheel_sensitivity: float = 2.,
+            _reset: bool = False,
+            **kw
+    ):
         self._init_configs = {
             k: v for k, v in locals().items()
             if k not in ("self", "kw", "_reset", "__class__")
@@ -274,10 +277,10 @@ class Sheet(ttk.Frame):
         
         # Init the backend states
         self._history = History(max_height=max_undo)
-        self._resize_start: Optional[dict] = None
-        self._hover: Optional[dict[str, str]] = None
-        self._mouse_selection_id: Optional[str] = None
-        self._focus_old_value: Optional[str] = None
+        self._resize_start: dict | None = None
+        self._hover: dict[str, str] | None = None
+        self._mouse_selection_id: str | None = None
+        self._focus_old_value: str | None = None
         self._focus_row = vrb.IntVar(self)
         self._focus_col = vrb.IntVar(self)
         self._focus_value = tk.StringVar(self)
@@ -397,7 +400,7 @@ class Sheet(ttk.Frame):
     
     def __to_fraction(self,
                       axis: int,
-                      *pixels) -> Union[tuple[float, ...], float]:
+                      *pixels) -> tuple[float, ...] | float:
         assert axis in (0, 1), axis
         complete = self._content_size[axis]
         fractions = tuple( pixel / complete for pixel in pixels )
@@ -407,7 +410,7 @@ class Sheet(ttk.Frame):
     
     def __to_pixel(self,
                    axis: int,
-                   *fractions) -> Union[tuple[int, ...], int]:
+                   *fractions) -> tuple[int, ...] | int:
         assert axis in (0, 1), axis
         complete = self._content_size[axis]
         pixels = tuple( round(fraction * complete) for fraction in fractions )
@@ -634,12 +637,12 @@ class Sheet(ttk.Frame):
         
         return fonts
     
-    def _canvasx(self, xs: Union[np.ndarray, list]):
+    def _canvasx(self, xs: np.ndarray | list):
         header_width = self._cell_sizes[1][0]
         (gx1, gx2), (gy1, gy2) = self._visible_xys
         return np.asarray(xs) - gx1 + header_width  # => to canvas coordinates
     
-    def _canvasy(self, ys: Union[np.ndarray, list]):
+    def _canvasy(self, ys: np.ndarray | list):
         header_height = self._cell_sizes[0][0]
         (gx1, gx2), (gy1, gy2) = self._visible_xys
         return np.asarray(ys) - gy1 + header_height  # => to canvas coordinates
@@ -665,16 +668,18 @@ class Sheet(ttk.Frame):
     def _center_window(self, toplevel: tk.BaseWidget):
         center_window(to_center=toplevel, center_of=self.winfo_toplevel())
     
-    def _make_tags(self,
-                   oid=None,
-                   type_=None,
-                   subtype=None,
-                   row=None,
-                   col=None,
-                   others: tuple = tuple(),
-                   *,
-                   withkey: bool = True,
-                   to_tuple: bool = False) -> Union[dict, tuple]:
+    def _make_tags(
+            self,
+            oid=None,
+            type_=None,
+            subtype=None,
+            row=None,
+            col=None,
+            others: tuple = tuple(),
+            *,
+            withkey: bool = True,
+            to_tuple: bool = False
+    ) -> dict | tuple:
         tagdict = {
             "oid": f'oid={oid}',
             "type": f'type={type_}',
@@ -707,11 +712,13 @@ class Sheet(ttk.Frame):
         assert "to_tuple" not in kwargs, kwargs.keys()
         return self._make_tags(*args, **kwargs)[key]
     
-    def _get_tags(self,
-                  oid: Union[int, str],
-                  withkey: bool = False,
-                  to_tuple: bool = False,
-                  canvas: tk.Canvas = None) -> Union[dict, tuple]:
+    def _get_tags(
+            self,
+            oid: int | str,
+            withkey: bool = False,
+            to_tuple: bool = False,
+            canvas: tk.Canvas = None
+    ) -> dict | tuple:
         assert isinstance(oid, (int, str)), oid
         assert isinstance(canvas, (type(None), tk.Canvas)), canvas
         
@@ -770,10 +777,12 @@ class Sheet(ttk.Frame):
         
         return tagdict
     
-    def _get_rc(self,
-                oid_or_tagdict: Union[int, dict, str],
-                to_tuple: bool = False,
-                canvas: tk.Canvas = None) -> Union[dict, tuple]:
+    def _get_rc(
+            self,
+            oid_or_tagdict: int | dict | str,
+            to_tuple: bool = False,
+            canvas: tk.Canvas = None
+    ) -> dict | tuple:
         assert isinstance(oid_or_tagdict, (int, dict, str)), oid_or_tagdict
         
         if isinstance(oid_or_tagdict, dict):
@@ -796,7 +805,7 @@ class Sheet(ttk.Frame):
         ))
     
     def _build_general_rightclick_menu(
-            self, menu: Optional[tk.Menu] = None) -> tk.Menu:
+            self, menu: tk.Menu | None = None) -> tk.Menu:
         menu = menu or tk.Menu(self, tearoff=0)
         
         # Manipulate values in cells
@@ -952,7 +961,7 @@ class Sheet(ttk.Frame):
     def _on_paste(self, event=None):
         self._selection_paste_values(undo=True)
     
-    def _on_entry_key_press(self, event) -> Optional[str]:
+    def _on_entry_key_press(self, event) -> str | None:
         keysym = event.keysym
         modifiers = get_modifiers(event.state)
         
@@ -981,7 +990,7 @@ class Sheet(ttk.Frame):
             self._focus_out_cell(discard=True)
             return 'break'
     
-    def _on_key_press(self, event) -> Optional[str]:
+    def _on_key_press(self, event) -> str | None:
         keysym, char = event.keysym, event.char
         modifiers = get_modifiers(event.state)
         
@@ -1057,7 +1066,7 @@ class Sheet(ttk.Frame):
         x, y, canvas = (event.x, event.y, event.widget)
         return self.__mouse_select(x, y, canvas, expand=False, dry=not select)
     
-    def _on_leftbutton_motion(self, event, _dxdy: Optional[tuple] = None):
+    def _on_leftbutton_motion(self, event, _dxdy: tuple | None = None):
         # Move the viewing window if the mouse cursor is moving outside the 
         # canvas
         x, y, canvas = (event.x, event.y, event.widget)
@@ -1191,12 +1200,14 @@ class Sheet(ttk.Frame):
                 getattr(self, f"_on_{handle}_leftbutton_press")
             )
     
-    def draw_headers(self,
-                       i1: Optional[int] = None,
-                       i2: Optional[int] = None,
-                       *,
-                       axis: int,
-                       skip_exist: bool = False):
+    def draw_headers(
+            self,
+            i1: int | None = None,
+            i2: int | None = None,
+            *,
+            axis: int,
+            skip_exist: bool = False
+    ):
         axis = int(axis)
         assert (i1 is not None) or (i2 is None), (i1, i2)
         assert axis in (0, 1), axis
@@ -1343,9 +1354,11 @@ class Sheet(ttk.Frame):
             getattr(self, f"_on_{handle}_leftbutton_press")
         )
     
-    def _set_header_state(self,
-                          tagdict: dict,
-                          state: Literal[_valid_header_states]):
+    def _set_header_state(
+            self,
+            tagdict: dict,
+            state: Literal[_valid_header_states]
+    ):
         assert isinstance(tagdict, dict), tagdict
         assert state is None or state in self._valid_header_states, state
         
@@ -1586,12 +1599,14 @@ class Sheet(ttk.Frame):
         event.widget.bind('<ButtonRelease-1>', start["b1release"])
         self._resize_start = None
     
-    def draw_cells(self,
-                     r1: Optional[int] = None,
-                     c1: Optional[int] = None,
-                     r2: Optional[int] = None,
-                     c2: Optional[int] = None,
-                     skip_exist: bool = False):
+    def draw_cells(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None,
+            skip_exist: bool = False
+    ):
         assert (r1 is not None) or (r2 is None), (r1, r2)
         assert (c1 is not None) or (c2 is None), (c1, c2)
         
@@ -1716,7 +1731,7 @@ class Sheet(ttk.Frame):
         menu.post(event.x_root, event.y_root)
         self.after_idle(menu.destroy)
     
-    def _refresh_entry(self, r: Optional[int] = None, c: Optional[int] = None):
+    def _refresh_entry(self, r: int | None = None, c: int | None = None):
         assert (r is None) == (c is None), (r, c)
         
         if (r is None) and (c is None):
@@ -1754,7 +1769,7 @@ class Sheet(ttk.Frame):
         en.lift(self.canvas)
         self._focus_old_value = old_text
     
-    def _focus_in_cell(self, r: Optional[int] = None, c: Optional[int] = None):
+    def _focus_in_cell(self, r: int | None = None, c: int | None = None):
         self._focus_out_cell()
         self._refresh_entry(r, c)
         self._entry.focus_set()
@@ -1783,11 +1798,13 @@ class Sheet(ttk.Frame):
         self._entry.lower()
         self.focus_set()
     
-    def _set_selection(self,
-                       r1: Optional[int] = None,
-                       c1: Optional[int] = None,
-                       r2: Optional[int] = None,
-                       c2: Optional[int] = None) -> tuple:
+    def _set_selection(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None
+    ) -> tuple:
         assert (r1 is not None) or (r2 is None), (r1, r2)
         assert (c1 is not None) or (c2 is None), (c1, c2)
         
@@ -1830,12 +1847,14 @@ class Sheet(ttk.Frame):
         
         return (rows_on, cols_on)
     
-    def select_cells(self,
-                     r1: Optional[int] = None,
-                     c1: Optional[int] = None,
-                     r2: Optional[int] = None,
-                     c2: Optional[int] = None,
-                     trace: Optional[str] = None) -> tuple:
+    def select_cells(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None,
+            trace: str | None = None
+    ) -> tuple:
         assert trace in (None, 'first', 'last'), trace
         
         self._focus_out_cell()
@@ -1905,10 +1924,12 @@ class Sheet(ttk.Frame):
     _reselect_cells = lambda self, *args, **kw: self.select_cells(
         *self._selection_rcs, *args, **kw)
     
-    def _move_selections(self,
-                         direction: str,
-                         area: Optional[str] = None,
-                         expand: bool = False):
+    def _move_selections(
+            self,
+            direction: str,
+            area: str | None = None,
+            expand: bool = False
+    ):
         assert direction in ('up', 'down', 'left', 'right'), direction
         assert area in ('paragraph', 'all', None), area
         assert isinstance(expand, bool), expand
@@ -1973,10 +1994,12 @@ class Sheet(ttk.Frame):
         
         return self.select_cells(*rc1_new, *rc2_new, trace='last')
     
-    def draw(self,
-               update_visible_rcs: bool = True,
-               skip_exist: bool = False,
-               trace: Optional[str] = None):
+    def draw(
+            self,
+            update_visible_rcs: bool = True,
+            skip_exist: bool = False,
+            trace: str | None = None
+    ):
         if update_visible_rcs:
             self._update_visible_and_p2s()
         self.draw_cornerheader(skip_exist=skip_exist)
@@ -1985,7 +2008,7 @@ class Sheet(ttk.Frame):
         self.draw_cells(skip_exist=skip_exist)
         self._reselect_cells(trace=trace)
     
-    def refresh(self, scrollbar:str='both', trace:Optional[str]=None):
+    def refresh(self, scrollbar: str = 'both', trace: str | None = None):
         assert scrollbar in ('x', 'y', 'both'), scrollbar
         
         self._canvases_delete('temp')
@@ -2079,14 +2102,16 @@ class Sheet(ttk.Frame):
         
         self.zoom(self._valid_scales[next_idx])
     
-    def resize_cells(self,
-                     i: int,
-                     axis: int,
-                     N: int = 1,
-                     sizes: Optional[np.ndarray] = None,
-                     dialog: bool = False,
-                     trace: Optional[str] = None,
-                     undo: bool = False) -> np.ndarray:
+    def resize_cells(
+            self,
+            i: int,
+            axis: int,
+            N: int = 1,
+            sizes: np.ndarray | None = None,
+            dialog: bool = False,
+            trace: str | None = None,
+            undo: bool = False
+    ) -> np.ndarray:
         assert axis in (0, 1), axis
         max_i = self.shape[axis] - 1
         assert -1 <= i <= max_i + 1, (i, max_i)
@@ -2168,18 +2193,20 @@ class Sheet(ttk.Frame):
         
         return unscaled_new_sizes
     
-    def insert_cells(self,
-                     i: Optional[int] = None,
-                     *,
-                     axis: int,
-                     N: int = 1,
-                     df: Optional[pd.DataFrame] = None,
-                     sizes: Optional[np.ndarray] = None,
-                     styles=None,
-                     dialog: bool = False,
-                     draw: bool = True,
-                     trace: Optional[str] = None,
-                     undo: bool = False):
+    def insert_cells(
+            self,
+            i: int | None = None,
+            *,
+            axis: int,
+            N: int = 1,
+            df: pd.DataFrame | None = None,
+            sizes: np.ndarray | None = None,
+            styles=None,
+            dialog: bool = False,
+            draw: bool = True,
+            trace: str | None = None,
+            undo: bool = False
+    ):
         assert axis in (0, 1), axis
         old_df, old_shape = self.values, self.shape
         max_i = old_shape[axis] - 1
@@ -2284,13 +2311,15 @@ class Sheet(ttk.Frame):
                     i, axis=axis, N=N, draw=draw, trace='first')
             )
     
-    def delete_cells(self,
-                     i: int,
-                     axis: int,
-                     N: int = 1,
-                     draw: bool = True,
-                     trace: Optional[str] = None,
-                     undo: bool = False):
+    def delete_cells(
+            self,
+            i: int,
+            axis: int,
+            N: int = 1,
+            draw: bool = True,
+            trace: str | None = None,
+            undo: bool = False
+    ):
         assert axis in (0, 1), axis
         max_i = self.shape[axis] - 1
         N = int(N)
@@ -2353,16 +2382,18 @@ class Sheet(ttk.Frame):
                 )
             )
     
-    def _undo_delete_cells(self,
-                           i: int,
-                           axis: int,
-                           N: int,
-                           df: pd.DataFrame,
-                           sizes: Union[np.ndarray, list[np.ndarray]],
-                           styles: np.ndarray,
-                           was_reset: bool,
-                           draw: bool = True,
-                           trace: Optional[str] = None):
+    def _undo_delete_cells(
+            self,
+            i: int,
+            axis: int,
+            N: int,
+            df: pd.DataFrame,
+            sizes: np.ndarray | list[np.ndarray],
+            styles: np.ndarray,
+            was_reset: bool,
+            draw: bool = True,
+            trace: str | None = None
+    ):
         assert isinstance(df, pd.DataFrame), df
         assert isinstance(styles, np.ndarray), styles
         assert isinstance(sizes, (np.ndarray, list)), sizes
@@ -2400,15 +2431,17 @@ class Sheet(ttk.Frame):
                 trace=trace
             )
     
-    def set_values(self,
-                   r1: Optional[int] = None,
-                   c1: Optional[int] = None,
-                   r2: Optional[int] = None,
-                   c2: Optional[int] = None,
-                   values: Union[pd.DataFrame, str] = '',
-                   draw: bool = True,
-                   trace: Optional[str] = None,
-                   undo: bool = False):
+    def set_values(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None,
+            values: pd.DataFrame | str = '',
+            draw: bool = True,
+            trace: str | None = None,
+            undo: bool = False
+    ):
         assert isinstance(values, (pd.DataFrame, str)), type(values)
         
         if isinstance(values, pd.DataFrame):
@@ -2435,22 +2468,26 @@ class Sheet(ttk.Frame):
                     *rcs, values=old_values, draw=draw, trace='first')
             )
     
-    def erase_values(self,
-                     r1: Optional[int] = None,
-                     c1: Optional[int] = None,
-                     r2: Optional[int] = None,
-                     c2: Optional[int] = None,
-                     draw: bool = True,
-                     trace: Optional[str] = None,
-                     undo: bool = False):
+    def erase_values(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None,
+            draw: bool = True,
+            trace: str | None = None,
+            undo: bool = False
+    ):
         self.set_values(
             r1, c1, r2, c2, values='', draw=draw, undo=undo, trace=trace)
     
-    def copy_values(self,
-                    r1: Optional[int] = None,
-                    c1: Optional[int] = None,
-                    r2: Optional[int] = None,
-                    c2: Optional[int] = None) -> pd.DataFrame:
+    def copy_values(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None
+    ) -> pd.DataFrame:
         r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
@@ -2459,17 +2496,19 @@ class Sheet(ttk.Frame):
         
         return values_to_copy
     
-    def set_styles(self,
-                   r1: Optional[int] = None,
-                   c1: Optional[int] = None,
-                   r2: Optional[int] = None,
-                   c2: Optional[int] = None,
-                   *,
-                   property_: str,
-                   values=None,
-                   draw: bool = True,
-                   trace: Optional[str] = None,
-                   undo: bool = False):
+    def set_styles(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None,
+            *,
+            property_: str,
+            values=None,
+            draw: bool = True,
+            trace: str | None = None,
+            undo: bool = False
+    ):
         r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
@@ -2519,15 +2558,17 @@ class Sheet(ttk.Frame):
                 )
             )
     
-    def reset_styles(self,
-                     r1: Optional[int] = None,
-                     c1: Optional[int] = None,
-                     r2: Optional[int] = None,
-                     c2: Optional[int] = None,
-                     *,
-                     draw: bool = True,
-                     trace: Optional[str] = None,
-                     undo: bool = False):
+    def reset_styles(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None,
+            *,
+            draw: bool = True,
+            trace: str | None = None,
+            undo: bool = False
+    ):
         r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
@@ -2560,15 +2601,17 @@ class Sheet(ttk.Frame):
                 )
             )
     
-    def _undo_reset_styles(self,
-                           r1: Optional[int] = None,
-                           c1: Optional[int] = None,
-                           r2: Optional[int] = None,
-                           c2: Optional[int] = None,
-                           *,
-                           styles: np.ndarray,
-                           draw: bool = True,
-                           trace: Optional[str] = None):
+    def _undo_reset_styles(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None,
+            *,
+            styles: np.ndarray,
+            draw: bool = True,
+            trace: str | None = None
+    ):
         assert isinstance(styles, np.ndarray), type(styles)
         assert styles.ndim == 2, styles.shape
         assert all([ isinstance(d, dict) for dicts in styles for d in dicts ])
@@ -2588,16 +2631,18 @@ class Sheet(ttk.Frame):
             self.draw_cells(r1, c1, r2, c2)
             self._reselect_cells(trace=trace)
     
-    def set_fonts(self,
-                  r1: Optional[int] = None,
-                  c1: Optional[int] = None,
-                  r2: Optional[int] = None,
-                  c2: Optional[int] = None,
-                  fonts=None,
-                  dialog: bool = False,
-                  draw: bool = True,
-                  trace: Optional[str] = None,
-                  undo: bool = False):
+    def set_fonts(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None,
+            fonts=None,
+            dialog: bool = False,
+            draw: bool = True,
+            trace: str | None = None,
+            undo: bool = False
+    ):
         if dialog:
             default_font = self._default_styles["cell"]["font"]
             style_topleft = self._cell_styles[min(r1, r2), min(c1, c2)]
@@ -2625,17 +2670,19 @@ class Sheet(ttk.Frame):
         
         return fonts
     
-    def _set_colors(self,
-                    r1: Optional[int] = None,
-                    c1: Optional[int] = None,
-                    r2: Optional[int] = None,
-                    c2: Optional[int] = None,
-                    field: str = 'foreground',
-                    colors=None,
-                    dialog: bool = False,
-                    draw: bool = True,
-                    trace: Optional[str] = None,
-                    undo: bool = False):
+    def _set_colors(
+            self,
+            r1: int | None = None,
+            c1: int | None = None,
+            r2: int | None = None,
+            c2: int | None = None,
+            field: str = 'foreground',
+            colors=None,
+            dialog: bool = False,
+            draw: bool = True,
+            trace: str | None = None,
+            undo: bool = False
+    ):
         assert field in ('foreground', 'background'), field
         
         if dialog:
@@ -2806,19 +2853,23 @@ class Book(ttk.Frame):
         return { ps["name"]: ps["sheet"] for ps in self._sheets_props.values() }
     
     @property
-    def sheet(self) -> Optional[Sheet]:
+    def sheet(self) -> Sheet | None:
         """
         Return current `Sheet` or `None`.
         """
         return self._sheet
     
-    def __init__(self,
-                 master,
-                 scrollbar_bootstyle='round',
-                 sidebar_width: int = 150,
-                 **sheet_kw):
+    def __init__(
+            self,
+            master,
+            scrollbar_bootstyle='round',
+            sidebar_width: int = 150,
+            lock_number_of_sheets: bool = False,
+            **sheet_kw
+    ):
         super().__init__(master)
         self._create_styles()
+        self._lock_number_of_sheets: bool = bool(lock_number_of_sheets)
         
         # Build toolbar
         self._toolbar = tb = ttk.Frame(self)
@@ -2922,18 +2973,39 @@ class Book(ttk.Frame):
             pw, scroll_orient='vertical', vbootstyle=scrollbar_bootstyle)
         self._panedwindow.add(sbfm.container)
         
-        ### Button to add new sheet
-        self._sidebar_add = ttk.Button(
-            sbfm,
-            style=self._bold_button_style,
-            text='  ＋',
-            command=lambda: self.insert_sheet(dialog=True),
-            takefocus=False
-        )
-        self._sidebar_add.pack(anchor='e')
+        ### Sheet tab container
+        def _remove_selected():
+            if not (selected_items := self._sidebar.selected_items):
+                return
+            
+            selected_keys = [ key for key, props in self._sheets_props.items() \
+                              if props["item"] in selected_items ]
+            
+            # Ask if the user confirm to delete the selected sheets
+            if not self._delete_sheet(selected_keys.pop(), request=True):
+                return
+            
+            # Continue to delete the selected sheets
+            for key in selected_keys:
+                self._delete_sheet(key, request=False)
+            selected_items = self._sidebar.remove_selected()
         
-        ### Sheet labels
-        self._sidebar = sb = TriggerDnDContainer(sbfm, cursor='arrow')
+        state = 'disabled' if lock_number_of_sheets else 'normal'
+        self._sidebar = sb = RearrangedDnDContainer(sbfm)
+        self._sidebar.set_rearrange_commands(
+            {
+                "label": 'Remove Selected...',
+                "command": _remove_selected,
+                "state": state
+            }
+        )
+        self._sidebar.set_other_commands(
+            {
+                "label": 'New Sheet...',
+                "command": lambda: self.insert_sheet(dialog=True),
+                "state": state
+            }
+        )
         self._sidebar.pack(fill='both', expand=True)
         self._sidebar.set_dnd_end_callback(self._on_dnd_end)
         
@@ -2953,7 +3025,7 @@ class Book(ttk.Frame):
         self._sheet_kw.update(sheet_kw)
         self._sheet_var = vrb.DoubleVar(self)
         self._sheet_var.trace_add('write', self._switch_sheet, weak=True)
-        self._sheet: Optional[Sheet] = None
+        self._sheet: Sheet | None = None
         self._sheets_props: dict[float, list] = dict()
         self._sheets_props = self.insert_sheet(0)
         
@@ -2975,15 +3047,9 @@ class Book(ttk.Frame):
         dummy_rdbutton = ttk.Radiobutton(self, bootstyle='toolbutton-primary')
         dummy_entry = ttk.Entry(self)
         self._button_style = 'Book.' + dummy_btn["style"]
-        self._bold_button_style = 'Book.bold.' + dummy_btn["style"]
         self._rdbutton_style = 'Book.' + dummy_rdbutton["style"]
         self._entry_style = 'Book.' + dummy_entry["style"]
         ttkstyle.configure(self._button_style, padding=1)
-        ttkstyle.configure(
-            self._bold_button_style,
-            padding=1,
-            font=('TkDefaultFont', 13, 'bold')
-        )
         ttkstyle.configure(
             self._rdbutton_style,
             anchor='w',
@@ -2999,19 +3065,19 @@ class Book(ttk.Frame):
     
     def _on_dnd_end(self, event, initial_items):
         if initial_items != self._sidebar.dnd_items:
-            self._rearrange_sheets()
+            self._rearrange_sheets_props()
         self._focus_on_sheet()
     
     def _center_window(self, toplevel: tk.BaseWidget):
         center_window(to_center=toplevel, center_of=self.winfo_toplevel())
     
-    def _rearrange_sheets(self, *_):
+    def _rearrange_sheets_props(self, *_):
         sheets_props = self._sheets_props.copy()
         
         new_sheets_props = dict()
         for sf in self._sidebar.dnd_items:  # new order
-            for key, ps in sheets_props.items():
-                if ps["switch_frame"] == sf:
+            for key, props in sheets_props.items():
+                if props["item"] == sf:
                     break
             new_sheets_props[key] = sheets_props.pop(key)
         
@@ -3029,10 +3095,10 @@ class Book(ttk.Frame):
             self._panedwindow.forget(0)
         self._sidebar_hidden = not self._sidebar_hidden
     
-    def _get_key(self, index_or_name: Union[int, str]) -> str:
+    def _get_key(self, index_or_name: int | str) -> str:
         if isinstance(index_or_name, str):  # name input
-            for key, ps in self._sheets_props.items():
-                if ps["name"] == index_or_name:
+            for key, props in self._sheets_props.items():
+                if props["name"] == index_or_name:
                     return key
             raise ValueError(
                 "Can't find the sheet with the name: {index_or_name}")
@@ -3073,18 +3139,18 @@ class Book(ttk.Frame):
         
         return new_sheet
     
-    def switch_sheet(self, index_or_name: Union[int, str]) -> Sheet:
+    def switch_sheet(self, index_or_name: int | str) -> Sheet:
         key = self._get_key(index_or_name)
         self._sheet_var.set(key)
         
         return self._sheet
     
-    def _get_unique_name(self, name: Optional[str]=None):
+    def _get_unique_name(self, name: str | None = None):
         assert isinstance(name, (str, type(None))), name
         
         # Check name
         sheets_props = self._sheets_props
-        names_exist = [ ps["name"] for ps in sheets_props.values() ]
+        names_exist = [ props["name"] for props in sheets_props.values() ]
         if name is None:
             i, name = (1, 'Sheet 1')
             while name in names_exist:
@@ -3099,11 +3165,13 @@ class Book(ttk.Frame):
         
         return name
     
-    def insert_sheet(self,
-                     index: Optional[int] = None,
-                     name: Optional[str] = None,
-                     dialog: bool = False,
-                     **kwargs):
+    def insert_sheet(
+            self,
+            index: int | None = None,
+            name: str | None = None,
+            dialog: bool = False,
+            **kwargs
+    ):
         assert isinstance(index, (int, type(None))), index
         assert isinstance(name, (str, type(None))), name
         
@@ -3233,24 +3301,16 @@ class Book(ttk.Frame):
         
         # Build a new sheet widget and sidebar button
         sheet = Sheet(self._sheet_pane, **sheet_kw)
-        frame = OrderlyDnDItem(self._sidebar)
-        bt = ttk.Button(
-            frame,
-            style=self._button_style,
-            text='::',
-            takefocus=False
-        )
-        bt.pack(side='left', padx=[3, 6])
-        bt.dnd_trigger = True
+        item = OrderlyDnDItem(self._sidebar, selectbutton=True, dragbutton=True)
         switch = ttk.Radiobutton(
-            frame,
+            item,
             style=self._rdbutton_style,
             text=name,
             value=key,
             variable=self._sheet_var,
             takefocus=False
         )
-        switch.pack(side='left', fill='x', expand=True)
+        switch.pack(fill='x', expand=True)
         switch.bind(RIGHTCLICK, lambda e: self._post_switch_menu(e, key))
         
         # Modify the sheet dict
@@ -3258,10 +3318,12 @@ class Book(ttk.Frame):
         keys.insert(index, key)
         props.insert(
             index,
-            {"name": name,
-             "sheet": sheet,
-             "switch": switch,
-             "switch_frame": frame}
+            {
+                "name": name,
+                "sheet": sheet,
+                "switch": switch,
+                "item": item
+            }
         )
         self._sheets_props = dict(zip(keys, props))
         
@@ -3274,10 +3336,10 @@ class Book(ttk.Frame):
     def _refresh_sidebar(self):
         self._sidebar.dnd_forget(destroy=False)
         self._sidebar.dnd_put(
-            [ ps["switch_frame"] for ps in self._sheets_props.values() ],
+            [ props["item"] for props in self._sheets_props.values() ],
             sticky='nwe',
             expand=(True, False),
-            padding=[6, 3],
+            padding=6,
             ipadding=2
         )
         self._sidebar_fm.event_generate('<<MapChild>>')
@@ -3293,21 +3355,23 @@ class Book(ttk.Frame):
         )
         menu.add_command(
             label='Delete Sheet',
-            command=lambda: self._delete_sheet(key, check=True)
+            command=lambda: self._delete_sheet(key, request=True)
         )
         
         menu.post(event.x_root, event.y_root)  # show the right click menu
         self.after_idle(menu.destroy)
     
-    def delete_sheet(self,
-                     index_or_name: Union[int, str],
-                     destroy: bool = True,
-                     check: bool = False) -> dict:
+    def delete_sheet(
+            self,
+            index_or_name: int | str,
+            destroy: bool = True,
+            request: bool = False
+    ) -> dict:
         key = self._get_key(index_or_name)
-        return self._delete_sheet(key, destroy=destroy, check=check)
+        return self._delete_sheet(key, destroy=destroy, request=request)
     
-    def _delete_sheet(self, key, destroy: bool = True, check: bool = False):
-        if check:
+    def _delete_sheet(self, key, destroy: bool = True, request: bool = False):
+        if request:
             result = dialogs.Messagebox.okcancel(
                 parent=self,
                 title='Sheet Deletion',
@@ -3322,7 +3386,7 @@ class Book(ttk.Frame):
         
         sheets_props = self._sheets_props
         index = list(sheets_props).index(key)
-        ps = sheets_props.pop(key)  # remove the sheet properties
+        props = sheets_props.pop(key)  # remove the sheet properties
         
         # Update GUI
         if sheets_props:  # the book is not empty after deleting the sheet
@@ -3335,16 +3399,16 @@ class Book(ttk.Frame):
             self.insert_sheet()  # add a new sheet
         
         if destroy:
-            for widget in (ps["sheet"], ps["switch_frame"]):
+            for widget in (props["sheet"], props["item"]):
                 widget.destroy()
         
         self.after(500, gc.collect)
         
-        return ps
+        return props
     
     def rename_sheet(self,
                      old_name: str,
-                     new_name: Optional[str] = None,
+                     new_name: str | None = None,
                      auto_rename: bool = False):
         sheets_props = self._sheets_props
         key = self._get_key(old_name)
@@ -3355,15 +3419,15 @@ class Book(ttk.Frame):
         if auto_rename:
             new_name = self._get_unique_name(new_name)
         
-        names = [ ps["name"] for ps in sheets_props.values() ]
+        names = [ props["name"] for props in sheets_props.values() ]
         if new_name in names:
             raise DuplicateNameError(
                 f"`new_name` = {new_name}. The name already exists: {names}")
         
         # Modify the sheet dict
-        ps = sheets_props[key]
-        ps["name"] = new_name
-        ps["switch"].configure(text=new_name)
+        props = sheets_props[key]
+        props["name"] = new_name
+        props["switch"].configure(text=new_name)
         
         return new_name
     

@@ -6,7 +6,7 @@ Created on Mon May 22 22:35:24 2023
 @author: tungchentsai
 """
 
-from .dnd import DnDItem, OrderlyDnDItem, DnDContainer, TriggerDnDContainer
+from .dnd import DnDItem, OrderlyDnDItem, DnDContainer, RearrangedDnDContainer
 from .collapsed import CollapsedFrame
 from .scrolled import ScrolledWidget
 from .scrolled import ScrolledTkFrame, ScrolledFrame, ScrolledLabelframe
@@ -20,7 +20,7 @@ from ._others import (
 
 
 __all__ = [
-    'DnDItem', 'OrderlyDnDItem', 'DnDContainer', 'TriggerDnDContainer',
+    'DnDItem', 'OrderlyDnDItem', 'DnDContainer', 'RearrangedDnDContainer',
     'CollapsedFrame',
     'ScrolledWidget', 'ScrolledTkFrame', 'ScrolledFrame', 'ScrolledLabelframe',
     'ScrolledText', 'ScrolledTreeview', 'ScrolledCanvas', 'UndockedFrame',
