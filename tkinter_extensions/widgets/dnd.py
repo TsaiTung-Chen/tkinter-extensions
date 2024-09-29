@@ -986,6 +986,9 @@ class RearrangedDnDContainer(DnDContainer):
             menu.add_command(label='Select All', command=self.select_all)
             menu.add_command(label='Deselect All', command=self.deselect_all)
             for kw in self._rearrange_commands:
+                if cmd := kw.get('command', None):
+                    cmd = lambda c=cmd: (c(), self.set_rearrangement(False))
+                    kw["command"] = cmd
                 menu.add_command(**kw)
         else:
             for kw in self._other_commands:
