@@ -2865,11 +2865,13 @@ class Book(ttk.Frame):
             scrollbar_bootstyle='round',
             sidebar_width: int = 150,
             lock_number_of_sheets: bool = False,
-            **sheet_kw
+            sheet_kw: dict = {},
+            **kwargs
     ):
-        super().__init__(master)
+        super().__init__(master, **kwargs)
         self._create_styles()
         self._lock_number_of_sheets: bool = bool(lock_number_of_sheets)
+        
         
         # Build toolbar
         self._toolbar = tb = ttk.Frame(self)
@@ -2879,7 +2881,7 @@ class Book(ttk.Frame):
         self._sidebar_hidden: bool = True
         self._sidebar_toggle = ttk.Button(
             tb,
-            style=self._button_style,
+            style=self._toolbar_bt_style,
             text='[Sidebar]',
             command=self._toggle_sidebar,
             takefocus=False
@@ -2895,7 +2897,7 @@ class Book(ttk.Frame):
         ## Undo button
         self._undo_btn = ttk.Button(
             tb,
-            style=self._button_style,
+            style=self._toolbar_bt_style,
             text='↺ Undo',
             command=lambda: self.sheet.undo(),
             takefocus=False
@@ -2905,7 +2907,7 @@ class Book(ttk.Frame):
         ## Redo button
         self._redo_btn = ttk.Button(
             tb,
-            style=self._button_style,
+            style=self._toolbar_bt_style,
             text='↻ Redo',
             command=lambda: self.sheet.redo(),
             takefocus=False
@@ -2954,8 +2956,6 @@ class Book(ttk.Frame):
         en.bind('<FocusIn>', lambda e: self.sheet._refresh_entry())
         en.bind('<KeyPress>', lambda e: self.sheet._on_entry_key_press(e))
         
-        # Separator
-        ttk.Separator(self, takefocus=False).pack(fill='x')
         
         # Build sidebar and sheet frame
         def _init_sidebar(event=None):
@@ -2963,7 +2963,10 @@ class Book(ttk.Frame):
             pw.unbind('<Map>')
             self._toggle_sidebar()
         
-        self._panedwindow = pw = ttk.Panedwindow(self, orient='horizontal')
+        border_fm = ttk.Frame(self, style=self._border_fm_style, padding=1)
+        border_fm.pack(fill='both', expand=True)
+        
+        self._panedwindow = pw = ttk.Panedwindow(border_fm, orient='horizontal')
         self._panedwindow.pack(fill='both', expand=True)
         pw.bind('<Map>', _init_sidebar)
         
@@ -2978,14 +2981,14 @@ class Book(ttk.Frame):
             if not (selected_items := self._sidebar.selected_items):
                 return
             
-            selected_keys = [ key for key, props in self._sheets_props.items() \
+            selected_keys = [ key for key, props in self._sheets_props.items()
                               if props["item"] in selected_items ]
             
             # Ask if the user confirm to delete the selected sheets
             if not self._delete_sheet(selected_keys.pop(), request=True):
                 return
             
-            # Continue to delete the selected sheets
+            # The user confirmed it. Continue to delete the selected sheets
             for key in selected_keys:
                 self._delete_sheet(key, request=False)
             selected_items = self._sidebar.remove_selected()
@@ -3029,8 +3032,6 @@ class Book(ttk.Frame):
         self._sheets_props: dict[float, list] = dict()
         self._sheets_props = self.insert_sheet(0)
         
-        # Sizegrip
-        ttk.Separator(self, takefocus=False).pack(fill='x')
         
         # Focus on current sheet if any of the frames or canvas is clicked
         for widget in [self, tb, ib, R_label, r_label, s_label, C_label, c_label,
@@ -3041,24 +3042,34 @@ class Book(ttk.Frame):
         self.bind('<<ThemeChanged>>', self._create_styles)
     
     def _create_styles(self, event=None):
-        ttkstyle = ttk.Style.get_instance()
-        colors = ttkstyle.colors
+        style = ttk.Style.get_instance()
+        light_theme = style.theme.type.lower() == 'light'
+        colors = style.colors
+        
+        dummy_fm = ttk.Frame(self)
         dummy_btn = ttk.Button(self, bootstyle='link-primary')
         dummy_rdbutton = ttk.Radiobutton(self, bootstyle='toolbutton-primary')
         dummy_entry = ttk.Entry(self)
-        self._button_style = 'Book.' + dummy_btn["style"]
-        self._rdbutton_style = 'Book.' + dummy_rdbutton["style"]
+        
+        self._border_fm_style = 'Book.' + dummy_fm["style"]
+        self._toolbar_bt_style = 'Book.' + dummy_btn["style"]
+        self._switch_rb_style = 'Book.' + dummy_rdbutton["style"]
         self._entry_style = 'Book.' + dummy_entry["style"]
-        ttkstyle.configure(self._button_style, padding=1)
-        ttkstyle.configure(
-            self._rdbutton_style,
+        
+        border = colors.border if light_theme else colors.selectbg
+        style.configure(self._border_fm_style, background=border)
+        style.configure(self._toolbar_bt_style, padding=1)
+        style.configure(
+            self._switch_rb_style,
             anchor='w',
             padding=[5, 3],
             background=colors.bg,
             foreground=colors.fg,
             borderwidth=0
         )
-        ttkstyle.configure(self._entry_style, padding=[5, 2])
+        style.configure(self._entry_style, padding=[5, 2])
+        
+        dummy_fm.destroy()
         dummy_btn.destroy()
         dummy_rdbutton.destroy()
         dummy_entry.destroy()
@@ -3304,7 +3315,7 @@ class Book(ttk.Frame):
         item = OrderlyDnDItem(self._sidebar, selectbutton=True, dragbutton=True)
         switch = ttk.Radiobutton(
             item,
-            style=self._rdbutton_style,
+            style=self._switch_rb_style,
             text=name,
             value=key,
             variable=self._sheet_var,
