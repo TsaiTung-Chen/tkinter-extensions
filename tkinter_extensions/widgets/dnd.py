@@ -25,8 +25,7 @@ class DnDItem(ttk.Frame):
     """
     def __init__(
             self,
-            master,
-            *args,
+            master=None,
             bootstyle='default',
             dnd_bordercolor: str = 'warning',
             dnd_borderwidth: int = 1,
@@ -82,14 +81,11 @@ class DnDItem(ttk.Frame):
             self._drag_bt = None
         
         # Content frame
-        super().__init__(self._wrapper, *args, bootstyle=bootstyle, **kwargs)
+        super().__init__(self._wrapper, bootstyle=bootstyle, **kwargs)
         self.grid(row=0, column=2, sticky='nswe')
         
         # Pad `self` later to make it work like a border
-        style = ttk.Style.get_instance()
-        if (bordercolor := style.colors.get(dnd_bordercolor)) is None:
-            bordercolor = dnd_bordercolor
-        self._dnd_bordercolor = bordercolor
+        self._dnd_bordercolor = dnd_bordercolor
         self._dnd_borderwidth: int = int(dnd_borderwidth)
         self._dnd_container: DnDContainer = master
         self._dnd_active: bool = False
@@ -249,8 +245,11 @@ class DnDItem(ttk.Frame):
             self.after_idle(focus_widget.focus_set)
         
         # Add border
+        style = ttk.Style.get_instance()
+        if (bordercolor := style.colors.get(self._dnd_bordercolor)) is None:
+            bordercolor = self._dnd_bordercolor
         wrapper.configure(
-            background=self._dnd_bordercolor,
+            background=bordercolor,
             padx=self._dnd_borderwidth,
             pady=self._dnd_borderwidth
         )
@@ -415,13 +414,13 @@ class DnDContainer(tk.Canvas):
     
     def __init__(
             self,
-            *args,
+            master=None,
             dnd_start_callback: Callable[[tk.Event, DnDItem], Any] | None = None,
             dnd_end_callback: Callable[[tk.Event, list[DnDItem]], Any] | None \
                 = None,
             **kwargs
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(master=master, **kwargs)
         self.bind('<Configure>', self._on_configure)
         self._canvas_w: int = 0
         self._canvas_h: int = 0
@@ -474,7 +473,10 @@ class DnDContainer(tk.Canvas):
         """
         return [ item for item in self._dnd_items if not item.selected.get() ]
     
-    def _rearrange_are_consistent(self) -> bool:
+    def _consistent_rearrangement(self) -> bool:
+        if not self._dnd_items:
+            return True
+        
         items = self._dnd_items.copy()
         active = items.pop().rearrange_active
         return all( item.rearrange_active == active for item in items )
@@ -836,15 +838,19 @@ class DnDContainer(tk.Canvas):
         the rearrangement buttons for each DnD item will disappear.
         """
         assert isinstance(enable, bool), enable
-        if not self._dnd_items:
-            raise ValueError(
-                "Rearrangement mode cannot be set before `dnd_put` be called."
-            )
         
-        if self._rearrange_active == enable and self._rearrange_are_consistent():
+        if self._rearrange_active == enable and self._consistent_rearrangement():
             return
         
         self._rearrange_active = enable
+        
+        if not self._dnd_items:
+            return
+        
+        self._set_rearrangement(enable, self._dnd_geometry_params)
+    
+    def _set_rearrangement(self, enable: bool, geometry_params: dict):
+        assert self._dnd_items, self._dnd_items
         
         items = self._dnd_items
         for item in items:
@@ -852,7 +858,7 @@ class DnDContainer(tk.Canvas):
         
         # Remove and then put the items onto the canvas again to update the
         # natural sizes
-        params = self._dnd_geometry_params
+        params = geometry_params
         R, C = params["shape"]
         put_kw = {
             "items": [ items[r*C:(r+1)*C] for r in range(R) ],  # 1-D => 2-D
@@ -900,7 +906,7 @@ class RearrangedDnDContainer(DnDContainer):
     """
     def __init__(
             self,
-            *args,
+            master=None,
             button_loc: str = 'top-right',
             button_kw: dict = {
                 "text": '⋯',
@@ -909,7 +915,7 @@ class RearrangedDnDContainer(DnDContainer):
             },
             **kwargs
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(master=master, **kwargs)
         
         if button_loc not in ('top-left', 'top-right',
                               'bottom-left', 'bottom-right'):
@@ -939,19 +945,21 @@ class RearrangedDnDContainer(DnDContainer):
             **button_kw
         )
         self._rearrange_bt.place(relx=relx, rely=rely, anchor=anchor)
-        self._rearrange_bt.configure(style=self._create_style(new=True))
+        self._rearrange_bt.configure(style=self._create_bt_style(new=True))
         
         self.update_idletasks()
         self._button_h: int = self._rearrange_bt.winfo_reqheight()
         self._button_loc: str = button_loc
-        self.bind('<<ThemeChanged>>', self._create_style)
+        self._original_padding: tuple[int, int, int, int] = (0, 0, 0, 0)
+        self.configure(height=self._button_h)
+        self.bind('<<ThemeChanged>>', self._create_bt_style)
         self.set_rearrange_commands({
             "label": 'Remove Selected', "command": self.remove_selected
         })
         self.set_other_commands()
         self.set_rearrange_callback()
     
-    def _create_style(self, event=None, new: bool = False) -> str:
+    def _create_bt_style(self, event=None, new: bool = False) -> str:
         if new:
             bt_style = 'Rearrange.DnDContainer.' + self._rearrange_bt["style"]
         else:
@@ -969,7 +977,7 @@ class RearrangedDnDContainer(DnDContainer):
         """
         rearrange_active = self._rearrange_active
         
-        # Get button position
+        # Get button position (show the menu from the bottome left corner)
         bt = self._rearrange_bt
         x = bt.winfo_rootx()
         y = bt.winfo_rooty() + bt.winfo_height()
@@ -983,18 +991,21 @@ class RearrangedDnDContainer(DnDContainer):
         )
         
         if rearrange_active:
-            menu.add_command(label='Select All', command=self.select_all)
-            menu.add_command(label='Deselect All', command=self.deselect_all)
+            ## Commands in rearrangement mode
+            if self._rearrange_commands:
+                menu.add_command(label='Select All', command=self.select_all)
+                menu.add_command(label='Deselect All', command=self.deselect_all)
             for kw in self._rearrange_commands:
                 if cmd := kw.get('command', None):
                     cmd = lambda c=cmd: (c(), self.set_rearrangement(False))
                     kw["command"] = cmd
                 menu.add_command(**kw)
         else:
+            ## Commands not in rearrangement mode
             for kw in self._other_commands:
                 menu.add_command(**kw)
         
-        if menu.index('end') > 0:  # not only the toggle entry appears
+        if menu.index('end') > 0:  # has mode commands
             menu.insert_separator(1)  # insert a separator below the toggle
         
         menu.post(x, y)
@@ -1046,14 +1057,14 @@ class RearrangedDnDContainer(DnDContainer):
         if not offset:
             super().dnd_put(*args, padding=padding, **kwargs)
             
+            ## Offset upwards
             px1, py1, px2, py2 = padding
             if 'top' in self._button_loc:
                 py1 -= self._button_h
             else:
                 py2 -= self._button_h
             
-            self._original_padding: tuple[int, int, int, int] = (
-                px1, py1, px2, py2)
+            self._original_padding = (px1, py1, px2, py2)
             return
         
         # Modify the y padding to make space for the rearrangement button
@@ -1070,8 +1081,9 @@ class RearrangedDnDContainer(DnDContainer):
         assert all( isinstance(p, int) for p in padding ), padding
         assert all( p >= 0 for p in padding ), padding
         
-        self._original_padding: tuple[int, int, int, int] = padding
+        self._original_padding = padding
         
+        ## Offset downwards
         px1, py1, px2, py2 = padding
         if 'top' in self._button_loc:
             py1 += self._button_h
@@ -1115,12 +1127,19 @@ class RearrangedDnDContainer(DnDContainer):
         for each item will appear on the left side of each DnD item. Otherwise,
         the rearrangement buttons for each DnD item will disappear.
         """
+        assert isinstance(enable, bool), enable
+        
+        if self._rearrange_active == enable and self._consistent_rearrangement():
+            return
+        
+        self._rearrange_active = enable
+        
         if not self._dnd_items:
-            raise ValueError(
-                "Rearrangement mode cannot be set before `dnd_put` be called."
-            )
-        self._dnd_geometry_params["padding"] = self._original_padding
-        super().set_rearrangement(enable)
+            return
+        
+        geometry_params = self._dnd_geometry_params.copy()
+        geometry_params["padding"] = self._original_padding
+        self._set_rearrangement(enable, geometry_params)
     
     def set_rearrange_commands(self, *kw_dictionaries: dict[str, Any]):
         """
