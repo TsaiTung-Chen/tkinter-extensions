@@ -588,7 +588,7 @@ class Sheet(ttk.Frame):
             },
             "selection": {
                 "color": style.lookup(selection_style, "background"),
-                "width": 2
+                "width": 3
             }
         }
         
