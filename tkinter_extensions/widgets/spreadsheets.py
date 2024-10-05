@@ -467,7 +467,7 @@ class Sheet(ttk.Frame):
         # Draw new items
         self.draw(
             update_visible_rcs=False,
-            skip_exist=True,   # reduce operating time
+            skip_existing=key,   # reduce operating time
             trace=None
         )
         
@@ -1079,8 +1079,10 @@ class Sheet(ttk.Frame):
         else:
             dx, dy = _dxdy
         
-        self.xview_scroll(dx, 'pixels')
-        self.yview_scroll(dy, 'pixels')
+        if dx != 0:
+            self.xview_scroll(dx, 'pixels')
+        if dy != 0:
+            self.yview_scroll(dy, 'pixels')
         self.__mouse_select(x - dx, y - dy, canvas, expand=True)
         
         # Cancel the old autoscroll function loop and then setup a new one
@@ -1090,7 +1092,8 @@ class Sheet(ttk.Frame):
         if (funcid := self._mouse_selection_id) is not None:
             self.after_cancel(funcid)
         self._mouse_selection_id = self.after(
-            20, self._on_leftbutton_motion, event, (dx, dy))
+            20, self._on_leftbutton_motion, event, (dx, dy)
+        )
     
     def _on_leftbutton_release(self, event=None):
         # Remove the autoscroll function loop
@@ -1102,7 +1105,9 @@ class Sheet(ttk.Frame):
         assert event.widget == self.canvas, event.widget
         self._focus_in_cell()
     
-    def draw_cornerheader(self, skip_exist=False):
+    def draw_cornerheader(self, skip_existing: bool = False):
+        assert isinstance(skip_existing, bool), skip_existing
+        
         type_ = 'cornerheader'
         x1, y1, x2, y2 = (0, 0, self._cell_sizes[1][0], self._cell_sizes[0][0])
         width, height = (x2 - x1, y2 - y1)
@@ -1118,7 +1123,7 @@ class Sheet(ttk.Frame):
         self.colcanvas.configure(height=height)
         
         tag = self._make_tag("type", type_=type_)
-        if skip_exist:
+        if skip_existing:
             for oid in canvas.find_withtag(tag):
                 subtype = self._get_tag("subtype", oid, canvas=canvas)
                 if subtype in ('background', 'hhandle', 'vhandle'):
@@ -1206,11 +1211,12 @@ class Sheet(ttk.Frame):
             i2: int | None = None,
             *,
             axis: int,
-            skip_exist: bool = False
+            skip_existing: bool = False
     ):
         axis = int(axis)
         assert (i1 is not None) or (i2 is None), (i1, i2)
         assert axis in (0, 1), axis
+        assert isinstance(skip_existing, bool), skip_existing
         
         r12_vis, c12_vis = self._visible_rcs
         i1_vis, i2_vis = r12_vis if axis == 0 else c12_vis
@@ -1278,7 +1284,7 @@ class Sheet(ttk.Frame):
         for i, kw, (x1, y1, x2, y2), xys_handle in coords_gen:
             tag = self._make_tag("type:row:col", **kw)
             
-            if skip_exist and canvas.find_withtag(tag):
+            if skip_existing and canvas.find_withtag(tag):
                 continue
             
             ## Delete the existing components
@@ -1408,14 +1414,13 @@ class Sheet(ttk.Frame):
                 canvas.tag_lower(tag_bg, tag_all_text)  # frontmost background
             else:
                 try:
-                    canvas.tag_lower(tag_bg, 'selected')  # lower than the selected
-                except tk.TclError:  # selected not in the view => cant't find them
-                    pass
+                    # Lower than the selected
+                    canvas.tag_lower(tag_bg, 'selected')
+                except tk.TclError:
+                    pass  # the selected not in the view
             
             # Update the text color
             canvas.itemconfigure(tag_text, fill=style["foreground"][state])
-        
-        return state
     
     def __on_header_enter_leave(self, event, enter_or_leave: str):
         # Set header state
@@ -1605,10 +1610,11 @@ class Sheet(ttk.Frame):
             c1: int | None = None,
             r2: int | None = None,
             c2: int | None = None,
-            skip_exist: bool = False
+            skip_existing: str | None = None,
     ):
         assert (r1 is not None) or (r2 is None), (r1, r2)
         assert (c1 is not None) or (c2 is None), (c1, c2)
+        assert skip_existing in ('row', 'col', None), skip_existing
         
         (r1_vis, r2_vis), (c1_vis, c2_vis) = self._visible_rcs
         gy2s, gx2s = self._gy2s_gx2s
@@ -1647,16 +1653,24 @@ class Sheet(ttk.Frame):
         canvas = self.canvas
         values = self.values
         cell_styles = self._cell_styles
+        skip_cols = np.full(c2-c1+1, False)
         for r, (y1, y2) in enumerate(zip(y1s[r1:r2+1], y2s[r1:r2+1]), r1):
             for c, (x1, x2) in enumerate(zip(x1s[c1:c2+1], x2s[c1:c2+1]), c1):
+                if skip_existing == 'col' and skip_cols[c-c1]:
+                    continue
+                
                 cell_style = default_style.copy()
                 cell_style.update(cell_styles[r, c])
                 kw = {"row": r, "col": c,
                       "others": ('xscroll', 'yscroll', 'temp')}
                 tag = self._make_tag("type:row:col", type_=type_, **kw)
                 
-                if skip_exist and canvas.find_withtag(tag):
-                    continue
+                if skip_existing and canvas.find_withtag(tag):
+                    if skip_existing == 'row':  # skip this row
+                        break
+                    else:  # skip this col
+                        skip_cols[c-c1] = True
+                        continue
                 
                 ## Delete the existing components
                 canvas.delete(tag)
@@ -1997,15 +2011,17 @@ class Sheet(ttk.Frame):
     def draw(
             self,
             update_visible_rcs: bool = True,
-            skip_exist: bool = False,
+            skip_existing: str | None = None,
             trace: str | None = None
     ):
+        assert skip_existing in ('row', 'col', None), skip_existing
+        
         if update_visible_rcs:
             self._update_visible_and_p2s()
-        self.draw_cornerheader(skip_exist=skip_exist)
-        self.draw_headers(axis=0, skip_exist=skip_exist)
-        self.draw_headers(axis=1, skip_exist=skip_exist)
-        self.draw_cells(skip_exist=skip_exist)
+        self.draw_cornerheader(skip_existing=skip_existing is not None)
+        self.draw_headers(axis=0, skip_existing=skip_existing == 'row')
+        self.draw_headers(axis=1, skip_existing=skip_existing == 'col')
+        self.draw_cells(skip_existing=skip_existing)
         self._reselect_cells(trace=trace)
     
     def refresh(self, scrollbar: str = 'both', trace: str | None = None):

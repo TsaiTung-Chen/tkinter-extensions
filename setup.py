@@ -18,7 +18,7 @@ with open(r'./LICENSE') as file:
 
 setup(
     name='tkinter-extensions',
-    version='0.0.6',
+    version='0.0.7',
     author='Tung-Chen Tsai',
     author_email='tungchentsai1753@gmail.com',
     description='Some tkinter extensions that allow you to build GUI apps with '
