@@ -68,8 +68,14 @@ class MessageDialog(_Positioned, dialogs.MessageDialog):
 
 
 class QueryDialog(_Positioned, dialogs.QueryDialog):
-    def __init__(self, *args, width: int = 80, **kwargs):
-        super().__init__(*args, width=width, **kwargs)
+    def __init__(
+            self,
+            *args,
+            width: int = 80,
+            padding: int | tuple[int, int] | tuple[int, int, int, int] = 12,
+            **kwargs
+    ):
+        super().__init__(*args, width=width, padding=padding, **kwargs)
     
     def create_body(self, master):
         #EDITED: create prompt message from another function
