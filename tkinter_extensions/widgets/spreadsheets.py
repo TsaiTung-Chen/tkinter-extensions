@@ -677,9 +677,11 @@ class Sheet(ttk.Frame):
             col=None,
             others: tuple = tuple(),
             *,
-            withkey: bool = True,
+            raw: bool = True,
             to_tuple: bool = False
     ) -> dict | tuple:
+        assert isinstance(others, tuple), others
+        
         tagdict = {
             "oid": f'oid={oid}',
             "type": f'type={type_}',
@@ -697,10 +699,10 @@ class Sheet(ttk.Frame):
                 f'type:subtype:row:col={type_}:{subtype}:{row}:{col}',
         }
         
-        if not withkey:
-            tagdict = self._parse_raw_tagdict(tagdict)
-        
-        others = tuple(others)
+        if not raw:
+            tagdict = {
+                k: self._parse_raw_tag(k, v) for k, v in tagdict.items()
+            }
         
         if to_tuple:
             return tuple(tagdict.values()) + others
@@ -708,16 +710,56 @@ class Sheet(ttk.Frame):
         tagdict["others"] = others
         return tagdict
     
-    def _make_tag(self, key:str, *args, **kwargs) -> str:
-        assert "to_tuple" not in kwargs, kwargs.keys()
-        return self._make_tags(*args, **kwargs)[key]
+    def _make_tag(
+            self,
+            key: str,
+            oid=None,
+            type_=None,
+            subtype=None,
+            row=None,
+            col=None,
+            others: tuple = tuple(),
+    ) -> str | tuple:
+        assert isinstance(others, tuple), others
+        
+        if key == 'oid':
+            return f'oid={oid}'
+        elif key == 'type':
+            return f'type={type_}'
+        elif key == 'subtype':
+            return f'subtype={subtype}'
+        elif key == 'row':
+            return f'row={row}'
+        elif key == 'col':
+            return f'col={col}'
+        elif key == 'row:col':
+            return f'row:col={row}:{col}'
+        elif key == 'type:row':
+            return f'type:row={type_}:{row}'
+        elif key == 'type:col':
+            return f'type:col={type_}:{col}'
+        elif key == 'type:row:col':
+            return f'type:row:col={type_}:{row}:{col}'
+        elif key == 'type:subtype':
+            return f'type:subtype={type_}:{subtype}'
+        elif key == 'type:subtype:row':
+            return f'type:subtype:row={type_}:{subtype}:{row}'
+        elif key == 'type:subtype:col':
+            return f'type:subtype:col={type_}:{subtype}:{col}'
+        elif key == 'type:subtype:row:col':
+            return f'type:subtype:row:col={type_}:{subtype}:{row}:{col}'
+        elif key == 'others':
+            return others
+        else:
+            raise ValueError(f"Invalid `key`: {key}.")
     
     def _get_tags(
             self,
             oid: int | str,
-            withkey: bool = False,
+            raw: bool = False,
             to_tuple: bool = False,
-            canvas: tk.Canvas = None
+            canvas: tk.Canvas = None,
+            _key: str | None = None
     ) -> dict | tuple:
         assert isinstance(oid, (int, str)), oid
         assert isinstance(canvas, (type(None), tk.Canvas)), canvas
@@ -743,15 +785,22 @@ class Sheet(ttk.Frame):
             try:
                 key, value = tag.split('=')
             except ValueError:
-                pass
+                others += (tag,)
             else:
                 if key in tagdict:
-                    tagdict[key] = tag
-                    continue
-            others += (tag,)
+                    if _key is None:  # found a tag
+                        tagdict[key] = tag
+                    elif _key == key:  # found the requested tag
+                        tagdict = {_key: tag}
+                        break
         
-        if not withkey:
-            tagdict = self._parse_raw_tagdict(tagdict)
+        if _key == 'others':
+            return {_key: others}
+        
+        if not raw:
+            tagdict = {
+                k: self._parse_raw_tag(k, v) for k, v in tagdict.items()
+            }
         
         if to_tuple:
             return tuple(tagdict.values()) + others
@@ -759,23 +808,17 @@ class Sheet(ttk.Frame):
         tagdict["others"] = others
         return tagdict
     
-    def _get_tag(self, key: str, *args, **kwargs) -> str:
-        assert "to_tuple" not in kwargs, kwargs.keys()
-        return self._get_tags(*args, **kwargs)[key]
+    def _get_tag(
+            self, key: str, oid: int | str, canvas: tk.Canvas = None
+    ) -> str | tuple | None:
+        return self._get_tags(oid=oid, canvas=canvas, _key=key)[key]
     
-    def _parse_raw_tagdict(self, raw_tagdict: dict) -> dict:
-        tagdict = {
-            k: None if v is None or (_v := v.split('=', 1)[1]) == 'None'
-                    else _v
-            for k, v in raw_tagdict.items()
-        }
-        
-        if (oid := tagdict["oid"]) is not None:
-            tagdict["oid"] = int(oid)
-        tagdict["row"] = row if (row := tagdict["row"]) is None else int(row)
-        tagdict["col"] = col if (col := tagdict["col"]) is None else int(col)
-        
-        return tagdict
+    def _parse_raw_tag(self, key: str, tag: str | None) -> str:
+        if tag is None or (_tag := tag.split('=', 1)[1]) == 'None':
+            return None
+        elif key in ('oid', 'row', 'col'):
+            return int(_tag)
+        return _tag
     
     def _get_rc(
             self,
@@ -1909,14 +1952,14 @@ class Sheet(ttk.Frame):
         
         ## Rowheaders
         for r in range(r1_vis, r2_vis+1):
-            tagdict = self._make_tags(type_='rowheader', row=r, withkey=False)
+            tagdict = self._make_tags(type_='rowheader', row=r, raw=False)
             self._set_header_state(
                 tagdict, state='selected' if r in rows_on else 'normal'
             )
         
         ## Colheaders
         for c in range(c1_vis, c2_vis+1):
-            tagdict = self._make_tags(type_='colheader', col=c, withkey=False)
+            tagdict = self._make_tags(type_='colheader', col=c, raw=False)
             self._set_header_state(
                 tagdict, state='selected' if c in cols_on else 'normal'
             )
@@ -1925,7 +1968,7 @@ class Sheet(ttk.Frame):
         state = 'selected' if ((r_low, r_high) == (0, r_max) and
                                (c_low, c_high) == (0, c_max)) \
                            else 'normal'
-        tagdict = self._make_tags(type_='cornerheader', withkey=False)
+        tagdict = self._make_tags(type_='cornerheader', raw=False)
         self._set_header_state(tagdict, state=state)
         
         # Update focus indices and focus value
