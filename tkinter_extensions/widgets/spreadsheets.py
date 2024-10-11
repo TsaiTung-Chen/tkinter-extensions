@@ -12,7 +12,7 @@ import time
 import tkinter as tk
 import tkinter.font
 from contextlib import contextmanager
-from typing import Callable, Literal
+from typing import Callable, Literal, Generator
 
 import numpy as np
 import pandas as pd
@@ -1148,6 +1148,71 @@ class Sheet(ttk.Frame):
         assert event.widget == self.canvas, event.widget
         self._focus_in_cell()
     
+    def _index_generator(
+            self, start: int | np.integer, last: int | np.integer
+    ) -> Generator[int, bool, None]:
+        """
+        Create an index generator which yields an index each time after
+        `.send(skip_last_index)` is called. The `.send` method will return the
+        next index if the generator hasn't received twice `False` values to
+        the argument `skip_last_index`.
+        
+        We assume the indices which should be skipped is contained in a block,
+        i.e. they are contiguous. So we divide all the possible indices into
+        two halves, revert the second half, and interleave the first half with
+        the reverted second half. Once we find the two skipped indices at the
+        edges, we stop the iteration. This can accelerate the looping by not
+        generating the indices which should be skipped. For example, if `start`
+        is 1, `last` is 10, and the indices which should be skipped are [2, 3,
+        4, 5, 6], The yielded indices will be [1, 10, 2, 9, 8, 7, 6].
+        
+        Parameters
+        ----------
+        start : int | np.integer
+            This is the smallest index value. This will be the first value
+            yielded by the generator.
+        last : int | np.integer
+            This is the largest index value. This will be the second value
+            yielded by the generator.
+        
+        Yields
+        ------
+        Generator[int, bool, None]
+            The created index generator. Use `next(generator)` to get the first
+            index. And use `generator.send(skip_last_index)` to get the
+            subsequent indices.
+        """
+        assert isinstance(start, (int, np.integer)), (type(start), start)
+        assert isinstance(last, (int, np.integer)), (type(last), last)
+        assert 0 <= start <= last, (start, last)
+        
+        n_half = (start + last) // 2
+        upper_idc = list(range(start, n_half+1, +1))
+        lower_idc = list(range(last, n_half, -1))
+        indices = [None] * (len(upper_idc) + len(lower_idc))
+        indices[0::2] = upper_idc
+        indices[1::2] = lower_idc
+        
+        start_skip: bool = False
+        for i, idx in enumerate(indices):
+            start_skip = yield idx
+            if start_skip:
+                break
+        else:
+            return
+        
+        # Start to skip from current `idx`
+        # => now find the end index where skip ends
+        if i % 2 == 0:  # current `idx` is in `upper_idc`
+            indices = lower_idc[i//2:] + upper_idc[i//2+1:][::-1]
+        else:  # current `idx` is in `lower_idc`
+            indices = upper_idc[(i+1)//2:] + lower_idc[(i+1)//2+1:][::-1]
+        
+        for idx in indices:
+            end_skip = yield idx
+            if end_skip:
+                break
+    
     def draw_cornerheader(self, skip_existing: bool = False):
         assert isinstance(skip_existing, bool), skip_existing
         
@@ -1245,7 +1310,7 @@ class Sheet(ttk.Frame):
             canvas.tag_bind(
                 tag_cornerhandle,
                 '<ButtonPress-1>',
-                getattr(self, f"_on_{handle}_leftbutton_press")
+                getattr(self, f'_on_{handle}_leftbutton_press')
             )
     
     def draw_headers(
@@ -1287,19 +1352,19 @@ class Sheet(ttk.Frame):
             x1, x2 = (0, widths[0])
             y2s = self._canvasy(self._gy2s_gx2s[axis][1:])
             y1s = y2s - heights[1:]
-            coords_gen = (
-                (r,
-                 {
-                     "type_": type_,
-                     "row": r,
-                     "col": -1,
-                     "others": ('yscroll', 'temp')
-                 },
-                 (x1, y1, x2, y2),  # rectangle
-                 (x1, y2, x2, y2)  # horizontal
+            properties = [
+                (
+                    {
+                        "type_": type_,
+                        "row": r,
+                        "col": -1,
+                        "others": ('yscroll', 'temp')
+                    },
+                    (x1, y1, x2, y2),  # rectangle
+                    (x1, y2, x2, y2)  # horizontal
                 )
                 for r, (y1, y2) in enumerate(zip(y1s[i1:i2+1], y2s[i1:i2+1]), i1)
-            )
+            ]
             xys_sep = (x2-dw_sep, y1s[i1], x2-dw_sep, y2s[i2])  # vertical
             canvas = self.rowcanvas
         else:
@@ -1307,28 +1372,35 @@ class Sheet(ttk.Frame):
             y1, y2 = (0, heights[0])
             x2s = self._canvasx(self._gy2s_gx2s[axis][1:])
             x1s = x2s - widths[1:]
-            coords_gen = (
-                (c,
-                 {
-                     "type_": type_,
-                     "row": -1,
-                     "col": c,
-                     "others": ('xscroll', 'temp')
-                 },
-                 (x1, y1, x2, y2),  # rectangle
-                 (x2, y1, x2, y2)  # vertical
+            properties = [
+                (
+                    {
+                        "type_": type_,
+                        "row": -1,
+                        "col": c,
+                        "others": ('xscroll', 'temp')
+                    },
+                    (x1, y1, x2, y2),  # rectangle
+                    (x2, y1, x2, y2)  # vertical
                 )
                 for c, (x1, x2) in enumerate(zip(x1s[i1:i2+1], x2s[i1:i2+1]), i1)
-            )
+            ]
             xys_sep = (x1s[i1], y2-dw_sep, x2s[i2], y2-dw_sep)  # horizontal
             canvas = self.colcanvas
         
         # Draw components for each header
-        for i, kw, (x1, y1, x2, y2), xys_handle in coords_gen:
+        i_generator = self._index_generator(i1, i2)
+        i = next(i_generator)
+        while True:
+            kw, (x1, y1, x2, y2), xys_handle = properties[i-i1]
             tag = self._make_tag("type:row:col", **kw)
             
-            if skip_existing and canvas.find_withtag(tag):
-                continue
+            if skip_existing and canvas.find_withtag(tag):  # skip this row/col
+                try:
+                    i = i_generator.send(True)  # get next `i`
+                    continue  # got to next row/col
+                except StopIteration:
+                    break  # stop this iteration
             
             ## Delete the existing components
             canvas.delete(tag)
@@ -1364,12 +1436,14 @@ class Sheet(ttk.Frame):
             oid = canvas.create_line(
                 *xys_handle, width=w_hand, fill='', tags=tags)
             canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
+            
+            try:
+                i = i_generator.send(False)  # get next `i`
+            except StopIteration:
+                break  # stop this iteration
         
         # Separator (always redrawn)
-        try:
-            kw.pop("to_tuple")
-        except KeyError:
-            pass
+        kw.pop("to_tuple", None)
         kw.pop("row" if axis == 0 else "col")
         tag = self._make_tag("type:subtype", subtype='separator', **kw)
         canvas.delete(tag)
@@ -1400,7 +1474,7 @@ class Sheet(ttk.Frame):
         canvas.tag_bind(
             tag_handle,
             '<ButtonPress-1>',
-            getattr(self, f"_on_{handle}_leftbutton_press")
+            getattr(self, f'_on_{handle}_leftbutton_press')
         )
     
     def _set_header_state(
@@ -1696,12 +1770,14 @@ class Sheet(ttk.Frame):
         canvas = self.canvas
         values = self.values
         cell_styles = self._cell_styles
-        skip_cols = np.full(c2-c1+1, False)
-        for r, (y1, y2) in enumerate(zip(y1s[r1:r2+1], y2s[r1:r2+1]), r1):
-            for c, (x1, x2) in enumerate(zip(x1s[c1:c2+1], x2s[c1:c2+1]), c1):
-                if skip_existing == 'col' and skip_cols[c-c1]:
-                    continue
-                
+        r_generator = self._index_generator(r1, r2)
+        r = next(r_generator)  # get first `r`
+        while True:
+            skip_this_row = False
+            y1, y2 = y1s[r], y2s[r]
+            c_generator = self._index_generator(c1, c2)
+            c = next(c_generator)  # get first `c`
+            while True:
                 cell_style = default_style.copy()
                 cell_style.update(cell_styles[r, c])
                 kw = {"row": r, "col": c,
@@ -1710,10 +1786,16 @@ class Sheet(ttk.Frame):
                 
                 if skip_existing and canvas.find_withtag(tag):
                     if skip_existing == 'row':  # skip this row
+                        skip_this_row = True
                         break
-                    else:  # skip this col
-                        skip_cols[c-c1] = True
-                        continue
+                    # Skip this column
+                    try:
+                        c = c_generator.send(True)  # get next `c`
+                        continue  # go to next column
+                    except StopIteration:
+                        break  # stop this column iteration
+                
+                x1, x2 = x1s[c], x2s[c]
                 
                 ## Delete the existing components
                 canvas.delete(tag)
@@ -1733,7 +1815,12 @@ class Sheet(ttk.Frame):
                 
                 ## Text
                 if not (text := values.iat[r, c]):
-                    continue
+                    try:
+                        c = c_generator.send(False)  # no text => get next `c`
+                        continue  # go to next column
+                    except StopIteration:
+                        break  # stop this column iteration
+                
                 tags = self._make_tags(type_=type_, subtype='text', **kw)
                 padx, pady = cell_style["padding"]
                 pad = {"n": pady, "w": padx, "s": -pady, "e": -padx}
@@ -1748,7 +1835,7 @@ class Sheet(ttk.Frame):
                         anchor[i] = ''
                         xy.append((p1 + p2) // 2)
                 justify = 'left' if 'w' in anchor else (
-                    'right' if 'e' in anchor else 'center')
+                          'right' if 'e' in anchor else 'center')
                 anchor = 'center' if anchor[0] == anchor[1] \
                                   else ''.join(anchor)[::-1]
                 text_fit = self._fit_size(
@@ -1767,6 +1854,15 @@ class Sheet(ttk.Frame):
                     tags=tags
                 )
                 canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
+                try:
+                    c = c_generator.send(False)  # get next `c`
+                except StopIteration:
+                    break  # stop this column iteration
+            
+            try:
+                r = r_generator.send(skip_this_row)  # get next `r`
+            except StopIteration:
+                break  # stop this row iteration
         
         # Bindings
         tag_cell = self._make_tag("type", type_=type_)
@@ -3050,7 +3146,7 @@ class Book(ttk.Frame):
             # The user confirmed it. Continue to delete the selected sheets
             for key in selected_keys:
                 self._delete_sheet(key, request=False)
-            selected_items = self._sidebar.remove_selected()
+            self._sidebar.remove_selected()
         
         state = 'disabled' if lock_number_of_sheets else 'normal'
         self._sidebar = sb = RearrangedDnDContainer(sbfm)
