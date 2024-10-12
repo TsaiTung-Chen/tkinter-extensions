@@ -91,56 +91,84 @@ def unbind(widget, sequence, funcid=None):
         widget.bind(sequence, '\n'.join([ c + '\n' for c in other_cmds ]))
 
 
-def bind_recursively(widget, seqs, funcs, add='', *, key, skip_top_children=True):
-    add = '+' if add else ''
+def bind_recursively(
+        widget: tk.BaseWidget,
+        seqs: str | list[str],
+        funcs: Callable | list[Callable],
+        add: bool | str | None = None,
+        *,
+        key: str,
+        skip_toplevel: bool = False
+):
+    if skip_toplevel and widget == widget.winfo_toplevel() and \
+            widget != widget._root():
+        return  # skip toplevel excluding root
+    
     if isinstance(seqs, str):
         seqs = [seqs]
     if callable(funcs):
         funcs = [funcs]
+    assert len(seqs) == len(funcs), (seqs, funcs)
+    
+    # Propagate
+    for child in widget.winfo_children():
+        if skip_toplevel and (child == child.winfo_toplevel()):
+            continue  # skip toplevel and its descendants
+        bind_recursively(
+            child, seqs, funcs, add,
+            key=key,
+            skip_toplevel=skip_toplevel
+        )
     
     widget._recursively_bound = getattr(widget, "_recursively_bound", dict())
     for seq, func in zip(seqs, funcs):
         assert seq.startswith('<') and seq.endswith('>'), seq
         subbound = widget._recursively_bound.setdefault(seq, dict())
-        if key not in subbound:
-            subbound[key] = widget.bind(seq, func, add)  # func id
+        if key in subbound:
+            continue  # skip if the key already exists
+        subbound[key] = widget.bind(seq, func, add)  # func id
+
+
+def unbind_recursively(
+        widget: tk.BaseWidget,
+        seqs: str | list[str] | None = None,
+        *,
+        key: str,
+        skip_toplevel: bool = False
+):
+    if skip_toplevel and widget == widget.winfo_toplevel() and \
+            widget != widget._root():
+        return  # skip toplevel excluding root
     
-    # Propagate
-    for child in widget.winfo_children():
-        if skip_top_children and (child == child.winfo_toplevel()):
-            continue
-        bind_recursively(
-            child, seqs, funcs, add,
-            key=key,
-            skip_top_children=skip_top_children
-        )
-
-
-def unbind_recursively(widget, seqs=None, *, key, skip_top_children=True):
     if isinstance(seqs, str):
         seqs = [seqs]
     
-    if hasattr(widget, "_recursively_bound"):
-        for _seq, subbound in list(widget._recursively_bound.items()):
-            for _key, func_id in list(subbound.items()):
-                if _key != key:
-                    continue
-                if seqs is None:
-                    unbind(widget, _seq, func_id)
-                elif _seq in seqs:
-                    unbind(widget, _seq, func_id)
-                del subbound[_key]
-            if not subbound:
-                del widget._recursively_bound[_seq]
-        if not widget._recursively_bound:
-            del widget._recursively_bound
-    
     # Propagate
     for child in widget.winfo_children():
-        if skip_top_children and (child == child.winfo_toplevel()):
-            continue
+        if skip_toplevel and (child == child.winfo_toplevel()):
+            continue  # skip toplevel and its descendants
         unbind_recursively(
-            child, seqs, key=key, skip_top_children=skip_top_children)
+            child, seqs,
+            key=key,
+            skip_toplevel=skip_toplevel
+        )
+    
+    if not hasattr(widget, "_recursively_bound"):
+        return
+    
+    for _seq, subbound in list(widget._recursively_bound.items()):
+        for _key, func_id in list(subbound.items()):
+            if _key != key:
+                continue
+            if seqs is None:
+                unbind(widget, _seq, func_id)
+            elif _seq in seqs:
+                unbind(widget, _seq, func_id)
+            del subbound[_key]
+        if not subbound:
+            del widget._recursively_bound[_seq]
+    if not widget._recursively_bound:
+        del widget._recursively_bound
 
 
 def redirect_layout_managers(redirected: tk.BaseWidget,

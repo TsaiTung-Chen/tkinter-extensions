@@ -1037,7 +1037,6 @@ class RearrangedDnDContainer(DnDContainer):
         self.dnd_forget(destroy=False)
         if items:
             self.dnd_put(offset=False, **put_kw)
-            self.master.event_generate('<<MapChild>>')
         
         for item in selected:
             item.destroy()
@@ -1091,6 +1090,10 @@ class RearrangedDnDContainer(DnDContainer):
             py2 += self._button_h
         
         super().dnd_put(*args, padding=(px1, py1, px2, py2), **kwargs)
+    
+    def dnd_forget(self, *args, **kwargs):
+        super().dnd_forget(*args, **kwargs)
+        self.configure(height=self._button_h)
     
     def rebind_dnd_start(self, moved: DnDItem):
         """

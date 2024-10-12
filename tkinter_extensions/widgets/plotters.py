@@ -435,9 +435,8 @@ class BasePlotter(UndockedFrame):
         return self._figurecanvas.figure.axes
     
     def __init__(self, master, figure, **kw):
-        kw["place_button"] = False
         kw.setdefault("window_title", 'Figure')
-        super().__init__(master, **kw)
+        super().__init__(master, place_button=False, **kw)
         self._delete_on_destroy = list()
         self._rc = self._fetch_rc()
         self._refresh_on_map: bool = False

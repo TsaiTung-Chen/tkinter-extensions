@@ -20,48 +20,37 @@ class CollapsedFrame(ttk.Frame):
     def __init__(self,
                  master=None,
                  text='',
+                 orient: str = 'vertical',
                  labelwidget: tk.BaseWidget = None,
                  variable: Optional[tk.Variable] = None,
-                 onvalue=None,
-                 orient: str = 'vertical',
-                 style: Optional[str] = None,
-                 bootstyle: Optional[str] = None,
+                 onvalue: str | None = None,
+                 button_style: Optional[str] = None,
+                 button_bootstyle: Optional[str] = None,
                  **kw):
-        _style = None if style is None else style.lower()
         assert orient in ('vertical', 'horizontal'), orient
         assert text or labelwidget, (text, labelwidget)
         assert isinstance(variable, (tk.Variable, type(None))), variable
         
         self._orient = orient
-        bootstyle_button = bootstyle
-        if bootstyle:
-            bootstyle = ttk.Bootstyle.ttkstyle_widget_color(bootstyle)
-        
-        if style and ('frame' in _style):
-            style_button = None
-        else:
-            style_button = style
-            style = None
-        
-        self._onvalue = onvalue = onvalue or '__on__'
-        self._variable = variable = variable or vrb.StringVar(
-            master, value=onvalue)
-        self._labelwidget = labelwidget = labelwidget or ttk.Checkbutton(
+        self._onvalue = '__on__' if onvalue is None else onvalue
+        self._offvalue = f'!{onvalue}'
+        self._variable = variable or vrb.StringVar(master, value=onvalue)
+        self._labelwidget = labelwidget or ttk.Checkbutton(
             master,
             text=text,
-            onvalue=onvalue,
-            offvalue=f'!{onvalue}',
-            variable=variable,
-            style=style_button,
-            bootstyle=bootstyle_button
+            onvalue=self._onvalue,
+            offvalue=self._offvalue,
+            variable=self._variable,
+            style=button_style,
+            bootstyle=button_bootstyle
         )
-        variable.trace_add('write', self.toggle, weak=True)
+        self._variable.trace_add('write', self._on_variable_update, weak=True)
         
-        self._container = container = ttk.Labelframe(master,
-                                                     labelwidget=labelwidget,
-                                                     style=style,
-                                                     bootstyle=bootstyle,
-                                                     **kw)
+        self._container = container = ttk.Labelframe(
+            master,
+            labelwidget=self._labelwidget,
+            **kw
+        )
         
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
@@ -70,6 +59,7 @@ class CollapsedFrame(ttk.Frame):
         
         redirect_layout_managers(self, container, orig_prefix='content_')
         self._collapsed = False
+        self._on_variable_update()
     
     @property
     def container(self):
@@ -88,6 +78,18 @@ class CollapsedFrame(ttk.Frame):
         return self._variable
     
     def collapse(self):
+        self.variable.set(self._offvalue)
+    
+    def expand(self):
+        self.variable.set(self._onvalue)
+    
+    def toggle(self):
+        if self.variable.get() == self._onvalue:
+            self.collapse()
+        else:
+            self.expand()
+    
+    def _collapse(self):
         if self.collapsed:
             return
         
@@ -102,22 +104,20 @@ class CollapsedFrame(ttk.Frame):
         self.container.grid_propagate(False)
         self.content_grid_remove()
         self.container.configure(width=width, height=height)
-        self.container.master.event_generate('<<MapChild>>')
     
-    def resume(self):
+    def _expand(self):
         if not self.collapsed:
             return
         
         self._collapsed = False
         self.container.grid_propagate(True)
         self.content_grid()
-        self.container.master.event_generate('<<MapChild>>')
     
-    def toggle(self, *_):
+    def _on_variable_update(self, *_):
         if self.variable.get() == self._onvalue:  # show
-            self.resume()
+            self._expand()
         else:  # hide
-            self.collapse()
+            self._collapse()
 
 
 # =============================================================================
@@ -128,12 +128,14 @@ if __name__ == '__main__':
     
     for orient, labelanchor, sep in [('vertical', 'n', ' '),
                                      ('horizontal', 'w', '\n')]:
-        text = sep.join(['Click', 'me', 'to', 'collapse'])
-        collapsed = CollapsedFrame(root,
-                                   text=text,
-                                   orient=orient,
-                                   labelanchor=labelanchor,
-                                   bootstyle='success-round-toggle')
+        text = sep.join(['Click', 'me', 'to', 'collapse', 'or', 'expand'])
+        collapsed = CollapsedFrame(
+            root,
+            text=text,
+            orient=orient,
+            labelanchor=labelanchor,
+            button_bootstyle='success-round-toggle'
+        )
         collapsed.grid(sticky='w', padx=6, pady=6)
         ttk.Label(collapsed, text='Label 1').pack()
         ttk.Label(collapsed, text='Label 2').pack()

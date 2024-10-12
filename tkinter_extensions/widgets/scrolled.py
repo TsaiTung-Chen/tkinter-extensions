@@ -419,18 +419,22 @@ class _Scrolled:
     
     def rebind_mousewheel(self):
         self.unbind_mousewheel()
-        self._bind_mousewheel()
-    
-    def _bind_mousewheel(self):
+        
+        # Bind mousewheel
         if self._os == 'x11':  # Linux
             seqs = ['<ButtonPress-4>', '<ButtonPress-5>']
         else:
             seqs = ['<MouseWheel>']
         funcs = [self._mousewheel_scroll] * len(seqs)
-        bind_recursively(self, seqs, funcs, add=True, key='scroll')
+        bind_recursively(
+            self, seqs, funcs,
+            add=True,
+            key='scrolled-wheel',
+            skip_toplevel=True
+        )
     
     def unbind_mousewheel(self):
-        unbind_recursively(self, key='scroll')
+        unbind_recursively(self, key='scrolled-wheel')
     
     def _on_configure(self, event=None):
         if not self._builtin_method:
@@ -445,7 +449,19 @@ class _Scrolled:
             if not self.vbar:
                 self.cropper.configure(height=self.winfo_reqheight())
     
-    def _on_map_child(self, event=None):
+    def _on_map_child(self, event):
+        # Rebind the mapchild callback to all descendants
+        for child in event.widget.winfo_children():
+            unbind_recursively(child, key='scrolled-mapchild')
+            bind_recursively(
+                child,
+                '<<MapChild>>',
+                self._on_map_child,
+                add=True,
+                key='scrolled-mapchild',
+                skip_toplevel=True
+            )
+        
         if self.container.winfo_ismapped():
             self._on_map(event)
     
@@ -664,10 +680,12 @@ class _CanvasBasedScrolled:
             "vbootstyle": vbootstyle,
             "scroll_sensitivity": scroll_sensitivity
         }
+        
+        # [master [ScrolledCanvas [self]]]
         self._canvas = ScrolledCanvas(master, fill=True, **canvas_kw)
         super().__init__(self._canvas, **kwargs)
         self._id = self._canvas.create_window(0, 0, anchor='nw', window=self)
-        self.bind('<<MapChild>>', self._on_map_child)
+        self.bind('<<MapChild>>', self._on_map_child, add=True)
         
         redirect_layout_managers(self, self._canvas, orig_prefix='content_')
     
@@ -679,8 +697,8 @@ class _CanvasBasedScrolled:
     def canvas(self) -> ScrolledCanvas:
         return self._canvas  # scrolled canvas
     
-    def _on_map_child(self, event=None):
-        return self.canvas._on_map_child(event)
+    def _on_map_child(self, *args, **kwargs):
+        return self.canvas._on_map_child(*args, **kwargs)
     
     def rebind_mousewheel(self, *args, **kwargs):
         return self.canvas.rebind_mousewheel(*args, **kwargs)

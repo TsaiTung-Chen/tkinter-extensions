@@ -14,21 +14,23 @@ import ttkbootstrap as ttk
 # ---- Classes
 # =============================================================================
 class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
-    def __init__(self,
-                 master,
-                 *args,
-                 window_title: str = '',
-                 dock_callbacks: tuple[Callable | None,
-                                       Callable | None] = (None, None),
-                 undock_callbacks: tuple[Callable | None,
-                                         Callable | None] = (None, None),
-                 undock_button: bool = True,
-                 place_button: bool = True,
-                 **kwargs):
+    def __init__(
+            self,
+            master,
+            *args,
+            window_title: str = '',
+            dock_callbacks: tuple[Callable | None,
+                                  Callable | None] = (None, None),
+            undock_callbacks: tuple[Callable | None,
+                                    Callable | None] = (None, None),
+            undock_button: bool = True,
+            place_button: bool = True,
+            **kwargs
+    ):
         super().__init__(master, *args, **kwargs)
         self._window_title = window_title
-        self._layout_manager = None
-        self._layout_info = None
+        self._layout_manager: Callable | None = None
+        self._layout_info: dict | None = None
         self.set_dock_callbacks(dock_callbacks)
         self.set_undock_callbacks(undock_callbacks)
         
@@ -44,7 +46,7 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
                 self.place_undock_button()
             else:
                 bt._place_info = None
-            self.bind('<<MapChild>>', lambda e: bt.lift())
+            self.bind('<<MapChild>>', lambda e: bt.lift(), add=True)
         else:
             self._undock_button = None
     
@@ -75,6 +77,21 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
         self._undock_callbacks = callbacks
     
     def undock(self):
+        if (manager := self.winfo_manager()) == 'pack':
+            self._layout_manager = self.pack
+            self._layout_info = self.pack_info()
+        elif manager == 'grid':
+            self._layout_manager = self.grid
+            self._layout_info = self.grid_info()
+        elif manager == 'place':
+            self._layout_manager = self.place
+            self._layout_info = self.place_info()
+        else:
+            raise RuntimeError(
+                f"Unknown layout manager: {repr(manager)}. Should be any of "
+                "'pack', 'grid', or 'place'."
+            )
+        
         callback_begin, callback_final = self._undock_callbacks
         
         if callback_begin:
@@ -103,32 +120,11 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
             callback_begin()
         
         tk.Wm.wm_forget(self, self)
-        getattr(self, self._layout_manager)(**self._layout_info)
+        self._layout_manager(**self._layout_info)
         
         if self._undock_button and self._undock_button._place_info:
             self._undock_button.place(**self._undock_button._place_info)
         
         if callback_final:
             callback_final()
-    
-    def pack_configure(self, *args, **kwargs):
-        super().pack_configure(*args, **kwargs)
-        self._layout_manager = 'pack'
-        self._layout_info = self.pack_info()
-    
-    pack = pack_configure
-    
-    def grid_configure(self, *args, **kwargs):
-        super().grid_configure(*args, **kwargs)
-        self._layout_manager = 'grid'
-        self._layout_info = self.grid_info()
-    
-    grid = grid_configure
-    
-    def place_configure(self, *args, **kwargs):
-        super().place_configure(*args, **kwargs)
-        self._layout_manager = 'place'
-        self._layout_info = self.place_info()
-    
-    place = place_configure
 

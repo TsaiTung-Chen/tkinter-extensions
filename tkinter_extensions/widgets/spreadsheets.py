@@ -3508,7 +3508,6 @@ class Book(ttk.Frame):
             padding=6,
             ipadding=2
         )
-        self._sidebar_fm.event_generate('<<MapChild>>')
     
     def _post_switch_menu(self, event, key):
         # Focus on the sheet that has been clicked
