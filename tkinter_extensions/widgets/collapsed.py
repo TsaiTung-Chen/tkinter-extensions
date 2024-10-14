@@ -23,7 +23,8 @@ class CollapsedFrame(ttk.Frame):
                  orient: str = 'vertical',
                  labelwidget: tk.BaseWidget = None,
                  variable: Optional[tk.Variable] = None,
-                 onvalue: str | None = None,
+                 onvalue='__on__',
+                 offvalue='__off__',
                  button_style: Optional[str] = None,
                  button_bootstyle: Optional[str] = None,
                  **kw):
@@ -32,9 +33,9 @@ class CollapsedFrame(ttk.Frame):
         assert isinstance(variable, (tk.Variable, type(None))), variable
         
         self._orient = orient
-        self._onvalue = '__on__' if onvalue is None else onvalue
-        self._offvalue = f'!{onvalue}'
-        self._variable = variable or vrb.StringVar(master, value=onvalue)
+        self._onvalue = onvalue
+        self._offvalue = offvalue
+        self._variable = variable or vrb.StringVar(master, value=self._onvalue)
         self._labelwidget = labelwidget or ttk.Checkbutton(
             master,
             text=text,

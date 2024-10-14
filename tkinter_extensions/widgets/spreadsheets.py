@@ -279,7 +279,7 @@ class Sheet(ttk.Frame):
         self._history = History(max_height=max_undo)
         self._resize_start: dict | None = None
         self._hover: dict[str, str] | None = None
-        self._mouse_selection_id: str | None = None
+        self._motion_select_id: str | None = None
         self._focus_old_value: str | None = None
         self._focus_row = vrb.IntVar(self)
         self._focus_col = vrb.IntVar(self)
@@ -1113,12 +1113,12 @@ class Sheet(ttk.Frame):
         # Move the viewing window if the mouse cursor is moving outside the 
         # canvas
         x, y, canvas = (event.x, event.y, event.widget)
-        heights, widths = self._cell_sizes
-        top_bd, left_bd = (heights[0], widths[0])  # headers' bottom/right
-        right_bd, bottom_bd = self._canvas_size
         if _dxdy is None:
-            dx = (x - left_bd if x < left_bd else max(x - right_bd, 0)) / 10.
-            dy = (y - top_bd if y < top_bd else max(y - bottom_bd, 0)) / 10.
+            heights, widths = self._cell_sizes
+            top_bd, left_bd = (heights[0], widths[0])  # headers' bottom/right
+            right_bd, bottom_bd = self._canvas_size
+            dx = (x - left_bd if x < left_bd else max(x - right_bd, 0)) / 2.
+            dy = (y - top_bd if y < top_bd else max(y - bottom_bd, 0)) / 8.
         else:
             dx, dy = _dxdy
         
@@ -1132,17 +1132,17 @@ class Sheet(ttk.Frame):
         # This function loop will autoscroll the canvas with the (dx, dy) above. 
         # This makes the user, once the first motion event has been triggered, 
         # don't need to continue moving the mouse to trigger the motion events
-        if (funcid := self._mouse_selection_id) is not None:
+        if (funcid := self._motion_select_id) is not None:
             self.after_cancel(funcid)
-        self._mouse_selection_id = self.after(
-            20, self._on_leftbutton_motion, event, (dx, dy)
+        self._motion_select_id = self.after(  # about 30 FPS
+            33, self._on_leftbutton_motion, event, (dx, dy)
         )
     
     def _on_leftbutton_release(self, event=None):
         # Remove the autoscroll function loop
-        if (funcid := self._mouse_selection_id) is not None:
+        if (funcid := self._motion_select_id) is not None:
             self.after_cancel(funcid)
-            self._mouse_selection_id = None
+            self._motion_select_id = None
     
     def _on_double_leftclick(self, event=None):
         assert event.widget == self.canvas, event.widget
