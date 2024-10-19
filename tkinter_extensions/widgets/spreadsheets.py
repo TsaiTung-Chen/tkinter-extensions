@@ -1680,7 +1680,8 @@ class Sheet(ttk.Frame):
             "x": event.x,
             "y": event.y,
             "i": i,
-            "size": self._cell_sizes[axis][_i],
+            "size": self._cell_sizes[axis][_i],  # scaled size
+            "scale": self._scale.get(),
             "step": self._history.step,
             "b1motion": old_b1motion,
             "b1release": old_b1release
@@ -1693,10 +1694,13 @@ class Sheet(ttk.Frame):
     
     def __on_handle_leftbutton_motion(self, event, axis: int):  # resizing
         start = self._resize_start
+        scale = start["scale"]
         if axis == 0:
             size = start["size"] + event.y - start["y"]
         else:
             size = start["size"] + event.x - start["x"]
+        size /= scale  # scaled size => unscaled size
+        start_size = start["size"] / scale  # scaled size => unscaled size
         self.resize_cells(start["i"], axis=axis, N=1, sizes=[size], undo=False)
         
         history = self._history
@@ -1706,7 +1710,7 @@ class Sheet(ttk.Frame):
             forward=lambda: self.resize_cells(
                 start["i"], axis=axis, N=1, sizes=[size], trace='first'),
             backward=lambda: self.resize_cells(
-                start["i"], axis=axis, sizes=[start["size"]], trace='first')
+                start["i"], axis=axis, sizes=[start_size], trace='first')
         )
     
     _on_hhandle_leftbutton_motion = lambda self, event: (
@@ -2328,10 +2332,13 @@ class Sheet(ttk.Frame):
         # Redraw the deleted rows or cols
         if axis == 0:
             self.yview_scroll(0, 'units')
-            self.select_cells(r1=i, r2=i+N-1, trace=trace)
+            rcs = {"r1": i, "r2": i + N - 1}
         else:
             self.xview_scroll(0, 'units')
-            self.select_cells(c1=i, c2=i+N-1, trace=trace)
+            rcs = {"c1": i, "c2": i + N - 1}
+        self.draw_headers(axis=axis)
+        self.draw_cells(**rcs)
+        self.select_cells(**rcs, trace=trace)
         
         if undo:
             self._history.add(
