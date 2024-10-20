@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from typing import Callable, Literal, Generator
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import ttkbootstrap as ttk
 from ttkbootstrap.icons import Icon
 from ttkbootstrap.colorutils import color_to_hsl
@@ -23,7 +23,9 @@ from ttkbootstrap.colorutils import color_to_hsl
 from ..constants import (
     RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK
 )
-from ..utils import get_modifiers, center_window, modify_hsl
+from ..utils import (
+    get_modifiers, center_window, modify_hsl, df_full, df_set_values
+)
 from .. import dialogs
 from .. import variables as vrb
 from .dnd import OrderlyDnDItem, RearrangedDnDContainer
@@ -184,7 +186,7 @@ class Sheet(ttk.Frame):
         return self._vbar
     
     @property
-    def values(self) -> pd.DataFrame:
+    def values(self) -> pl.DataFrame:
         return self._values
     
     @property
@@ -290,7 +292,7 @@ class Sheet(ttk.Frame):
         self._lock_number_of_rows: bool = bool(lock_number_of_rows)
         self._lock_number_of_cols: bool = bool(lock_number_of_cols)
         
-        self._values = pd.DataFrame(np.full(shape, '', dtype=object))
+        self._values = df_full(shape, value='', dtype=pl.String)
         self._cell_sizes = [
             np.full(shape[0] + 1, cell_height, dtype=float),
             np.full(shape[1] + 1, cell_width, dtype=float)
@@ -1818,7 +1820,7 @@ class Sheet(ttk.Frame):
                 canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
                 
                 ## Text
-                if not (text := values.iat[r, c]):
+                if not (text := values[r, c]):
                     try:
                         c = c_generator.send(False)  # no text => get next `c`
                         continue  # go to next column
@@ -1901,7 +1903,7 @@ class Sheet(ttk.Frame):
         x1, y1 = (x2 - widths[c+1], y2 - heights[r+1])
         x1, x2 = self._canvasx([x1, x2])
         y1, y2 = self._canvasy([y1, y2])
-        old_text:str = self.values.iat[r, c]
+        old_text: str = self.values[r, c]
         
         default_style = self._default_styles["cell"]
         cell_style = {
@@ -1966,12 +1968,12 @@ class Sheet(ttk.Frame):
         assert (c1 is not None) or (c2 is None), (c1, c2)
         
         r_max, c_max = [ s - 1 for s in self.shape ]
-        r1 = 0 if r1 is None else np.clip(r1, 0, r_max)
-        c1 = 0 if c1 is None else np.clip(c1, 0, c_max)
-        r2 = r_max if r2 is None else np.clip(r2, 0, r_max)
-        c2 = c_max if c2 is None else np.clip(c2, 0, c_max)
+        r1 = 0 if r1 is None else int(np.clip(r1, 0, r_max))
+        c1 = 0 if c1 is None else int(np.clip(c1, 0, c_max))
+        r2 = r_max if r2 is None else int(np.clip(r2, 0, r_max))
+        c2 = c_max if c2 is None else int(np.clip(c2, 0, c_max))
         
-        self._selection_rcs:tuple[int, int, int, int] = (r1, c1, r2, c2)
+        self._selection_rcs: tuple[int, int, int, int] = (r1, c1, r2, c2)
         
         return self._selection_rcs
     
@@ -2074,7 +2076,7 @@ class Sheet(ttk.Frame):
         # Update focus indices and focus value
         self._focus_row.set(r_low)
         self._focus_col.set(c_low)
-        self._focus_value.set(self.values.iat[r_low, c_low])
+        self._focus_value.set(self.values[r_low, c_low])
         
         return self._selection_rcs
     
@@ -2086,18 +2088,20 @@ class Sheet(ttk.Frame):
             direction: str,
             area: str | None = None,
             expand: bool = False
-    ):
+    ) -> tuple[int, int, int, int]:
         assert direction in ('up', 'down', 'left', 'right'), direction
         assert area in ('paragraph', 'all', None), area
         assert isinstance(expand, bool), expand
         
         r1_old, c1_old, r2_old, c2_old = self._selection_rcs
-        rc_max = [ s - 1 for s in self.shape ]
+        n_rows, n_cols = self.shape
+        rc_max = [n_rows - 1, n_cols - 1]
         axis = 0 if direction in ('up', 'down') else 1
         rc1_new = [r1_old, c1_old]
         rc2_old, rc2_new = [r2_old, c2_old], [r2_old, c2_old]
         
         if area == 'all':
+            # Move the last selection to the edge
             rc2_new[axis] = 0 if direction in ('up', 'left') else rc_max[axis]
             
             if not expand:  # single-cell selection
@@ -2110,30 +2114,35 @@ class Sheet(ttk.Frame):
             # paragraph or next paragraph
             
             ## Slice the cell value array to an 1-D DataFrame
-            slices = [r2_old, c2_old]  # [row index, col index]
             if direction in ('up', 'left'):
                 rc_lim = [0, 0]
-                flip = slice(None, None, -1)
-                slices[axis] = slice(None, slices[axis] + 1)
-                values = self.values.iloc[tuple(slices)]
-                i_correction1, i_correction2 = (-1, values.size - 1)
+                if axis == 0:
+                    values = self.values[:r2_old+1, c2_old]
+                else:
+                    values = self.values[r2_old, :c2_old+1]
+                values = values.to_numpy().ravel()[::-1]  # flip
+                correction1, correction2 = (-1, values.size - 1)
             else:  # down or right
                 rc_lim = rc_max
-                flip = slice(None, None, None)
-                i_correction1, i_correction2 = (1, slices[axis])
-                slices[axis] = slice(slices[axis], None)
-                values = self.values.iloc[tuple(slices)]
+                correction1 = 1
+                if axis == 0:
+                    correction2 = r2_old
+                    values = self.values[r2_old:, c2_old]
+                else:
+                    correction2 = c2_old
+                    values = self.values[r2_old, c2_old:]
+                values = values.to_numpy().ravel()
             
-            # Find the nearset nonempty cell that in the same paragraph or next
-            # paragraph
-            diff = np.diff((values[flip] != '').astype(int))
+            ## Find the nearset nonempty cell that in the same paragraph or next
+            #  paragraph
+            diff = np.diff((values != '').astype(int))
             vary_at = np.flatnonzero(diff)
             if vary_at.size and (vary_at[0] == 0) and (diff[0] == -1):
                 vary_at = vary_at[1:]
             
             if vary_at.size:  # found
                 rc2_new[axis] = (vary_at[0] if diff[vary_at[0]] == -1
-                    else vary_at[0] + 1) * i_correction1 + i_correction2
+                    else vary_at[0] + 1) * correction1 + correction2
             else:  # not found
                 rc2_new[axis] = rc_lim[axis]
             
@@ -2144,7 +2153,7 @@ class Sheet(ttk.Frame):
         
         # Move the last selection by 1 step
         step = -1 if direction in ('up', 'left') else +1
-        rc2_new[axis] = np.clip(rc2_old[axis] + step, 0, rc_max[axis])
+        rc2_new[axis] = int(np.clip(rc2_old[axis] + step, 0, rc_max[axis]))
         
         if not expand:  # single-cell selection
             rc1_new = rc2_new
@@ -2361,7 +2370,7 @@ class Sheet(ttk.Frame):
             *,
             axis: int,
             N: int = 1,
-            df: pd.DataFrame | None = None,
+            df: pl.DataFrame | None = None,
             sizes: np.ndarray | None = None,
             styles=None,
             dialog: bool = False,
@@ -2393,15 +2402,9 @@ class Sheet(ttk.Frame):
             N = int(N)
         assert N >= 1, N
         
-        # Create a dataframe containing the new values (a 2-D dataframe)
         new_shape = list(old_shape)
         new_shape[axis] = N
         new_shape = tuple(new_shape)
-        if df is None:
-            new_df = pd.DataFrame(np.full(new_shape, '', dtype=object))
-        else:
-            assert np.shape(df) == new_shape, (df, new_shape)
-            new_df = pd.DataFrame(df)
         
         # Create a list of new sizes (a 1-D list)
         if sizes is None:
@@ -2420,16 +2423,30 @@ class Sheet(ttk.Frame):
             assert np.shape(styles) == new_shape, styles
             new_styles = np.asarray(styles)
         
-        # Insert the new values
-        if axis == 0:
-            leading, trailing = old_df.iloc[:i, :], old_df.iloc[i:, :]
+        # Create a dataframe containing the new values (a 2-D dataframe)
+        if df is None:
+            inserted_df = df_full(new_shape, '', dtype=pl.String)
         else:
-            leading, trailing = old_df.iloc[:, :i], old_df.iloc[:, i:]
-        self._values = pd.concat(
-            [leading, new_df, trailing],
-            axis=axis,
-            ignore_index=True,
-            copy=False
+            assert isinstance(df, pl.DataFrame), (type(df), df)
+            assert np.shape(df) == new_shape, (df, new_shape)
+            inserted_df = df
+        
+        # Extract the leading and trailing partitions
+        if axis == 0:  # new rows
+            orient = 'vertical'
+            leading, trailing = old_df[:i, :], old_df[i:, :]
+        else:  # new columns
+            orient = 'horizontal'
+            leading, trailing = old_df[:, :i], old_df[:, i:]
+            col_names = map(str, range(old_df.shape[axis] + N))
+            leading = leading.rename(lambda _: next(col_names))
+            inserted_df = inserted_df.rename(lambda _: next(col_names))
+            trailing = trailing.rename(lambda _: next(col_names))
+        
+        # Insert the new values
+        self._values = pl.concat(
+            [leading, inserted_df, trailing],
+            how=orient
         )
         
         # Insert the new sizes
@@ -2489,14 +2506,21 @@ class Sheet(ttk.Frame):
         assert N >= 1, N
         
         # Delete the values
+        old_df = self.values
         idc = np.arange(i, i+N)
-        idc_2d = (idc, slice(None)) if axis == 0 else (slice(None), idc)
-        deleted_df = self.values.iloc[idc_2d].copy()
-        self.values.drop(idc, axis=axis, inplace=True)
         if axis == 0:
-            self.values.index = range(self.shape[axis])
+            orient = 'vertical'
+            idc_2d = (idc, slice(None))
+            leading, trailing = old_df[:i, :], old_df[i+N:, :]
         else:
-            self.values.columns = range(self.shape[axis])
+            orient = 'horizontal'
+            idc_2d = (slice(None), idc)
+            leading, trailing = old_df[:, :i], old_df[:, i+N:]
+            col_names = map(str, range(old_df.shape[axis] - N))
+            leading = leading.rename(lambda _: next(col_names))
+            trailing = trailing.rename(lambda _: next(col_names))
+        deleted_df = self.values[idc_2d].clone()
+        self._values = pl.concat([leading, trailing], how=orient)
         
         # Delete the sizes
         _idc = idc + 1  # add 1 to skip the header size
@@ -2510,17 +2534,17 @@ class Sheet(ttk.Frame):
                                     for dicts in self._cell_styles[idc_2d] ])
         self._cell_styles = np.delete(self._cell_styles, idc, axis=axis)
         
+        
+        # Select cells
         if axis == 0:
             selection_kw = dict(r1=i, r2=i+N-1)
         else:
             selection_kw = dict(c1=i, c2=i+N-1)
-        
-        # Select cells
         self._set_selection(**selection_kw)
         
         # Redraw
         was_reset = False
-        if self.values.empty:  # reset the Sheet if no cells exist
+        if self.values.is_empty():  # reset the Sheet if no cells exist
             self.reset(history=False)
             deleted_sizes = all_sizes
             was_reset = True
@@ -2549,14 +2573,14 @@ class Sheet(ttk.Frame):
             i: int,
             axis: int,
             N: int,
-            df: pd.DataFrame,
+            df: pl.DataFrame,
             sizes: np.ndarray | list[np.ndarray],
             styles: np.ndarray,
             was_reset: bool,
             draw: bool = True,
             trace: str | None = None
     ):
-        assert isinstance(df, pd.DataFrame), df
+        assert isinstance(df, pl.DataFrame), df
         assert isinstance(styles, np.ndarray), styles
         assert isinstance(sizes, (np.ndarray, list)), sizes
         assert styles.shape == df.shape, (styles.shape, df.shape)
@@ -2569,7 +2593,7 @@ class Sheet(ttk.Frame):
             assert sizes[0].shape == (n_rows+1,), (sizes[0].shape, df.shape)
             assert sizes[1].shape == (n_cols+1,), (sizes[1].shape, df.shape)
             
-            self._values = df.copy()
+            self._values = df.clone()
             self._cell_styles = np.array([ [ d.copy() for d in dicts ]
                                            for dicts in styles ])
             self._cell_sizes = [ ss.copy() for ss in sizes ]
@@ -2599,24 +2623,30 @@ class Sheet(ttk.Frame):
             c1: int | None = None,
             r2: int | None = None,
             c2: int | None = None,
-            values: pd.DataFrame | str = '',
+            values: pl.DataFrame | str = '',
             draw: bool = True,
             trace: str | None = None,
             undo: bool = False
     ):
-        assert isinstance(values, (pd.DataFrame, str)), type(values)
-        
-        if isinstance(values, pd.DataFrame):
-            df = values.astype(str)
-        else:
-            df = pd.DataFrame([[values]])
+        assert isinstance(values, (pl.DataFrame, str)), type(values)
         
         r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
-        [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
-        idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
+        rr, cc = sorted([r1, r2]), sorted([c1, c2])
+        r_low, r_high, c_low, c_high = map(int, (*rr, *cc))
         
-        old_values = self.values.iloc[idc].copy()
-        self.values.iloc[idc] = df.copy()
+        if isinstance(values, pl.DataFrame):
+            df = values.cast(pl.String)  # string type
+        else:
+            df = df_full(
+                (r_high-r_low+1, c_high-c_low+1),
+                values,
+                dtype=pl.String
+            )
+        
+        old_values = self.values[r_low:r_high+1, c_low:c_high+1].clone()
+        self._values = df_set_values(
+            self.values, df, r_start=r_low, c_start=c_low
+        )
         
         if draw:
             self.draw_cells(*rcs)
@@ -2625,7 +2655,7 @@ class Sheet(ttk.Frame):
         if undo:
             self._history.add(
                 forward=lambda: self.set_values(
-                    *rcs, values=df.copy(), draw=draw, trace='first'),
+                    *rcs, values=df.clone(), draw=draw, trace='first'),
                 backward=lambda: self.set_values(
                     *rcs, values=old_values, draw=draw, trace='first')
             )
@@ -2649,12 +2679,14 @@ class Sheet(ttk.Frame):
             c1: int | None = None,
             r2: int | None = None,
             c2: int | None = None
-    ) -> pd.DataFrame:
+    ) -> pl.DataFrame:
         r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
-        values_to_copy = self.values.iloc[idc]
-        values_to_copy.to_clipboard(sep='\t', index=False, header=False)
+        values_to_copy = self.values[idc]
+        values_to_copy.write_clipboard(
+            include_header=False, separator='\t', line_terminator='\n'
+        )
         
         return values_to_copy
     
@@ -2925,13 +2957,8 @@ class Sheet(ttk.Frame):
         self.copy_values(*rcs)
     
     def _selection_paste_values(self, undo: bool = False):
-        df = pd.read_clipboard(
-            sep='\t',
-            header=None,
-            index_col=False,
-            dtype=str,
-            skip_blank_lines=False,
-            keep_default_na=False
+        df = pl.read_clipboard(
+            has_header=False, separator='\t', infer_schema=False
         )
         
         n_rows, n_cols = df.shape
@@ -2940,20 +2967,20 @@ class Sheet(ttk.Frame):
         r_end, c_end = (r_start + n_rows - 1, c_start + n_cols - 1)
         
         idc = (slice(r_start, r_end + 1), slice(c_start, c_end + 1))
-        n_rows_exist, n_cols_exist = self.values.iloc[idc].shape
+        n_rows_exist, n_cols_exist = self.values[idc].shape
         r_max, c_max = self.shape  # add new cells at the end
         with self._history.add_sequence() as seq:
             # Add new rows/cols before pasting if the table to be paste has 
             # a larger shape
             if (n_rows_add := n_rows - n_rows_exist):
                 if self._lock_number_of_rows:
-                    df = df.iloc[:-n_rows_add, :]
+                    df = df[:-n_rows_add, :]
                 else:
                     self.insert_cells(
                         r_max, axis=0, N=n_rows_add, draw=False, undo=undo)
             if (n_cols_add := n_cols - n_cols_exist):
                 if self._lock_number_of_cols:
-                    df = df.iloc[:, :-n_cols_add]
+                    df = df[:, :-n_cols_add]
                 else:
                     self.insert_cells(
                         c_max, axis=1, N=n_cols_add, draw=False, undo=undo)
@@ -3662,7 +3689,7 @@ if __name__ == '__main__':
         ss.set_values(4, 3, 4, 3, values='r4, c3 (method 1)')
     
     def _set_value_method2():
-        ss.values.iat[5, 3] = 'R5, C3 (method 2)'
+        ss.values[5, 3] = 'R5, C3 (method 2)'
         ss.draw_cells(5, 3, 5, 3)
     
     ss.after(1000, _set_value_method1)
