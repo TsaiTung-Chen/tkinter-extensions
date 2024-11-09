@@ -13,7 +13,7 @@ from tkinter.font import nametofont
 
 import ttkbootstrap as ttk
 
-from ..constants import MODIFIER_MASKS, COMMAND
+from ..constants import MODIFIER_MASKS, COMMAND, MOUSESCROLL
 from ..utils import (defer,
                      bind_recursively,
                      unbind_recursively,
@@ -24,28 +24,28 @@ from ..utils import (defer,
 class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
     def __init__(self,
                  master=None,
-                 autohide=True,
+                 autohide: bool = True,
                  autohide_ms: int = 300,
                  command=None,
                  **kwargs):
         super().__init__(master, command=command, **kwargs)
-        self.autohide = autohide
-        self._autohide_ms = autohide_ms
+        self.autohide: bool = bool(autohide)
+        self._autohide_ms: int = int(autohide_ms)
         self._manager = None
-        self._last_func = dict()
+        self._last_func: dict = {"name": 'hide', "id": None}
     
     @property
     def autohide(self) -> bool:
         return self._autohide
     
     @autohide.setter
-    def autohide(self, auto: bool):
+    def autohide(self, auto: bool | None):
         if auto is not None:
             self._autohide = bool(auto)
     
     @property
     def hidden(self):
-        return self._last_func.get("name", None) == 'hide'
+        return self._last_func["name"] == 'hide'
     
     @property
     def all_visible(self):
@@ -60,8 +60,10 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
         if self.autohide and (not self.hidden) and self.all_visible:
             self.hide(after_ms=self._autohide_ms)
     
-    def show(self, after_ms: int = -1, autohide=None):
-        assert self._manager, self._manager
+    def show(self, after_ms: int = -1, autohide: bool | None = None):
+        if self._manager is None:
+            self._manager = self.winfo_manager()
+        assert self._manager == 'grid', self._manager
         
         self.autohide = autohide
         id_ = time.time()
@@ -72,28 +74,26 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
         else:
             self.after(after_ms, self._show, id_)
     
-    def hide(self, after_ms: int = -1, autohide=None):
+    def hide(self, after_ms: int = -1, autohide: bool | None = None):
+        if self._manager is None:
+            self._manager = self.winfo_manager()
+        assert self._manager == 'grid', self._manager
+        
         self.autohide = autohide
-        self._manager = manager = self._manager or self.winfo_manager()
-        if not manager:
-            return
-        
-        assert manager == 'grid', (self, manager)
-        
         id_ = time.time()
-        
         self._last_func = {"name": 'hide', "id": id_}
+        
         if after_ms < 0:
             self._hide(id_)
         else:
             self.after(after_ms, self._hide, id_)
     
     def _show(self, id_):
-        if self._last_func.get("id", None) == id_:
+        if self._last_func == {"name": 'show', "id": id_}:
             self.grid()
     
     def _hide(self, id_):
-        if self._last_func.get("id", None) == id_:
+        if self._last_func == {"name": 'hide', "id": id_}:
             self.grid_remove()
 
 
@@ -292,22 +292,24 @@ class _Scrolled:
     
     _scrollbar_padding = (0, 1)
     
-    def __init__(self,
-                 master=None,
-                 scroll_orient: Optional[str] = 'both',
-                 autohide=True,
-                 hbootstyle='round',
-                 vbootstyle='round',
-                 scroll_sensitivity: Union[float,
-                                           tuple[float, float],
-                                           list[float, float]] = 1.,
-                 builtin_method=False,
-                 **kwargs):
+    def __init__(
+            self,
+            master=None,
+            scroll_orient: str | None = 'both',
+            autohide: bool = True,
+            hbootstyle='round',
+            vbootstyle='round',
+            scroll_sensitivities: float
+                                  | tuple[float, float]
+                                  | list[float, float] = 1.,
+            builtin_method=False,
+            **kwargs
+    ):
         valid_orients = ('vertical', 'horizontal', 'both', None)
         assert scroll_orient in valid_orients, (valid_orients, scroll_orient)
         self._builtin_method = builtin_method
         self._scroll_orient = scroll_orient
-        self.scroll_sensitivity = scroll_sensitivity
+        self.set_scroll_sensitivities(scroll_sensitivities)
         
         # Outer frame (container)
         self._container = container = ttk.Frame(
@@ -381,21 +383,32 @@ class _Scrolled:
     def vbar(self) -> Union[AutoHiddenScrollbar, None]:
         return self._vbar
     
-    @property
-    def scroll_sensitivity(self) -> tuple[float]:
-        return self._scroll_sensitivity
-    
-    @scroll_sensitivity.setter
-    def scroll_sensitivity(
+    def set_scroll_sensitivities(
             self,
-            sens: Union[float, tuple[float, float], list[float, float]]
-    ):
+            sens: float | tuple[float, float] | list[float, float] | None = None
+    ) -> tuple[float, float]:
         assert isinstance(sens, (float, tuple, list)), sens
         
         try:
-            self._scroll_sensitivity = _, _ = tuple( float(s) for s in sens )
+            self._scroll_sensitivities = _, _ = tuple( float(s) for s in sens )
         except TypeError:
-            self._scroll_sensitivity = (float(sens), float(sens))
+            self._scroll_sensitivities = (float(sens), float(sens))
+        
+        return self._scroll_sensitivities
+    
+    def set_autohide_scrollbars(
+            self, enable: bool | None = None
+    ) -> tuple[bool, bool]:
+        
+        states = tuple()
+        if self.hbar:
+            self.hbar.autohide = enable
+            states += (self.hbar.autohide,)
+        if self.vbar:
+            self.vbar.autohide = enable
+            states += (self.vbar.autohide,)
+        
+        return states
     
     def autohide_scrollbars(self, auto: bool = True):
         if self.hbar:
@@ -404,14 +417,14 @@ class _Scrolled:
             self.vbar.autohide = auto
     
     def show_scrollbars(
-            self, after_ms: int = -1, autohide: Optional[bool] = None):
+            self, after_ms: int = -1, autohide: bool | None = None):
         if self.hbar:
             self.hbar.show(after_ms, autohide=autohide)
         if self.vbar:
             self.vbar.show(after_ms, autohide=autohide)
     
     def hide_scrollbars(
-            self, after_ms: int = -1, autohide: Optional[bool] = None):
+            self, after_ms: int = -1, autohide: bool | None = None):
         if self.hbar:
             self.hbar.hide(after_ms, autohide=autohide)
         if self.vbar:
@@ -421,13 +434,9 @@ class _Scrolled:
         self.unbind_mousewheel()
         
         # Bind mousewheel
-        if self._os == 'x11':  # Linux
-            seqs = ['<ButtonPress-4>', '<ButtonPress-5>']
-        else:
-            seqs = ['<MouseWheel>']
-        funcs = [self._mousewheel_scroll] * len(seqs)
+        funcs = [self._mousewheel_scroll] * len(MOUSESCROLL)
         bind_recursively(
-            self, seqs, funcs,
+            self, MOUSESCROLL, funcs,
             add=True,
             key='scrolled-wheel',
             skip_toplevel=True
@@ -480,7 +489,7 @@ class _Scrolled:
         
         x_direction = (event.state & MODIFIER_MASKS["Shift"]) \
             == MODIFIER_MASKS["Shift"]
-        sensitivity = self.scroll_sensitivity[0 if x_direction else 1]
+        sensitivity = self._scroll_sensitivities[0 if x_direction else 1]
         number = -round(delta * sensitivity)
         
         if x_direction:
@@ -663,22 +672,24 @@ class ScrolledCanvas(_Scrolled, tk.Canvas):
 
 
 class _CanvasBasedScrolled:
-    def __init__(self,
-                 master=None,
-                 scroll_orient: Optional[str] = 'both',
-                 autohide=True,
-                 hbootstyle='round',
-                 vbootstyle='round',
-                 scroll_sensitivity: Union[float,
-                                           tuple[float, float],
-                                           list[float, float]] = 1.,
-                 **kwargs):
+    def __init__(
+            self,
+            master=None,
+            scroll_orient: str | None = 'both',
+            autohide: bool = True,
+            hbootstyle='round',
+            vbootstyle='round',
+            scroll_sensitivities: float
+                                  | tuple[float, float]
+                                  | list[float, float] = 1.,
+            **kwargs
+    ):
         canvas_kw = {
             "scroll_orient": scroll_orient,
             "autohide": autohide,
             "hbootstyle": hbootstyle,
             "vbootstyle": vbootstyle,
-            "scroll_sensitivity": scroll_sensitivity
+            "scroll_sensitivities": scroll_sensitivities
         }
         
         # [master [ScrolledCanvas [self]]]

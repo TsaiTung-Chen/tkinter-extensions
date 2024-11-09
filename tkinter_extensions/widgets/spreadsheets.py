@@ -203,11 +203,13 @@ class Sheet(ttk.Frame):
             min_height: int = 10,
             get_style: Callable | None = None,
             max_undo: int | None = 20,
-            autohide_scrollbar: bool = True,
+            autohide_scrollbars: bool = True,
             scrollbar_bootstyle='round',
             lock_number_of_rows: bool = False,
             lock_number_of_cols: bool = False,
-            mousewheel_sensitivity: float = 2.,
+            scroll_sensitivities: float
+                                  | tuple[float, float]
+                                  | list[float, float] = 1.,
             _reset: bool = False,
             **kw
     ):
@@ -223,12 +225,10 @@ class Sheet(ttk.Frame):
         assert cell_width >= 1 and cell_height >= 1, (cell_width, cell_height)
         assert min_width >= 1 and min_height >= 1, (min_width, min_height)
         assert get_style is None or callable(get_style), get_style
-        assert mousewheel_sensitivity >= 0, mousewheel_sensitivity
         
         shape = tuple( int(s) for s in shape )
         cell_width, cell_height = int(cell_width), int(cell_height)
         min_width, min_height = int(min_width), int(min_height)
-        mousewheel_sensitivity = float(mousewheel_sensitivity)
         
         # Stacking order: CornerCanvas > ColCanvas > RowCanvas > CoverFrame
         # > Entry > CellCanvas
@@ -246,7 +246,7 @@ class Sheet(ttk.Frame):
         
         self._hbar = AutoHiddenScrollbar(
             master=self,
-            autohide=autohide_scrollbar,
+            autohide=autohide_scrollbars,
             command=self.xview,
             bootstyle=scrollbar_bootstyle,
             orient='horizontal',
@@ -254,7 +254,7 @@ class Sheet(ttk.Frame):
         self._hbar.grid(row=2, column=0, columnspan=2, sticky='ew', pady=(1, 0))
         self._vbar = AutoHiddenScrollbar(
             master=self,
-            autohide=autohide_scrollbar,
+            autohide=autohide_scrollbars,
             command=self.yview,
             bootstyle=scrollbar_bootstyle,
             orient='vertical',
@@ -263,7 +263,7 @@ class Sheet(ttk.Frame):
         self._cover = ttk.Frame(self)  # covers the entry widget
         self._cover.grid(row=2, column=2, sticky='nesw')  # right bottom corner
         self._cover.lift()
-        self._mousewheel_sensitivity = mousewheel_sensitivity
+        self.set_scroll_sensitivities(scroll_sensitivities)
         
         # Create an invisible background (lowest item) which makes this sheet
         # become the focus if it is clicked
@@ -350,6 +350,43 @@ class Sheet(ttk.Frame):
         self.xview_scroll(0, 'units')
         self.yview_scroll(0, 'units')
         self.focus_set()
+    
+    def set_scroll_sensitivities(
+            self,
+            sens: float | tuple[float, float] | list[float, float] | None = None
+    ) -> tuple[float, float]:
+        assert isinstance(sens, (float, tuple, list)), sens
+        
+        try:
+            self._scroll_sensitivities = _, _ = tuple( float(s) for s in sens )
+        except TypeError:
+            self._scroll_sensitivities = (float(sens), float(sens))
+        
+        return self._scroll_sensitivities
+    
+    def set_autohide_scrollbars(
+            self, enable: bool | None = None
+    ) -> tuple[bool, bool]:
+        if self.hbar:
+            self.hbar.autohide = enable
+        if self.vbar:
+            self.vbar.autohide = enable
+        
+        return (self.hbar.autohide, self.vbar.autohide)
+    
+    def show_scrollbars(
+            self, after_ms: int = -1, autohide: bool | None = None):
+        if self.hbar:
+            self.hbar.show(after_ms, autohide=autohide)
+        if self.vbar:
+            self.vbar.show(after_ms, autohide=autohide)
+    
+    def hide_scrollbars(
+            self, after_ms: int = -1, autohide: bool | None = None):
+        if self.hbar:
+            self.hbar.hide(after_ms, autohide=autohide)
+        if self.vbar:
+            self.vbar.hide(after_ms, autohide=autohide)
     
     def __view(self, axis: int, *args):
         """Update the view from the canvas
@@ -990,9 +1027,13 @@ class Sheet(ttk.Frame):
             delta = event.delta / 120.
         else:  # Mac
             delta = event.delta
-        number = -round(delta * self._mousewheel_sensitivity)
         
-        if event.state & MODIFIER_MASKS["Shift"]:
+        x_direction = (event.state & MODIFIER_MASKS["Shift"]) \
+            == MODIFIER_MASKS["Shift"]
+        sensitivity = self._scroll_sensitivities[0 if x_direction else 1]
+        number = -round(delta * sensitivity * 2.)
+        
+        if x_direction:
             self.xview_scroll(number, 'units')
         else:
             self.yview_scroll(number, 'units')
@@ -3678,22 +3719,22 @@ if __name__ == '__main__':
     
     win = ttk.Toplevel(title='Sheet', position=(100, 100), size=(800, 500))
     
-    ss = Sheet(win, scrollbar_bootstyle='light-round')
-    ss.pack(fill='both', expand=True)
+    sh = Sheet(win, scrollbar_bootstyle='light-round')
+    sh.pack(fill='both', expand=True)
     
-    ss.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)
-    ss.set_backgroundcolors(5, 3, 5, 3, colors='#2A7AD5', undo=True)
-    ss.resize_cells(5, axis=0, sizes=[80], trace=None, undo=True)
+    sh.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)
+    sh.set_backgroundcolors(5, 3, 5, 3, colors='#2A7AD5', undo=True)
+    sh.resize_cells(5, axis=0, sizes=[80], trace=None, undo=True)
     
     def _set_value_method1():
-        ss.set_values(4, 3, 4, 3, values='r4, c3 (method 1)')
+        sh.set_values(4, 3, 4, 3, values='r4, c3 (method 1)')
     
     def _set_value_method2():
-        ss.values[5, 3] = 'R5, C3 (method 2)'
-        ss.draw_cells(5, 3, 5, 3)
+        sh.values[5, 3] = 'R5, C3 (method 2)'
+        sh.draw_cells(5, 3, 5, 3)
     
-    ss.after(1000, _set_value_method1)
-    ss.after(2000, _set_value_method2)
+    sh.after(1000, _set_value_method1)
+    sh.after(2000, _set_value_method2)
     
     
     root.mainloop()
