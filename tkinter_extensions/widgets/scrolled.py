@@ -7,7 +7,6 @@ Created on Mon May 22 22:35:24 2023
 """
 
 import time
-from typing import Optional, Union
 import tkinter as tk
 from tkinter.font import nametofont
 
@@ -374,15 +373,15 @@ class _Scrolled:
         return self._container  # outer frame
     
     @property
-    def cropper(self) -> Union[ttk.Frame, None]:
+    def cropper(self) -> ttk.Frame | None:
         return self._cropper  # inner frame
     
     @property
-    def hbar(self) -> Union[AutoHiddenScrollbar, None]:
+    def hbar(self) -> AutoHiddenScrollbar | None:
         return self._hbar
     
     @property
-    def vbar(self) -> Union[AutoHiddenScrollbar, None]:
+    def vbar(self) -> AutoHiddenScrollbar | None:
         return self._vbar
     
     def set_scroll_sensitivities(
@@ -517,7 +516,7 @@ class _Scrolled:
         return (content_width + vbar_width + pad_width,
                 content_height + hbar_height + pad_height)
     
-    def set_size(self, width: Optional[int] = None, height: Optional[int] = None):
+    def set_size(self, width: int | None = None, height: int | None = None):
         if self._builtin_method:
             raise TypeError("This function does not support built-in methods.")
         
