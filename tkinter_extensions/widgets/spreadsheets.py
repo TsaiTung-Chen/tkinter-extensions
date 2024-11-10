@@ -3347,15 +3347,24 @@ class Book(ttk.Frame):
         if not self.sidebar_hidden:
             return
         
-        self.update_idletasks()
-        self._panedwindow.sashpos(0, self._sidebar_width)
+        autohide = self._sidebar_fm.set_autohide_scrollbars()[1]  # save autohide
+        self._sidebar_fm.set_autohide_scrollbars(False)  # temp disable autohide
+        self.update_idletasks()  # update all widgets
+        self._panedwindow.sashpos(0, self._sidebar_width)  # set the sash position
+        self.update_idletasks()  # update the sash position
+        self._sidebar_fm.set_autohide_scrollbars(autohide)[1]  # restore autohide
     
     def hide_sidebar(self):
         if self.sidebar_hidden:
             return
         
-        self._sidebar_width = self._panedwindow.sashpos(0)
-        self._panedwindow.sashpos(0, 0)
+        self._sidebar_width = self._panedwindow.sashpos(0)  # save width
+        autohide = self._sidebar_fm.set_autohide_scrollbars()[1]  # save autohide
+        self._sidebar_fm.set_autohide_scrollbars(False)  # temp disable autohide
+        self.update_idletasks()  # update all widgets
+        self._panedwindow.sashpos(0, 0)  # set the sash position
+        self.update_idletasks()  # update the sash position
+        self._sidebar_fm.set_autohide_scrollbars(autohide)[1]  # restore autohide
     
     def _get_key(self, index_or_name: int | str) -> str:
         if isinstance(index_or_name, str):  # name input

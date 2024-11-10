@@ -42,8 +42,12 @@ for i in range(2):
     # Note that `panedwindow.sashpos` does not work before the panedwindow and
     # its descendents get a layout manager. Additionally,
     # `widget.update_idletasks` must be called first.
-    tab_pw.update_idletasks()  # update all widgets
+    autohide = left.set_autohide_scrollbars()[1]  # vertical autohide
+    left.set_autohide_scrollbars(False)  # temporarily disable autohide
+    left.update_idletasks()  # update all widgets
     print(tab_pw.sashpos(0, 500))  # set the sash position
+    left.update_idletasks()  # update the sash position
+    left.set_autohide_scrollbars(autohide)  # restore autohide
 
 root.mainloop()
 
