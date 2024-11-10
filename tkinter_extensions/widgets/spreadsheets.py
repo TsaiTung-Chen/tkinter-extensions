@@ -3089,6 +3089,10 @@ class Book(ttk.Frame):
         """
         return self._sheet
     
+    @property
+    def sidebar_hidden(self) -> bool:
+        return self._panedwindow.sashpos(0) <= 0
+    
     def __init__(
             self,
             master,
@@ -3104,13 +3108,12 @@ class Book(ttk.Frame):
         
         
         # Build toolbar
-        self._toolbar = tb = ttk.Frame(self)
+        self._toolbar = ttk.Frame(self)
         self._toolbar.pack(fill='x', padx=9, pady=3)
         
         ## Sidebar button
-        self._sidebar_hidden: bool = True
         self._sidebar_toggle = ttk.Button(
-            tb,
+            self._toolbar,
             style=self._toolbar_bt_style,
             text='[Sidebar]',
             command=self._toggle_sidebar,
@@ -3119,14 +3122,14 @@ class Book(ttk.Frame):
         self._sidebar_toggle.pack(side='left')
         
         ## Separator
-        sep_fm = ttk.Frame(tb, width=3)
+        sep_fm = ttk.Frame(self._toolbar, width=3)
         sep_fm.pack(side='left', fill='y', padx=9, ipady=9)
         sep = ttk.Separator(sep_fm, orient='vertical', takefocus=False)
         sep.place(relx=0.5, y=0, relheight=1.)
         
         ## Undo button
         self._undo_btn = ttk.Button(
-            tb,
+            self._toolbar,
             style=self._toolbar_bt_style,
             text='↺ Undo',
             command=lambda: self.sheet.undo(),
@@ -3136,7 +3139,7 @@ class Book(ttk.Frame):
         
         ## Redo button
         self._redo_btn = ttk.Button(
-            tb,
+            self._toolbar,
             style=self._toolbar_bt_style,
             text='↻ Redo',
             command=lambda: self.sheet.redo(),
@@ -3145,66 +3148,64 @@ class Book(ttk.Frame):
         self._redo_btn.pack(side='left', padx=[5, 0])
         
         ## Zooming optionmenu
-        self._zoom_om = zoom_om = OptionMenu(tb, bootstyle='outline')
+        self._zoom_om = zoom_om = OptionMenu(self._toolbar, bootstyle='outline')
         self._zoom_om.pack(side='right')
         om_style = f'{id(zoom_om)}.{zoom_om["style"]}'
         self._root().style.configure(om_style, padding=[5, 0])
         self._zoom_om.configure(style=om_style)
         
-        zoom_lb = ttk.Label(tb, text='x', bootstyle='primary')
+        zoom_lb = ttk.Label(self._toolbar, text='x', bootstyle='primary')
         zoom_lb.pack(side='right', padx=[5, 2])
         
         # Build inputbar
-        self._inputbar = ib = ttk.Frame(self)
+        self._inputbar = ttk.Frame(self)
         self._inputbar.pack(fill='x', padx=9, pady=[9, 6])
         self._inputbar.grid_columnconfigure(0, minsize=130)
         self._inputbar.grid_columnconfigure(1, weight=1)
         
         ## Row and col labels
-        self._label_fm = label_fm = ttk.Frame(ib)
+        self._label_fm = ttk.Frame(self._inputbar)
         self._label_fm.grid(row=0, column=0, sticky='sw')
         
         font = ('TkDefaultfont', 10)
-        R_label = ttk.Label(label_fm, text='R', font=font)  # prefix R
+        R_label = ttk.Label(self._label_fm, text='R', font=font)  # prefix R
         R_label.pack(side='left')
         
-        self._r_label = r_label = ttk.Label(label_fm, font=font)
+        self._r_label = ttk.Label(self._label_fm, font=font)
         self._r_label.pack(side='left')
         
-        s_label = ttk.Label(label_fm, text=',  ', font=font)  # seperator
+        s_label = ttk.Label(self._label_fm, text=',  ', font=font)  # seperator
         s_label.pack(side='left')
         
-        C_label = ttk.Label(label_fm, text='C', font=font)  # prefix C
+        C_label = ttk.Label(self._label_fm, text='C', font=font)  # prefix C
         C_label.pack(side='left')
         
-        self._c_label = c_label = ttk.Label(label_fm, font=font)
+        self._c_label = ttk.Label(self._label_fm, font=font)
         self._c_label.pack(side='left')
         
         ## Entry
-        self._entry = en = ttk.Entry(ib, style=self._entry_style)
+        self._entry = ttk.Entry(self._inputbar, style=self._entry_style)
         self._entry.grid(row=0, column=1, sticky='nesw', padx=[12, 0])
-        en.bind('<FocusIn>', lambda e: self.sheet._refresh_entry())
-        en.bind('<KeyPress>', lambda e: self.sheet._on_entry_key_press(e))
+        self._entry.bind('<FocusIn>', lambda e: self.sheet._refresh_entry())
+        self._entry.bind(
+            '<KeyPress>', lambda e: self.sheet._on_entry_key_press(e)
+        )
         
         
         # Build sidebar and sheet frame
-        def _init_sidebar(event=None):
-            assert self._sidebar_hidden, self._sidebar_hidden
-            pw.unbind('<Map>')
-            self._toggle_sidebar()
-        
         border_fm = ttk.Frame(self, style=self._border_fm_style, padding=1)
         border_fm.pack(fill='both', expand=True)
         
-        self._panedwindow = pw = ttk.Panedwindow(border_fm, orient='horizontal')
+        self._panedwindow = ttk.Panedwindow(border_fm, orient='horizontal')
         self._panedwindow.pack(fill='both', expand=True)
-        pw.bind('<Map>', _init_sidebar)
         
         ## Sidebar
         self._sidebar_width: int = int(sidebar_width)
-        self._sidebar_fm = sbfm = ScrolledFrame(
-            pw, scroll_orient='vertical', vbootstyle=scrollbar_bootstyle)
-        self._panedwindow.add(sbfm.container)
+        self._sidebar_fm = ScrolledFrame(
+            self._panedwindow,
+            vbootstyle=scrollbar_bootstyle
+        )
+        self._panedwindow.add(self._sidebar_fm.container)
         
         ### Sheet tab container
         def _remove_selected():
@@ -3224,7 +3225,7 @@ class Book(ttk.Frame):
             self._sidebar.remove_selected()
         
         state = 'disabled' if lock_number_of_sheets else 'normal'
-        self._sidebar = sb = RearrangedDnDContainer(sbfm)
+        self._sidebar = RearrangedDnDContainer(self._sidebar_fm)
         self._sidebar.set_rearrange_commands(
             {
                 "label": 'Remove Selected...',
@@ -3243,8 +3244,9 @@ class Book(ttk.Frame):
         self._sidebar.set_dnd_end_callback(self._on_dnd_end)
         
         ## Frame to contain sheets
-        self._sheet_pane = sp = ttk.Frame(pw, padding=[1, 1, 0, 0])
-        self._panedwindow.add(sp)
+        self._sheet_pane = ttk.Frame(self._panedwindow, padding=[1, 1, 0, 0])
+        self._panedwindow.add(self._sheet_pane)
+        self._panedwindow.sashpos(0, 0)  # init the sash position
         
         ### Build the first sheet
         sheet_kw["scrollbar_bootstyle"] = scrollbar_bootstyle
@@ -3257,15 +3259,18 @@ class Book(ttk.Frame):
         }
         self._sheet_kw.update(sheet_kw)
         self._sheet_var = vrb.DoubleVar(self)
-        self._sheet_var.trace_add('write', self._switch_sheet, weak=True)
+        self._sheet_var.trace_add('write', self._select_sheet, weak=True)
         self._sheet: Sheet | None = None
         self._sheets_props: dict[float, list] = dict()
         self._sheets_props = self.insert_sheet(0)
         
         
         # Focus on current sheet if any of the frames or canvas is clicked
-        for widget in [self, tb, ib, R_label, r_label, s_label, C_label, c_label,
-                       sbfm, sbfm.canvas, sb]:
+        for widget in [
+                self, self._toolbar, self._inputbar, R_label, self._r_label,
+                s_label, C_label, self._c_label, self._sidebar_fm,
+                self._sidebar_fm.canvas, self._sidebar
+        ]:
             widget.configure(takefocus=False)
             widget.bind('<ButtonPress-1>', self._focus_on_sheet)
         
@@ -3328,13 +3333,29 @@ class Book(ttk.Frame):
         self.sheet._focus()
     
     def _toggle_sidebar(self):
-        if self._sidebar_hidden:  # show sidebar
-            self._panedwindow.insert(0, self._sidebar_fm.container)
-            self._panedwindow.sashpos(0, self._sidebar_width)
-        else:  # hide sidebar
-            self._sidebar_width = self._panedwindow.sashpos(0)
-            self._panedwindow.forget(0)
-        self._sidebar_hidden = not self._sidebar_hidden
+        if self.sidebar_hidden:  # => show sidebar
+            self.show_sidebar()
+        else:  # => hide sidebar
+            self.hide_sidebar()
+    
+    def show_sidebar(self):
+        """
+        Show the sidebar. Calling this method may not work before `self`
+        get a layout manager. Calling this method right after `self.pack`,
+        `self.grid`, or `self.place` is recommended.
+        """
+        if not self.sidebar_hidden:
+            return
+        
+        self.update_idletasks()
+        self._panedwindow.sashpos(0, self._sidebar_width)
+    
+    def hide_sidebar(self):
+        if self.sidebar_hidden:
+            return
+        
+        self._sidebar_width = self._panedwindow.sashpos(0)
+        self._panedwindow.sashpos(0, 0)
     
     def _get_key(self, index_or_name: int | str) -> str:
         if isinstance(index_or_name, str):  # name input
@@ -3358,7 +3379,7 @@ class Book(ttk.Frame):
         self._zoom_om.configure(textvariable=self.sheet._scale)
         self._zoom_om.set_menu(None, *self.sheet._valid_scales)
     
-    def _switch_sheet(self, *_) -> Sheet:
+    def _select_sheet(self, *_) -> Sheet:
         key = self._sheet_var.get()
         
         old_sheet = self._sheet
@@ -3708,6 +3729,7 @@ if __name__ == '__main__':
     
     book = Book(root, scrollbar_bootstyle='round-light')
     book.pack(fill='both', expand=True)
+    book.show_sidebar()  # show the sidebar after `self.pack`
     
     book.insert_sheet(1, name='index = 1')
     book.insert_sheet(0, name='index = 0')

@@ -30,17 +30,20 @@ for i in range(2):
     nb.add(tab_pw, text=f'Tab {i}')
     nb.select(i)
     
-    left = wid.Sheet(tab_pw)
+    left = wid.ScrolledFrame(tab_pw)
     right = wid.BasePlotter(tab_pw, fig)
     
-    tab_pw.add(left)
+    ttk.Button(left, text='button').pack(fill='x', expand=True)
+    
+    tab_pw.add(left.container)
     tab_pw.add(right)
     
     # Set the sash position
-    left.set_autohide_scrollbars(False)  # disable autohide before `sashpos`
+    # Note that `panedwindow.sashpos` does not work before the panedwindow and
+    # its descendents get a layout manager. Additionally,
+    # `widget.update_idletasks` must be called first.
     tab_pw.update_idletasks()  # update all widgets
-    tab_pw.sashpos(0, 500)  # set the sash position
-    left.set_autohide_scrollbars(True)  # enable autohide after `sashpos`
+    print(tab_pw.sashpos(0, 500))  # set the sash position
 
 root.mainloop()
 

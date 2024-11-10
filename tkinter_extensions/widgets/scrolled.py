@@ -32,7 +32,7 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
         self.autohide: bool = bool(autohide)
         self._autohide_ms: int = int(autohide_ms)
         self._manager = None
-        self._last_func: dict = {"name": 'hide', "id": None}
+        self._last_func: dict = {"name": 'show', "id": None}
     
     @property
     def autohide(self) -> bool:
@@ -52,6 +52,9 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
         return [ float(v) for v in self.get() ] == [0., 1.]
     
     def set(self, first, last):
+        if self._last_func["id"] is None:  # init
+            self.show()
+        
         if self.autohide and self.hidden and (not self.all_visible):
             self.show()
         
@@ -295,7 +298,7 @@ class _Scrolled:
     def __init__(
             self,
             master=None,
-            scroll_orient: str | None = 'both',
+            scroll_orient: str = 'vertical',
             autohide: bool = True,
             hbootstyle='round',
             vbootstyle='round',
@@ -305,10 +308,9 @@ class _Scrolled:
             builtin_method=False,
             **kwargs
     ):
-        valid_orients = ('vertical', 'horizontal', 'both', None)
+        valid_orients = ('vertical', 'horizontal', 'both')
         assert scroll_orient in valid_orients, (valid_orients, scroll_orient)
         self._builtin_method = builtin_method
-        self._scroll_orient = scroll_orient
         self.set_scroll_sensitivities(scroll_sensitivities)
         
         # Outer frame (container)
@@ -400,21 +402,16 @@ class _Scrolled:
             self, enable: bool | None = None
     ) -> tuple[bool, bool]:
         
-        states = tuple()
+        states = [None, None]
         if self.hbar:
             self.hbar.autohide = enable
-            states += (self.hbar.autohide,)
+            states[0] = self.hbar.autohide
+        
         if self.vbar:
             self.vbar.autohide = enable
-            states += (self.vbar.autohide,)
+            states[1] = self.vbar.autohide
         
-        return states
-    
-    def autohide_scrollbars(self, auto: bool = True):
-        if self.hbar:
-            self.hbar.autohide = auto
-        if self.vbar:
-            self.vbar.autohide = auto
+        return tuple(states)
     
     def show_scrollbars(
             self, after_ms: int = -1, autohide: bool | None = None):
@@ -588,8 +585,9 @@ class ScrolledText(_Scrolled, ttk.Text):
 
 
 class ScrolledCanvas(_Scrolled, tk.Canvas):
-    def __init__(self, *args, fill: bool = True, **kwargs):
+    def __init__(self, *args, fill: bool = False, **kwargs):
         assert isinstance(fill, bool), (type(fill), fill)
+        
         self._on_map_child = defer(200)(self._on_map_child)
         super().__init__(*args, builtin_method=True, **kwargs)
         self._fill = fill
@@ -666,7 +664,7 @@ class ScrolledCanvas(_Scrolled, tk.Canvas):
         return (content_width + vbar_width + pad_width,
                 content_height + hbar_height + pad_height)
     
-    def set_size(self, width: Optional[int] = None, height: Optional[int] = None):
+    def set_size(self, width: int | None = None, height: int | None = None):
         self.configure(width=width, height=height)
         self._on_configure()
 
@@ -675,7 +673,7 @@ class _CanvasBasedScrolled:
     def __init__(
             self,
             master=None,
-            scroll_orient: str | None = 'both',
+            scroll_orient: str = 'vertical',
             autohide: bool = True,
             hbootstyle='round',
             vbootstyle='round',
@@ -696,7 +694,7 @@ class _CanvasBasedScrolled:
         self._canvas = ScrolledCanvas(master, fill=True, **canvas_kw)
         super().__init__(self._canvas, **kwargs)
         self._id = self._canvas.create_window(0, 0, anchor='nw', window=self)
-        self.bind('<<MapChild>>', self._on_map_child, add=True)
+        self.bind('<<MapChild>>', self._canvas._on_map_child, add=True)
         
         redirect_layout_managers(self, self._canvas, orig_prefix='content_')
     
@@ -706,10 +704,27 @@ class _CanvasBasedScrolled:
     
     @property
     def canvas(self) -> ScrolledCanvas:
-        return self._canvas  # scrolled canvas
+        return self._canvas  # scrollable canvas
     
-    def _on_map_child(self, *args, **kwargs):
-        return self.canvas._on_map_child(*args, **kwargs)
+    @property
+    def hbar(self) -> ScrolledCanvas:
+        return self._canvas.hbar
+    
+    @property
+    def vbar(self) -> ScrolledCanvas:
+        return self._canvas.vbar
+    
+    def set_scroll_sensitivities(self, *args, **kwargs):
+        return self.canvas.set_scroll_sensitivities(*args, **kwargs)
+    
+    def set_autohide_scrollbars(self, *args, **kwargs):
+        return self.canvas.set_autohide_scrollbars(*args, **kwargs)
+    
+    def show_scrollbars(self, *args, **kwargs):
+        return self.canvas.show_scrollbars(*args, **kwargs)
+    
+    def hide_scrollbars(self, *args, **kwargs):
+        return self.canvas.hide_scrollbars(*args, **kwargs)
     
     def rebind_mousewheel(self, *args, **kwargs):
         return self.canvas.rebind_mousewheel(*args, **kwargs)
