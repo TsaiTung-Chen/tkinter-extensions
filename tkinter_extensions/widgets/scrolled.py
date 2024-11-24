@@ -305,6 +305,7 @@ class _Scrolled:
                                   | tuple[float, float]
                                   | list[float, float] = 1.,
             builtin_method=False,
+            propagate_geometry=True,
             **kwargs
     ):
         valid_orients = ('vertical', 'horizontal', 'both')
@@ -317,6 +318,7 @@ class _Scrolled:
             master=master, relief='flat', borderwidth=0)
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
+        container.grid_propagate(propagate_geometry)
         
         self._cropper = None
         if builtin_method:
@@ -679,6 +681,7 @@ class _CanvasBasedScrolled:
             scroll_sensitivities: float
                                   | tuple[float, float]
                                   | list[float, float] = 1.,
+            propagate_geometry=True,
             **kwargs
     ):
         canvas_kw = {
@@ -686,7 +689,8 @@ class _CanvasBasedScrolled:
             "autohide": autohide,
             "hbootstyle": hbootstyle,
             "vbootstyle": vbootstyle,
-            "scroll_sensitivities": scroll_sensitivities
+            "scroll_sensitivities": scroll_sensitivities,
+            "propagate_geometry": propagate_geometry
         }
         
         # [master [ScrolledCanvas [self]]]
@@ -698,7 +702,7 @@ class _CanvasBasedScrolled:
         redirect_layout_managers(self, self._canvas, orig_prefix='content_')
     
     @property
-    def container(self) -> ScrolledCanvas:
+    def container(self) -> ttk.Frame:
         return self._canvas._container  # outer container
     
     @property
@@ -706,11 +710,11 @@ class _CanvasBasedScrolled:
         return self._canvas  # scrollable canvas
     
     @property
-    def hbar(self) -> ScrolledCanvas:
+    def hbar(self) -> AutoHiddenScrollbar | None:
         return self._canvas.hbar
     
     @property
-    def vbar(self) -> ScrolledCanvas:
+    def vbar(self) -> AutoHiddenScrollbar | None:
         return self._canvas.vbar
     
     def set_scroll_sensitivities(self, *args, **kwargs):
