@@ -24,7 +24,8 @@ from ..constants import (
     RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK
 )
 from ..utils import (
-    get_modifiers, center_window, modify_hsl, df_full, df_set_values
+    get_modifiers, center_window, modify_hsl,
+    df_full, df_set_values, df_concat
 )
 from .. import dialogs
 from .. import variables as vrb
@@ -100,12 +101,15 @@ class History:
     
     def stop_sequence(self):
         assert isinstance(self._sequence, dict), self._sequence
-        sequences = self._sequence
+        forward, backward = self._sequence["forward"], self._sequence["backward"]
+        
+        if forward or backward:
+            self.add(
+                forward=lambda: [ func() for func in forward ],
+                backward=lambda: [ func() for func in backward[::-1] ]
+            )
+        
         self._sequence = None
-        self.add(
-            forward=lambda: [ func() for func in sequences["forward"] ],
-            backward=lambda: [ func() for func in sequences["backward"][::-1] ]
-        )
     
     def pop(self) -> dict[str, list[Callable]]:
         assert self.step > 0, self.step
@@ -196,6 +200,7 @@ class Sheet(ttk.Frame):
     def __init__(
             self,
             master,
+            df: pl.DataFrame | None = None,
             shape: tuple[int, int] | list[int] = (10, 10),
             cell_width: int = 80,
             cell_height: int = 25,
@@ -215,9 +220,10 @@ class Sheet(ttk.Frame):
     ):
         self._init_configs = {
             k: v for k, v in locals().items()
-            if k not in ("self", "kw", "_reset", "__class__")
+            if k not in ('self', 'kw', '_reset', '__class__', 'df')
         }
         self._init_configs.update(kw)
+        
         if not _reset:
             super().__init__(master)
         
@@ -317,6 +323,7 @@ class Sheet(ttk.Frame):
         self._visible_xys: list[tuple[int, int]] = visible_xys
         self._visible_rcs: list[tuple[int, int]] = visible_rcs
         self._gy2s_gx2s: tuple[np.ndarray, np.ndarray] = gyx2s
+        self._selection_rcs: tuple[int, int, int, int] = (-1, -1, -1, -1)
         
         # Create an entry widget
         self._entry = entry = tk.Entry(
@@ -325,8 +332,6 @@ class Sheet(ttk.Frame):
         entry.lower()
         entry.bind('<KeyPress>', self._on_entry_key_press)
         
-        self._selection_rcs: tuple[int, int, int, int] = (-1, -1, -1, -1)
-        self._selection_rcs = self.select_cells(0, 0, 0, 0)
         
         # Bindings
         self.bind('<<ThemeChanged>>', self._on_theme_changed)
@@ -346,9 +351,14 @@ class Sheet(ttk.Frame):
             _canvas.bind('<ButtonRelease-1>', self._on_leftbutton_release)
         canvas.bind('<Double-ButtonPress-1>', self._on_double_leftclick)
         
+        # Update values
+        if df is not None:
+            self.paste_values(0, 0, df, draw=False)
+        
         # Refresh the canvases and scrollbars
         self.xview_scroll(0, 'units')
         self.yview_scroll(0, 'units')
+        self.select_cells(0, 0, 0, 0)
         self.focus_set()
     
     def set_scroll_sensitivities(
@@ -2251,13 +2261,33 @@ class Sheet(ttk.Frame):
         else:
             print('Not forwardable: current step =', history.step)
     
-    def reset(self, history: bool = True):
+    def reset(self):
+        # Destroy children
         for child in self.winfo_children():
             child.destroy()
-        _history: History = self._history
+        
+        # Backup states
+        history: History = self._history
+        scroll_sensitivities = self._scroll_sensitivities
+        hbar_hidden = self.hbar.hidden
+        vbar_hidden = self.vbar.hidden
+        hbar_autohide = self.hbar.autohide if self.hbar else None
+        vbar_autohide = self.vbar.autohide if self.vbar else None
+        
+        # Reinitialize
         self.__init__(_reset=True, **self._init_configs)
-        if not history:  # don't reset (clean up) the history records
-            self._history = _history
+        
+        # Restore the states
+        self._history = history
+        self._scroll_sensitivities = scroll_sensitivities
+        if hbar_hidden:
+            self.hbar.hide(autohide=hbar_autohide)
+        else:
+            self.hbar.show(autohide=hbar_autohide)
+        if vbar_hidden:
+            self.vbar.hide(autohide=vbar_autohide)
+        else:
+            self.vbar.show(autohide=vbar_autohide)
     
     def zoom(self, scale: float = 1.):
         """
@@ -2337,6 +2367,7 @@ class Sheet(ttk.Frame):
                 parent=self,
                 prompt=f'Enter the new {dimension}:',
                 initialvalue=int(unscaled_old_sizes[0]),
+                width=40,
                 position=self._center_window
             )
             if not isinstance(size, int):  # cancelled
@@ -2435,6 +2466,7 @@ class Sheet(ttk.Frame):
                 initialvalue=1,
                 minvalue=1,
                 maxvalue=100000,
+                width=40,
                 position=self._center_window
             )
             if not isinstance(N, int):
@@ -2479,13 +2511,9 @@ class Sheet(ttk.Frame):
         else:  # new columns
             orient = 'horizontal'
             leading, trailing = old_df[:, :i], old_df[:, i:]
-            col_names = map(str, range(old_df.shape[axis] + N))
-            leading = leading.rename(lambda _: next(col_names))
-            inserted_df = inserted_df.rename(lambda _: next(col_names))
-            trailing = trailing.rename(lambda _: next(col_names))
         
         # Insert the new values
-        self._values = pl.concat(
+        self._values = df_concat(
             [leading, inserted_df, trailing],
             how=orient
         )
@@ -2557,11 +2585,8 @@ class Sheet(ttk.Frame):
             orient = 'horizontal'
             idc_2d = (slice(None), idc)
             leading, trailing = old_df[:, :i], old_df[:, i+N:]
-            col_names = map(str, range(old_df.shape[axis] - N))
-            leading = leading.rename(lambda _: next(col_names))
-            trailing = trailing.rename(lambda _: next(col_names))
         deleted_df = self.values[idc_2d].clone()
-        self._values = pl.concat([leading, trailing], how=orient)
+        self._values = df_concat([leading, trailing], how=orient)
         
         # Delete the sizes
         _idc = idc + 1  # add 1 to skip the header size
@@ -2586,7 +2611,7 @@ class Sheet(ttk.Frame):
         # Redraw
         was_reset = False
         if self.values.is_empty():  # reset the Sheet if no cells exist
-            self.reset(history=False)
+            self.reset()
             deleted_sizes = all_sizes
             was_reset = True
         elif draw:
@@ -2719,17 +2744,75 @@ class Sheet(ttk.Frame):
             r1: int | None = None,
             c1: int | None = None,
             r2: int | None = None,
-            c2: int | None = None
+            c2: int | None = None,
+            to_cpliboard: bool = True
     ) -> pl.DataFrame:
         r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
         values_to_copy = self.values[idc]
-        values_to_copy.write_clipboard(
-            include_header=False, separator='\t', line_terminator='\n'
-        )
+        
+        if to_cpliboard:
+            values_to_copy.write_clipboard(
+                include_header=False, separator='\t', line_terminator='\n'
+            )
         
         return values_to_copy
+    
+    def paste_values(
+            self,
+            r: int | None = None,
+            c: int | None = None,
+            df: pl.DataFrame | None = None,
+            draw: bool = True,
+            trace: str | None = None,
+            undo: bool = False
+    ):
+        if df is None:
+            df = pl.read_clipboard(
+                has_header=False, separator='\t', infer_schema=False
+            )
+        
+        n_rows, n_cols = df.shape
+        r1, c1, r2, c2 = self._selection_rcs
+        r_start = min(r1, r2) if r is None else r
+        c_start = min(c1, c2) if c is None else c
+        r_end, c_end = (r_start + n_rows - 1, c_start + n_cols - 1)
+        
+        idc = (slice(r_start, r_end + 1), slice(c_start, c_end + 1))
+        n_rows_exist, n_cols_exist = self.values[idc].shape
+        r_max, c_max = self.shape  # add new cells at the end
+        with self._history.add_sequence() as seq:
+            # Add new rows/cols before pasting if the table to paste has a
+            # larger shape
+            if (n_rows_add := n_rows - n_rows_exist):
+                if self._lock_number_of_rows:
+                    df = df[:-n_rows_add, :]
+                else:
+                    self.insert_cells(
+                        r_max, axis=0, N=n_rows_add, draw=False, undo=undo)
+            if (n_cols_add := n_cols - n_cols_exist):
+                if self._lock_number_of_cols:
+                    df = df[:, :-n_cols_add]
+                else:
+                    self.insert_cells(
+                        c_max, axis=1, N=n_cols_add, draw=False, undo=undo)
+            
+            # Set values
+            self.set_values(
+                r_start, c_start, r_end, c_end,
+                values=df,
+                draw=False,
+                trace=None,
+                undo=undo
+            )
+            
+            if undo:
+                seq["forward"].append(lambda: self.refresh(trace='first'))
+                seq["backward"].insert(0, lambda: self.refresh(trace='first'))
+        
+        if draw:
+            self.refresh(trace=trace)
     
     def set_styles(
             self,
@@ -2998,46 +3081,7 @@ class Sheet(ttk.Frame):
         self.copy_values(*rcs)
     
     def _selection_paste_values(self, undo: bool = False):
-        df = pl.read_clipboard(
-            has_header=False, separator='\t', infer_schema=False
-        )
-        
-        n_rows, n_cols = df.shape
-        r1, c1, r2, c2 = self._selection_rcs
-        r_start, c_start = (min(r1, r2), min(c1, c2))
-        r_end, c_end = (r_start + n_rows - 1, c_start + n_cols - 1)
-        
-        idc = (slice(r_start, r_end + 1), slice(c_start, c_end + 1))
-        n_rows_exist, n_cols_exist = self.values[idc].shape
-        r_max, c_max = self.shape  # add new cells at the end
-        with self._history.add_sequence() as seq:
-            # Add new rows/cols before pasting if the table to be paste has 
-            # a larger shape
-            if (n_rows_add := n_rows - n_rows_exist):
-                if self._lock_number_of_rows:
-                    df = df[:-n_rows_add, :]
-                else:
-                    self.insert_cells(
-                        r_max, axis=0, N=n_rows_add, draw=False, undo=undo)
-            if (n_cols_add := n_cols - n_cols_exist):
-                if self._lock_number_of_cols:
-                    df = df[:, :-n_cols_add]
-                else:
-                    self.insert_cells(
-                        c_max, axis=1, N=n_cols_add, draw=False, undo=undo)
-            
-            # Set values
-            self.set_values(
-                r_start, c_start, r_end, c_end,
-                values=df,
-                draw=False,
-                undo=undo
-            )
-            
-            seq["forward"].append(lambda: self.refresh(trace='first'))
-            seq["backward"].insert(0, lambda: self.refresh(trace='first'))
-        
-        self.refresh()
+        self.paste_values(undo=undo)
     
     def _selection_set_styles(
             self, property_: str, values=None, undo: bool = False):
@@ -3099,7 +3143,16 @@ class Book(ttk.Frame):
             scrollbar_bootstyle='round',
             sidebar_width: int = 150,
             lock_number_of_sheets: bool = False,
-            sheet_kw: dict = {},
+            dfs: dict[str, pl.DataFrame] = {
+                "Sheet 1": df_full((10, 10), '', dtype=pl.String)
+            },
+            sheet_kw: dict = {
+                "shape": (10, 10),
+                "cell_width": 80,
+                "cell_height": 25,
+                "min_width": 20,
+                "min_height": 10
+            },
             **kwargs
     ):
         super().__init__(master, **kwargs)
@@ -3249,21 +3302,14 @@ class Book(ttk.Frame):
         self._panedwindow.add(self._sheet_pane)
         self._panedwindow.sashpos(0, 0)  # init the sash position
         
-        ### Build the first sheet
-        sheet_kw["scrollbar_bootstyle"] = scrollbar_bootstyle
-        self._sheet_kw = {
-            "shape": (10, 10),
-            "cell_width": 80,
-            "cell_height": 25,
-            "min_width": 20,
-            "min_height": 10
-        }
-        self._sheet_kw.update(sheet_kw)
+        ### Build the initial sheet(s)
+        self._sheet_kw = dict(scrollbar_bootstyle=scrollbar_bootstyle, **sheet_kw)
         self._sheet_var = vrb.DoubleVar(self)
         self._sheet_var.trace_add('write', self._select_sheet, weak=True)
         self._sheet: Sheet | None = None
         self._sheets_props: dict[float, list] = dict()
-        self._sheets_props = self.insert_sheet(0)
+        for i, (name, df) in enumerate(dfs.items()):
+            self.insert_sheet(i, name=name, df=df)
         
         
         # Focus on current sheet if any of the frames or canvas is clicked
@@ -3411,7 +3457,7 @@ class Book(ttk.Frame):
         
         return self._sheet
     
-    def _get_unique_name(self, name: str | None = None):
+    def _make_unique_name(self, name: str | None = None):
         assert isinstance(name, (str, type(None))), name
         
         # Check name
@@ -3442,7 +3488,7 @@ class Book(ttk.Frame):
         assert isinstance(name, (str, type(None))), name
         
         sheets_props = self._sheets_props
-        name = self._get_unique_name(name)
+        name = self._make_unique_name(name)
         sheet_kw = self._sheet_kw.copy()
         sheet_kw.update(kwargs)
         
@@ -3563,6 +3609,7 @@ class Book(ttk.Frame):
         
         # Generate a unique key
         while (key := time.time()) in sheets_props:
+            time.sleep(1e-9)
             pass
         
         # Build a new sheet widget and sidebar button
@@ -3682,7 +3729,7 @@ class Book(ttk.Frame):
             return new_name
         
         if auto_rename:
-            new_name = self._get_unique_name(new_name)
+            new_name = self._make_unique_name(new_name)
         
         names = [ props["name"] for props in sheets_props.values() ]
         if new_name in names:
@@ -3705,6 +3752,7 @@ class Book(ttk.Frame):
             title='Rename Sheet',
             prompt=_prompt,
             initialvalue=old_name,
+            width=40,
             position=self._center_window
         )
         if new_name is None:  # cancelled
@@ -3725,10 +3773,12 @@ class Book(ttk.Frame):
 # ---- Main
 # =============================================================================
 if __name__ == '__main__':
-    root = ttk.Window(title='Book (Root)',
-                      themename='morph',
-                      position=(100, 100),
-                      size=(800, 500))
+    root = ttk.Window(
+        title='Book (Root)',
+        themename='morph',
+        position=(100, 100),
+        size=(800, 500)
+    )
     
     
     book = Book(root, scrollbar_bootstyle='round-light')
@@ -3761,7 +3811,6 @@ if __name__ == '__main__':
     
     sh.after(1000, _set_value_method1)
     sh.after(2000, _set_value_method2)
-    
     
     root.mainloop()
 

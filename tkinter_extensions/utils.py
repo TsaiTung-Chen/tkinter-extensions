@@ -454,3 +454,27 @@ def df_set_values(
     
     return new_df
 
+
+def df_concat(
+        dfs: tuple[pl.DataFrame] | list[pl.DataFrame],
+        how: str = 'vertical',
+        names: Iterable[str] | None = None,
+        rechunk: bool = False
+) -> pl.DataFrame:
+    assert isinstance(dfs, (tuple, list)), type(dfs)
+    assert how in ('vertical', 'horizontal'), how
+    
+    if how == 'vertical':
+        return pl.concat(dfs, how=how, rechunk=rechunk)
+    
+    # `how` == 'horizontal'
+    # Rename columns
+    if names is None:
+        n_cols = sum( df.width for df in dfs )
+        names = map(str, range(n_cols))
+    else:
+        names = iter(names)
+    dfs = [ df.rename(lambda _: next(names)) for df in dfs ]
+    
+    return pl.concat(dfs, how=how, rechunk=rechunk)
+
