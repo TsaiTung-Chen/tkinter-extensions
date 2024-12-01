@@ -53,19 +53,22 @@ class History:
     
     def __init__(
             self,
-            max_height: int | None = None,
+            max_height: int,
             callback: Callable | None = None
     ):
-        assert isinstance(max_height, (type(None), int)), max_height
         assert callback is None or callable(callback), callback
-        if isinstance(max_height, int):
-            assert max_height >= 1, max_height
         
         self._callback: Callable | None = callback
         self._sequence: dict[str, list[Callable]] | None = None
         self._stack = {"forward": list(), "backward": list()}
-        self._max_height = max_height
+        self._max_height = self.set_max_height(max_height)
         self._step = 0
+    
+    def set_max_height(self, height: int):
+        assert isinstance(height, int), height
+        assert height >= 1, height
+        self._max_height = height
+        return self._max_height
     
     def reset(self, callback: Callable | None = None):
         self.__init__(callback=callback)
@@ -76,11 +79,10 @@ class History:
         if self._sequence is None:
             forward = self._stack["forward"][:self.step] + [forward]
             backward = self._stack["backward"][:self.step] + [backward]
-            if self._max_height:
-                n = len(forward)
-                forward = forward[-self._max_height:]
-                backward = backward[-self._max_height:]
-                self._step -= (n - len(forward))
+            n = len(forward)
+            forward = forward[-self._max_height:]
+            backward = backward[-self._max_height:]
+            self._step -= (n - len(forward))
             self._step += 1
             self._stack.update(forward=forward, backward=backward)
             if self._callback:
@@ -206,35 +208,19 @@ class Sheet(ttk.Frame):
             cell_height: int = 25,
             min_width: int = 20,
             min_height: int = 10,
+            scale: float = 1.0,
             get_style: Callable | None = None,
-            max_undo: int | None = 20,
-            autohide_scrollbars: bool = True,
-            scrollbar_bootstyle='round',
+            max_undo: int = 20,
             lock_number_of_rows: bool = False,
             lock_number_of_cols: bool = False,
+            autohide_scrollbars: bool = True,
+            scrollbar_bootstyle='round',
             scroll_sensitivities: float
                                   | tuple[float, float]
                                   | list[float, float] = 1.,
-            _reset: bool = False,
             **kw
     ):
-        self._init_configs = {
-            k: v for k, v in locals().items()
-            if k not in ('self', 'kw', '_reset', '__class__', 'df')
-        }
-        self._init_configs.update(kw)
-        
-        if not _reset:
-            super().__init__(master)
-        
-        assert len(shape) == 2 and all( s > 0 for s in shape ), shape
-        assert cell_width >= 1 and cell_height >= 1, (cell_width, cell_height)
-        assert min_width >= 1 and min_height >= 1, (min_width, min_height)
-        assert get_style is None or callable(get_style), get_style
-        
-        shape = tuple( int(s) for s in shape )
-        cell_width, cell_height = int(cell_width), int(cell_height)
-        min_width, min_height = int(min_width), int(min_height)
+        super().__init__(master)
         
         # Stacking order: CornerCanvas > ColCanvas > RowCanvas > CoverFrame
         # > Entry > CellCanvas
@@ -284,46 +270,19 @@ class Sheet(ttk.Frame):
         canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         
         # Init the backend states
-        self._history = History(max_height=max_undo)
-        self._resize_start: dict | None = None
-        self._hover: dict[str, str] | None = None
-        self._motion_select_id: str | None = None
-        self._focus_old_value: str | None = None
-        self._focus_row = vrb.IntVar(self)
-        self._focus_col = vrb.IntVar(self)
-        self._focus_value = tk.StringVar(self)
-        self._prev_scale: float = 1.0
-        self._scale = vrb.DoubleVar(self, value=1.0)
-        self._scale.trace_add('write', self._zoom, weak=True)
-        self._lock_number_of_rows: bool = bool(lock_number_of_rows)
-        self._lock_number_of_cols: bool = bool(lock_number_of_cols)
-        
-        self._values = df_full(shape, value='', dtype=pl.String)
-        self._cell_sizes = [
-            np.full(shape[0] + 1, cell_height, dtype=float),
-            np.full(shape[1] + 1, cell_width, dtype=float)
-        ]
-        self._cell_styles = np.array(
-            [ [ dict() for c in range(shape[1]) ] for r in range(shape[0]) ],
-            dtype=object
-        )  # an array of dictionaries
-        
-        self._get_style = get_style
-        self._default_styles = self._update_default_styles()
-        self._default_cell_shape = shape
-        self._default_cell_sizes = (cell_height, cell_width) = (
-            cell_height, cell_width)
-        self._min_sizes = (min_height, min_width)
-        
-        self.update_idletasks()
-        self._canvas_size = (canvas.winfo_width(), canvas.winfo_height())
-        self._content_size = self._update_content_size()
-        self._view = [(0, 0), (0, 0)]  # x view and y view in pixel
-        gyx2s, visible_xys, visible_rcs = self._update_visible_and_p2s()
-        self._visible_xys: list[tuple[int, int]] = visible_xys
-        self._visible_rcs: list[tuple[int, int]] = visible_rcs
-        self._gy2s_gx2s: tuple[np.ndarray, np.ndarray] = gyx2s
-        self._selection_rcs: tuple[int, int, int, int] = (-1, -1, -1, -1)
+        self.set_states(
+            shape=shape,
+            cell_width=cell_width,
+            cell_height=cell_height,
+            min_width=min_width,
+            min_height=min_height,
+            scale=scale,
+            get_style=get_style,
+            max_undo=max_undo,
+            lock_number_of_rows=lock_number_of_rows,
+            lock_number_of_cols=lock_number_of_cols,
+            draw=False
+        )
         
         # Create an entry widget
         self._entry = entry = tk.Entry(
@@ -331,7 +290,6 @@ class Sheet(ttk.Frame):
         entry.place(x=0, y=0)
         entry.lower()
         entry.bind('<KeyPress>', self._on_entry_key_press)
-        
         
         # Bindings
         self.bind('<<ThemeChanged>>', self._on_theme_changed)
@@ -356,10 +314,91 @@ class Sheet(ttk.Frame):
             self.paste_values(0, 0, df, draw=False)
         
         # Refresh the canvases and scrollbars
-        self.xview_scroll(0, 'units')
-        self.yview_scroll(0, 'units')
-        self.select_cells(0, 0, 0, 0)
+        self.refresh(trace='first')
         self.focus_set()
+    
+    def set_states(
+            self,
+            shape: tuple[int, int] | list[int] = (10, 10),
+            cell_width: int = 80,
+            cell_height: int = 25,
+            min_width: int = 20,
+            min_height: int = 10,
+            scale: float = 1.0,
+            get_style: Callable | None = None,
+            max_undo: int = 20,
+            lock_number_of_rows: bool = False,
+            lock_number_of_cols: bool = False,
+            draw: bool = True
+    ):
+        """
+        Reset the cell sizes, table shape, contents, styles, and lock numbers.
+        """
+        assert len(shape) == 2 and all( s > 0 for s in shape ), shape
+        assert cell_width >= 1 and cell_height >= 1, (cell_width, cell_height)
+        assert min_width >= 1 and min_height >= 1, (min_width, min_height)
+        assert get_style is None or callable(get_style), get_style
+        
+        shape = tuple( int(s) for s in shape )
+        cell_width, cell_height = int(cell_width), int(cell_height)
+        min_width, min_height = int(min_width), int(min_height)
+        
+        # Init the backend states
+        if hasattr(self, '_history'):
+            self._history.set_max_height(max_undo)
+        else:
+            self._history = History(max_height=max_undo)
+        self._lock_number_of_rows: bool = bool(lock_number_of_rows)
+        self._lock_number_of_cols: bool = bool(lock_number_of_cols)
+        
+        self._values = df_full(shape, value='', dtype=pl.String)
+        self._cell_sizes = [
+            np.full(shape[0] + 1, cell_height, dtype=float),
+            np.full(shape[1] + 1, cell_width, dtype=float)
+        ]
+        self._cell_styles = np.array(
+            [ [ dict() for c in range(shape[1]) ] for r in range(shape[0]) ],
+            dtype=object
+        )  # an array of dictionaries
+        
+        self._focus_old_value: str | None = None
+        if not hasattr(self, '_focus_row'):
+            self._focus_row = vrb.IntVar(self)
+        if not hasattr(self, '_focus_col'):
+            self._focus_col = vrb.IntVar(self)
+        if not hasattr(self, '_focus_value'):
+            self._focus_value = tk.StringVar(self)
+        self._prev_scale: float = 1.0
+        if not hasattr(self, '_scale'):
+            self._scale = vrb.DoubleVar(self, value=scale)
+            self._scale.trace_add('write', self._zoom, weak=True)
+        else:
+            self.zoom(scale)
+        
+        self._get_style = get_style
+        self._default_styles = self._update_default_styles()
+        self._default_cell_shape = shape
+        self._default_cell_sizes = (cell_height, cell_width)
+        self._min_sizes = (min_height, min_width)
+        
+        self.update_idletasks()
+        self._canvas_size = (
+            self._canvas.winfo_width(), self._canvas.winfo_height()
+        )
+        self._content_size = self._update_content_size()
+        self._view = [(0, 0), (0, 0)]  # x view and y view in pixel
+        gyx2s, visible_xys, visible_rcs = self._update_visible_and_p2s()
+        self._visible_xys: list[tuple[int, int]] = visible_xys
+        self._visible_rcs: list[tuple[int, int]] = visible_rcs
+        self._gy2s_gx2s: tuple[np.ndarray, np.ndarray] = gyx2s
+        
+        self._selection_rcs: tuple[int, int, int, int] = (0, 0, 0, 0)
+        self._resize_start: dict | None = None
+        self._hover: dict[str, str] | None = None
+        self._motion_select_id: str | None = None
+        
+        if draw:
+            self.refresh(trace='first')
     
     def set_scroll_sensitivities(
             self,
@@ -2261,34 +2300,6 @@ class Sheet(ttk.Frame):
         else:
             print('Not forwardable: current step =', history.step)
     
-    def reset(self):
-        # Destroy children
-        for child in self.winfo_children():
-            child.destroy()
-        
-        # Backup states
-        history: History = self._history
-        scroll_sensitivities = self._scroll_sensitivities
-        hbar_hidden = self.hbar.hidden
-        vbar_hidden = self.vbar.hidden
-        hbar_autohide = self.hbar.autohide if self.hbar else None
-        vbar_autohide = self.vbar.autohide if self.vbar else None
-        
-        # Reinitialize
-        self.__init__(_reset=True, **self._init_configs)
-        
-        # Restore the states
-        self._history = history
-        self._scroll_sensitivities = scroll_sensitivities
-        if hbar_hidden:
-            self.hbar.hide(autohide=hbar_autohide)
-        else:
-            self.hbar.show(autohide=hbar_autohide)
-        if vbar_hidden:
-            self.vbar.hide(autohide=vbar_autohide)
-        else:
-            self.vbar.show(autohide=vbar_autohide)
-    
     def zoom(self, scale: float = 1.):
         """
         Zoom in when `scale` > 1.0 or zoom out when `scale` < 1.0.
@@ -2611,7 +2622,19 @@ class Sheet(ttk.Frame):
         # Redraw
         was_reset = False
         if self.values.is_empty():  # reset the Sheet if no cells exist
-            self.reset()
+            self.set_states(
+                shape=self._default_cell_shape,
+                cell_width=self._default_cell_sizes[1],
+                cell_height=self._default_cell_sizes[0],
+                min_width=self._min_sizes[1],
+                min_height=self._min_sizes[0],
+                get_style=self._get_style,
+                max_undo=self._history._max_height,
+                lock_number_of_rows=self._lock_number_of_rows,
+                lock_number_of_cols=self._lock_number_of_cols,
+                scale=self._scale.get(),
+                draw=draw
+            )
             deleted_sizes = all_sizes
             was_reset = True
         elif draw:
