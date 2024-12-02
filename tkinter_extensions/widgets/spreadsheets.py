@@ -3164,7 +3164,7 @@ class Book(ttk.Frame):
             self,
             master,
             scrollbar_bootstyle='round',
-            sidebar_width: int = 150,
+            sidebar_width: int = 180,
             lock_number_of_sheets: bool = False,
             dfs: dict[str, pl.DataFrame] = {
                 "Sheet 1": df_full((10, 10), '', dtype=pl.String)
@@ -3326,14 +3326,20 @@ class Book(ttk.Frame):
         self._panedwindow.sashpos(0, 0)  # init the sash position
         
         ### Build the initial sheet(s)
-        self._sheet_kw = dict(scrollbar_bootstyle=scrollbar_bootstyle, **sheet_kw)
+        self._sheet_kw: dict = {
+            "shape": (10, 10),
+            "cell_width": 80,
+            "cell_height": 25,
+            "min_width": 20,
+            "min_height": 10
+        }
+        self._sheet_kw.update(scrollbar_bootstyle=scrollbar_bootstyle, **sheet_kw)
         self._sheet_var = vrb.DoubleVar(self)
         self._sheet_var.trace_add('write', self._select_sheet, weak=True)
         self._sheet: Sheet | None = None
         self._sheets_props: dict[float, list] = dict()
         for i, (name, df) in enumerate(dfs.items()):
             self.insert_sheet(i, name=name, df=df)
-        
         
         # Focus on current sheet if any of the frames or canvas is clicked
         for widget in [
