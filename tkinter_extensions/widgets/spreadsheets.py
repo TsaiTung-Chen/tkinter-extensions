@@ -311,7 +311,9 @@ class Sheet(ttk.Frame):
         
         # Update values
         if df is not None:
+            selection_rcs = self._selection_rcs  # backup selection rcs
             self.paste_values(0, 0, df, draw=False)
+            self._selection_rcs = selection_rcs  # restore the selection rcs
         
         # Refresh the canvases and scrollbars
         self.refresh(trace='first')
