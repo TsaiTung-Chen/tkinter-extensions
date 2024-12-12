@@ -7,7 +7,7 @@ Created on Sun Dec 11 19:18:31 2022
 """
 
 from functools import wraps
-from typing import Union, Callable, Iterable
+from typing import Union, Callable
 import tkinter as tk
 from tkinter.font import Font
 from tkinter import Pack, Grid, Place
@@ -15,7 +15,6 @@ from PIL import Image, ImageColor
 from PIL.ImageTk import PhotoImage
 
 import numpy as np
-import polars as pl
 import ttkbootstrap as ttk
 from ttkbootstrap import colorutils
 from ttkbootstrap.utility import scale_size
@@ -383,98 +382,4 @@ def modify_hsl(color, func: Callable, inmodel: str = 'hex', outmodel: str = 'hex
         return colorutils.color_to_hex((h, s, l), model='hsl')
     else:
         return (h, s, l)
-
-
-def df_full(
-        shape: int | tuple[int, int] | list[int],
-        value,
-        dtype=None,
-        names: Iterable[str] | None = None,
-        eager: bool = True
-) -> pl.DataFrame | pl.LazyFrame:
-    if value is None and dtype is None:
-        raise ValueError("`dtype` must not be `None` if `value` is `None`.")
-    
-    if isinstance(shape, (tuple, list)):
-        assert len(shape) in (1, 2), shape
-        if len(shape) == 1:
-            r, c = 1, shape[0]
-        else:
-            r, c = shape
-    else:
-        r, c = 1, shape
-    
-    if names is None:
-        names = map(str, range(c))
-    else:
-        names = iter(names)
-    
-    lazyframe = (
-        pl.LazyFrame(pl.Series(next(names), values=[value], dtype=dtype))  # scalar
-        .select(pl.all().repeat_by(r).flatten())  # repeat in row direction
-        .with_columns( pl.all().alias(name) for name in names )
-         # repeat in col direction
-    )
-    
-    if eager:
-        return lazyframe.collect()
-    return lazyframe
-
-
-def df_set_values(
-        df: pl.DataFrame,
-        values: pl.DataFrame,
-        r_start: int | None = None,
-        c_start: int | None = None,
-        strict: bool = True,
-        rechunk: bool = False
-) -> pl.DataFrame:
-    assert isinstance(df, pl.DataFrame), type(df)
-    
-    n_rows, n_cols = values.shape
-    r_end, c_end = (r_start + n_rows, c_start + n_cols)
-    rslices = [slice(None, r_start), slice(r_start, r_end), slice(r_end, None)]
-    cslices = [slice(None, c_start), slice(c_start, c_end), slice(c_end, None)]
-    
-    dfs = [ [ df[rs, cs] for cs in cslices ] for rs in rslices ]
-    values.columns = dfs[1][1].columns
-    dfs[1][1] = values
-    
-    new_df = pl.concat(
-        [ pl.concat(row_dfs, how='horizontal') for row_dfs in dfs ],
-        how='vertical',
-        rechunk=rechunk
-    )
-    
-    if strict and new_df.shape != df.shape:
-        raise ValueError(
-            "Changing the shape of the DataFrame is disallowed in "
-            "`strict = True` mode."
-        )
-    
-    return new_df
-
-
-def df_concat(
-        dfs: tuple[pl.DataFrame] | list[pl.DataFrame],
-        how: str = 'vertical',
-        names: Iterable[str] | None = None,
-        rechunk: bool = False
-) -> pl.DataFrame:
-    assert isinstance(dfs, (tuple, list)), type(dfs)
-    assert how in ('vertical', 'horizontal'), how
-    
-    if how == 'vertical':
-        return pl.concat(dfs, how=how, rechunk=rechunk)
-    
-    # `how` == 'horizontal'
-    # Rename columns
-    if names is None:
-        n_cols = sum( df.width for df in dfs )
-        names = map(str, range(n_cols))
-    else:
-        names = iter(names)
-    dfs = [ df.rename(lambda _: next(names)) for df in dfs ]
-    
-    return pl.concat(dfs, how=how, rechunk=rechunk)
 

@@ -15,7 +15,6 @@ from contextlib import contextmanager
 from typing import Callable, Literal, Generator
 
 import numpy as np
-import polars as pl
 import ttkbootstrap as ttk
 from ttkbootstrap.icons import Icon
 from ttkbootstrap.colorutils import color_to_hsl
@@ -23,15 +22,48 @@ from ttkbootstrap.colorutils import color_to_hsl
 from ..constants import (
     RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK
 )
-from ..utils import (
-    get_modifiers, center_window, modify_hsl,
-    df_full, df_set_values, df_concat
-)
+from ..utils import get_modifiers, center_window, modify_hsl
 from .. import dialogs
 from .. import variables as vrb
 from .dnd import OrderlyDnDItem, RearrangedDnDContainer
 from .scrolled import AutoHiddenScrollbar, ScrolledFrame
 from ._others import OptionMenu
+# =============================================================================
+# ---- Functions
+# =============================================================================
+def check_string_array(data) -> bool:
+    if not isinstance(data, np.ndarray):
+        raise TypeError(
+            "The `data` must be a `np.ndarray` of Python `str` (`object`) "
+            f"dtype but got {type(data)} type."
+        )
+    elif data.dtype != object:
+        raise TypeError(
+            "The `data` must be a `np.ndarray` of Python `str` (`object`) "
+            f"dtype but got {data.dtype} dtype."
+        )
+    for item in data.flat:
+        if not isinstance(item, str):
+            raise TypeError(
+                "The `data` must be a `np.ndarray` of Python `str` (`object`) "
+                f"dtype but got {data.dtype} dtype."
+            )
+    
+    return True
+
+
+def array_to_string(array: np.ndarray) -> str:
+    check_string_array(array)
+    return '\n'.join( '\t'.join(row) for row in array )
+
+
+def string_to_array(string: str) -> np.ndarray:
+    assert isinstance(string, str), type(string)
+    return np.array(
+        [ row.split('\t') for row in string.split('\n') ], dtype=object
+    )
+
+
 # =============================================================================
 # ---- Classes
 # =============================================================================
@@ -105,13 +137,12 @@ class History:
         assert isinstance(self._sequence, dict), self._sequence
         forward, backward = self._sequence["forward"], self._sequence["backward"]
         
+        self._sequence = None
         if forward or backward:
             self.add(
                 forward=lambda: [ func() for func in forward ],
                 backward=lambda: [ func() for func in backward[::-1] ]
             )
-        
-        self._sequence = None
     
     def pop(self) -> dict[str, list[Callable]]:
         assert self.step > 0, self.step
@@ -192,7 +223,7 @@ class Sheet(ttk.Frame):
         return self._vbar
     
     @property
-    def values(self) -> pl.DataFrame:
+    def values(self) -> np.ndarray:
         return self._values
     
     @property
@@ -202,7 +233,7 @@ class Sheet(ttk.Frame):
     def __init__(
             self,
             master,
-            df: pl.DataFrame | None = None,
+            data: np.ndarray | None = None,
             shape: tuple[int, int] | list[int] = (10, 10),
             cell_width: int = 80,
             cell_height: int = 25,
@@ -310,9 +341,9 @@ class Sheet(ttk.Frame):
         canvas.bind('<Double-ButtonPress-1>', self._on_double_leftclick)
         
         # Update values
-        if df is not None:
+        if data is not None:
             selection_rcs = self._selection_rcs  # backup selection rcs
-            self.paste_values(0, 0, df, draw=False)
+            self.paste_values(0, 0, data, draw=False)
             self._selection_rcs = selection_rcs  # restore the selection rcs
         
         # Refresh the canvases and scrollbars
@@ -353,7 +384,7 @@ class Sheet(ttk.Frame):
         self._lock_number_of_rows: bool = bool(lock_number_of_rows)
         self._lock_number_of_cols: bool = bool(lock_number_of_cols)
         
-        self._values = df_full(shape, value='', dtype=pl.String)
+        self._values = np.full(shape, '', dtype=object)
         self._cell_sizes = [
             np.full(shape[0] + 1, cell_height, dtype=float),
             np.full(shape[1] + 1, cell_width, dtype=float)
@@ -1802,9 +1833,11 @@ class Sheet(ttk.Frame):
             history.pop()
         history.add(
             forward=lambda: self.resize_cells(
-                start["i"], axis=axis, N=1, sizes=[size], trace='first'),
+                start["i"], axis=axis, N=1, sizes=[size], trace='first'
+            ),
             backward=lambda: self.resize_cells(
-                start["i"], axis=axis, sizes=[start_size], trace='first')
+                start["i"], axis=axis, sizes=[start_size], trace='first'
+            )
         )
     
     _on_hhandle_leftbutton_motion = lambda self, event: (
@@ -2032,14 +2065,16 @@ class Sheet(ttk.Frame):
             rcs = (r, c, r, c)
             if (not discard) and (new_value := self._entry.get()) != old_value:
                 # Apply the new value
-                self.set_values(*rcs, values=new_value, draw=False)
+                self.set_values(*rcs, data=new_value, draw=False)
                 self.draw_cells(*rcs)
                  # put draw here to avoid recursive function calls
                 self._history.add(
                     forward=lambda: self.set_values(
-                        *rcs, values=new_value, trace='first'),
+                        *rcs, data=new_value, trace='first'
+                    ),
                     backward=lambda: self.set_values(
-                        *rcs, values=old_value, trace='first')
+                        *rcs, data=old_value, trace='first'
+                    )
                 )
             else:  # Restore the old value
                 self._entry.delete(0, 'end')
@@ -2212,7 +2247,7 @@ class Sheet(ttk.Frame):
                     values = self.values[:r2_old+1, c2_old]
                 else:
                     values = self.values[r2_old, :c2_old+1]
-                values = values.to_numpy().ravel()[::-1]  # flip
+                values = values.ravel()[::-1]  # flip
                 correction1, correction2 = (-1, values.size - 1)
             else:  # down or right
                 rc_lim = rc_max
@@ -2223,7 +2258,7 @@ class Sheet(ttk.Frame):
                 else:
                     correction2 = c2_old
                     values = self.values[r2_old, c2_old:]
-                values = values.to_numpy().ravel()
+                values = values.ravel()
             
             ## Find the nearset nonempty cell that in the same paragraph or next
             #  paragraph
@@ -2437,7 +2472,8 @@ class Sheet(ttk.Frame):
         if undo:
             self._history.add(
                 forward=lambda: self.resize_cells(
-                    i, axis=axis, N=N, sizes=copy.copy(sizes), trace='first'),
+                    i, axis=axis, N=N, sizes=copy.copy(sizes), trace='first'
+                ),
                 backward=lambda: self.resize_cells(
                     i,
                     axis=axis,
@@ -2455,7 +2491,7 @@ class Sheet(ttk.Frame):
             *,
             axis: int,
             N: int = 1,
-            df: pl.DataFrame | None = None,
+            data: np.ndarray | None = None,
             sizes: np.ndarray | None = None,
             styles=None,
             dialog: bool = False,
@@ -2510,26 +2546,20 @@ class Sheet(ttk.Frame):
             new_styles = np.asarray(styles)
         
         # Create a dataframe containing the new values (a 2-D dataframe)
-        if df is None:
-            inserted_df = df_full(new_shape, '', dtype=pl.String)
+        if data is None:
+            inserted_arr = np.full(new_shape, '', dtype=object)
         else:
-            assert isinstance(df, pl.DataFrame), (type(df), df)
-            assert np.shape(df) == new_shape, (df, new_shape)
-            inserted_df = df
+            check_string_array(data)
+            inserted_arr = data
         
         # Extract the leading and trailing partitions
         if axis == 0:  # new rows
-            orient = 'vertical'
             leading, trailing = old_df[:i, :], old_df[i:, :]
         else:  # new columns
-            orient = 'horizontal'
             leading, trailing = old_df[:, :i], old_df[:, i:]
         
         # Insert the new values
-        self._values = df_concat(
-            [leading, inserted_df, trailing],
-            how=orient
-        )
+        self._values = np.concat([leading, inserted_arr, trailing], axis=axis)
         
         # Insert the new sizes
         idc = [i+1] * N  # add 1 to skip the header size
@@ -2561,7 +2591,7 @@ class Sheet(ttk.Frame):
                     i,
                     axis=axis,
                     N=N,
-                    df=None if df is None else df.copy(),
+                    data=None if data is None else data.copy(),
                     sizes=None if sizes is None else copy.copy(sizes),
                     styles=None if styles is None else np.array(
                         [ [ d.copy() for d in dicts] for dicts in styles ]),
@@ -2569,7 +2599,8 @@ class Sheet(ttk.Frame):
                     trace='first'
                 ),
                 backward=lambda: self.delete_cells(
-                    i, axis=axis, N=N, draw=draw, trace='first')
+                    i, axis=axis, N=N, draw=draw, trace='first'
+                )
             )
     
     def delete_cells(
@@ -2591,15 +2622,13 @@ class Sheet(ttk.Frame):
         old_df = self.values
         idc = np.arange(i, i+N)
         if axis == 0:
-            orient = 'vertical'
             idc_2d = (idc, slice(None))
             leading, trailing = old_df[:i, :], old_df[i+N:, :]
         else:
-            orient = 'horizontal'
             idc_2d = (slice(None), idc)
             leading, trailing = old_df[:, :i], old_df[:, i+N:]
-        deleted_df = self.values[idc_2d].clone()
-        self._values = df_concat([leading, trailing], how=orient)
+        deleted_arr = self.values[idc_2d].copy()
+        self._values = np.concat([leading, trailing], axis=axis)
         
         # Delete the sizes
         _idc = idc + 1  # add 1 to skip the header size
@@ -2623,7 +2652,7 @@ class Sheet(ttk.Frame):
         
         # Redraw
         was_reset = False
-        if self.values.is_empty():  # reset the Sheet if no cells exist
+        if self._values.size == 0:  # reset the Sheet if no cells exist
             self.set_states(
                 shape=self._default_cell_shape,
                 cell_width=self._default_cell_sizes[1],
@@ -2645,12 +2674,13 @@ class Sheet(ttk.Frame):
         if undo:
             self._history.add(
                 forward=lambda: self.delete_cells(
-                    i, axis=axis, N=N, draw=draw, trace='first'),
+                    i, axis=axis, N=N, draw=draw, trace='first'
+                ),
                 backward=lambda: self._undo_delete_cells(
                     i,
                     axis=axis,
                     N=N,
-                    df=deleted_df,
+                    data=deleted_arr,
                     sizes=deleted_sizes,
                     styles=deleted_styles,
                     was_reset=was_reset,
@@ -2664,27 +2694,27 @@ class Sheet(ttk.Frame):
             i: int,
             axis: int,
             N: int,
-            df: pl.DataFrame,
+            data: np.ndarray,
             sizes: np.ndarray | list[np.ndarray],
             styles: np.ndarray,
             was_reset: bool,
             draw: bool = True,
             trace: str | None = None
     ):
-        assert isinstance(df, pl.DataFrame), df
+        check_string_array(data)
         assert isinstance(styles, np.ndarray), styles
         assert isinstance(sizes, (np.ndarray, list)), sizes
-        assert styles.shape == df.shape, (styles.shape, df.shape)
+        assert styles.shape == data.shape, (styles.shape, data.shape)
         
         if was_reset:
-            n_rows, n_cols = df.shape
+            n_rows, n_cols = data.shape
             assert isinstance(sizes, list), type(sizes)
             assert len(sizes) == 2, sizes
             assert all( isinstance(ss, np.ndarray) for ss in sizes ), sizes
-            assert sizes[0].shape == (n_rows+1,), (sizes[0].shape, df.shape)
-            assert sizes[1].shape == (n_cols+1,), (sizes[1].shape, df.shape)
+            assert sizes[0].shape == (n_rows+1,), (sizes[0].shape, data.shape)
+            assert sizes[1].shape == (n_cols+1,), (sizes[1].shape, data.shape)
             
-            self._values = df.clone()
+            self._values = data.copy()
             self._cell_styles = np.array([ [ d.copy() for d in dicts ]
                                            for dicts in styles ])
             self._cell_sizes = [ ss.copy() for ss in sizes ]
@@ -2701,7 +2731,7 @@ class Sheet(ttk.Frame):
                 i,
                 axis=axis,
                 N=N,
-                df=df,
+                data=data,
                 sizes=sizes,
                 styles=styles,
                 draw=draw,
@@ -2714,41 +2744,39 @@ class Sheet(ttk.Frame):
             c1: int | None = None,
             r2: int | None = None,
             c2: int | None = None,
-            values: pl.DataFrame | str = '',
+            data: np.ndarray | str = '',
             draw: bool = True,
             trace: str | None = None,
             undo: bool = False
     ):
-        assert isinstance(values, (pl.DataFrame, str)), type(values)
+        assert isinstance(data, str) or check_string_array(data), type(data)
         
         r1, c1, r2, c2 = rcs = self._set_selection(r1, c1, r2, c2)
         rr, cc = sorted([r1, r2]), sorted([c1, c2])
         r_low, r_high, c_low, c_high = map(int, (*rr, *cc))
         
-        if isinstance(values, pl.DataFrame):
-            df = values.cast(pl.String)  # string type
+        if isinstance(data, str):
+            shape = (r_high-r_low+1, c_high-c_low+1)
+            _data = np.full(shape, data, dtype=object)
         else:
-            df = df_full(
-                (r_high-r_low+1, c_high-c_low+1),
-                values,
-                dtype=pl.String
-            )
+            _data = data
         
-        old_values = self.values[r_low:r_high+1, c_low:c_high+1].clone()
-        self._values = df_set_values(
-            self.values, df, r_start=r_low, c_start=c_low
-        )
+        old_data = self.values[r_low:r_high+1, c_low:c_high+1].copy()
+        self._values[r_low:r_high+1, c_low:c_high+1] = _data
         
         if draw:
             self.draw_cells(*rcs)
             self._reselect_cells(trace=trace)
         
         if undo:
+            data = data if isinstance(data, str) else data.copy()
             self._history.add(
                 forward=lambda: self.set_values(
-                    *rcs, values=df.clone(), draw=draw, trace='first'),
+                    *rcs, data=data, draw=draw, trace='first'
+                ),
                 backward=lambda: self.set_values(
-                    *rcs, values=old_values, draw=draw, trace='first')
+                    *rcs, data=old_data, draw=draw, trace='first'
+                )
             )
     
     def erase_values(
@@ -2762,7 +2790,8 @@ class Sheet(ttk.Frame):
             undo: bool = False
     ):
         self.set_values(
-            r1, c1, r2, c2, values='', draw=draw, undo=undo, trace=trace)
+            r1, c1, r2, c2, data='', draw=draw, undo=undo, trace=trace
+        )
     
     def copy_values(
             self,
@@ -2771,34 +2800,38 @@ class Sheet(ttk.Frame):
             r2: int | None = None,
             c2: int | None = None,
             to_cpliboard: bool = True
-    ) -> pl.DataFrame:
+    ) -> np.ndarray:
         r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
-        values_to_copy = self.values[idc]
+        data = self.values[idc]
         
         if to_cpliboard:
-            values_to_copy.write_clipboard(
-                include_header=False, separator='\t', line_terminator='\n'
-            )
+            string = array_to_string(data)
+            self.clipboard_clear()
+            self.clipboard_append(string)
         
-        return values_to_copy
+        return data
     
     def paste_values(
             self,
             r: int | None = None,
             c: int | None = None,
-            df: pl.DataFrame | None = None,
+            data: np.ndarray | None = None,
             draw: bool = True,
             trace: str | None = None,
             undo: bool = False
     ):
-        if df is None:
-            df = pl.read_clipboard(
-                has_header=False, separator='\t', infer_schema=False
-            )
+        if data is None:
+            try:
+                string = self.clipboard_get()
+                data = string_to_array(string)
+            except tk.TclError:
+                return
         
-        n_rows, n_cols = df.shape
+        check_string_array(data)
+        
+        n_rows, n_cols = data.shape
         r1, c1, r2, c2 = self._selection_rcs
         r_start = min(r1, r2) if r is None else r
         c_start = min(c1, c2) if c is None else c
@@ -2812,21 +2845,23 @@ class Sheet(ttk.Frame):
             # larger shape
             if (n_rows_add := n_rows - n_rows_exist):
                 if self._lock_number_of_rows:
-                    df = df[:-n_rows_add, :]
+                    data = data[:-n_rows_add, :]
                 else:
                     self.insert_cells(
-                        r_max, axis=0, N=n_rows_add, draw=False, undo=undo)
+                        r_max, axis=0, N=n_rows_add, draw=False, undo=undo
+                    )
             if (n_cols_add := n_cols - n_cols_exist):
                 if self._lock_number_of_cols:
-                    df = df[:, :-n_cols_add]
+                    data = data[:, :-n_cols_add]
                 else:
                     self.insert_cells(
-                        c_max, axis=1, N=n_cols_add, draw=False, undo=undo)
+                        c_max, axis=1, N=n_cols_add, draw=False, undo=undo
+                    )
             
             # Set values
             self.set_values(
                 r_start, c_start, r_end, c_end,
-                values=df,
+                data=data,
                 draw=False,
                 trace=None,
                 undo=undo
@@ -2918,8 +2953,9 @@ class Sheet(ttk.Frame):
         styles = self._cell_styles[idc]  # an sub array of dictionaries
         
         # Get the old values
-        old_styles = np.array([ [ d.copy() for d in dicts ]
-                                for dicts in styles ])
+        old_styles = np.array(
+            [ [ d.copy() for d in dicts ] for dicts in styles ]
+        )
         
         # Clear the style collections
         for style in styles.flat:
@@ -3168,8 +3204,8 @@ class Book(ttk.Frame):
             scrollbar_bootstyle='round',
             sidebar_width: int = 180,
             lock_number_of_sheets: bool = False,
-            dfs: dict[str, pl.DataFrame] = {
-                "Sheet 1": df_full((10, 10), '', dtype=pl.String)
+            data: dict[str, np.ndarray] = {
+                "Sheet 1": np.full((10, 10), '', dtype=object)
             },
             sheet_kw: dict = {
                 "shape": (10, 10),
@@ -3340,8 +3376,8 @@ class Book(ttk.Frame):
         self._sheet_var.trace_add('write', self._select_sheet, weak=True)
         self._sheet: Sheet | None = None
         self._sheets_props: dict[float, list] = dict()
-        for i, (name, df) in enumerate(dfs.items()):
-            self.insert_sheet(i, name=name, df=df)
+        for i, (name, array) in enumerate(data.items()):
+            self.insert_sheet(i, name=name, data=array)
         
         # Focus on current sheet if any of the frames or canvas is clicked
         for widget in [
@@ -3834,7 +3870,7 @@ if __name__ == '__main__':
     sh.resize_cells(5, axis=0, sizes=[80], trace=None, undo=True)
     
     def _set_value_method1():
-        sh.set_values(4, 3, 4, 3, values='r4, c3 (method 1)')
+        sh.set_values(4, 3, 4, 3, data='r4, c3 (method 1)')
     
     def _set_value_method2():
         sh.values[5, 3] = 'R5, C3 (method 2)'

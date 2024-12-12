@@ -36,7 +36,7 @@ setup(
         'tkinter_extensions',
         'tkinter_extensions.*'
     ]),
-    install_requires=['matplotlib==3.8.*', 'ttkbootstrap', 'polars'],
+    install_requires=['matplotlib==3.8.*', 'ttkbootstrap'],
     python_requires='>=3.10',
     package_data={'': ['*.json']}
 )
