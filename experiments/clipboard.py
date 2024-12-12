@@ -10,7 +10,10 @@ import tkinter as tk
 import numpy as np
 
 
-arr = np.array([['1', '23', '4'], ['5', '67', '8901']], dtype=object)
+arr = np.array(
+    [['1', '23', '4'], ['5', '67', '8901']],
+    dtype=np.dtypes.StringDType
+)
 
 table = '\n'.join( '\t'.join(row) for row in arr )
 

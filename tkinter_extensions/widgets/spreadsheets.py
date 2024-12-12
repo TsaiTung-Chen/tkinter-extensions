@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from typing import Callable, Literal, Generator
 
 import numpy as np
+from numpy.dtypes import StringDType
 import ttkbootstrap as ttk
 from ttkbootstrap.icons import Icon
 from ttkbootstrap.colorutils import color_to_hsl
@@ -28,26 +29,22 @@ from .. import variables as vrb
 from .dnd import OrderlyDnDItem, RearrangedDnDContainer
 from .scrolled import AutoHiddenScrollbar, ScrolledFrame
 from ._others import OptionMenu
+
+DType = StringDType(coerce=False)
 # =============================================================================
 # ---- Functions
 # =============================================================================
-def check_string_array(data) -> bool:
+def check_string_array(data: np.ndarray) -> bool:
     if not isinstance(data, np.ndarray):
         raise TypeError(
-            "The `data` must be a `np.ndarray` of Python `str` (`object`) "
-            f"dtype but got {type(data)} type."
+            f"`data` must be a `np.ndarray` of `{DType}` dtype "
+            f"but got a `{type(data)}` type."
         )
-    elif data.dtype != object:
+    elif not np.issubdtype(data.dtype, DType):
         raise TypeError(
-            "The `data` must be a `np.ndarray` of Python `str` (`object`) "
-            f"dtype but got {data.dtype} dtype."
+            f"`data` must be a `np.ndarray` of `{DType}` dtype "
+            f"but got a `{data.dtype}` dtype."
         )
-    for item in data.flat:
-        if not isinstance(item, str):
-            raise TypeError(
-                "The `data` must be a `np.ndarray` of Python `str` (`object`) "
-                f"dtype but got {data.dtype} dtype."
-            )
     
     return True
 
@@ -60,7 +57,8 @@ def array_to_string(array: np.ndarray) -> str:
 def string_to_array(string: str) -> np.ndarray:
     assert isinstance(string, str), type(string)
     return np.array(
-        [ row.split('\t') for row in string.split('\n') ], dtype=object
+        [ row.split('\t') for row in string.split('\n') ],
+        dtype=DType
     )
 
 
@@ -384,7 +382,7 @@ class Sheet(ttk.Frame):
         self._lock_number_of_rows: bool = bool(lock_number_of_rows)
         self._lock_number_of_cols: bool = bool(lock_number_of_cols)
         
-        self._values = np.full(shape, '', dtype=object)
+        self._values = np.full(shape, '', dtype=DType)
         self._cell_sizes = [
             np.full(shape[0] + 1, cell_height, dtype=float),
             np.full(shape[1] + 1, cell_width, dtype=float)
@@ -2547,10 +2545,10 @@ class Sheet(ttk.Frame):
         
         # Create a dataframe containing the new values (a 2-D dataframe)
         if data is None:
-            inserted_arr = np.full(new_shape, '', dtype=object)
+            inserted_data = np.full(new_shape, '', dtype=DType)
         else:
             check_string_array(data)
-            inserted_arr = data
+            inserted_data = data
         
         # Extract the leading and trailing partitions
         if axis == 0:  # new rows
@@ -2559,7 +2557,11 @@ class Sheet(ttk.Frame):
             leading, trailing = old_df[:, :i], old_df[:, i:]
         
         # Insert the new values
-        self._values = np.concat([leading, inserted_arr, trailing], axis=axis)
+        self._values = np.concat(
+            [leading, inserted_data, trailing],
+            axis=axis,
+            dtype=DType
+        )
         
         # Insert the new sizes
         idc = [i+1] * N  # add 1 to skip the header size
@@ -2627,8 +2629,12 @@ class Sheet(ttk.Frame):
         else:
             idc_2d = (slice(None), idc)
             leading, trailing = old_df[:, :i], old_df[:, i+N:]
-        deleted_arr = self.values[idc_2d].copy()
-        self._values = np.concat([leading, trailing], axis=axis)
+        deleted_data = self.values[idc_2d].copy()
+        self._values = np.concat(
+            [leading, trailing],
+            axis=axis,
+            dtype=DType
+        )
         
         # Delete the sizes
         _idc = idc + 1  # add 1 to skip the header size
@@ -2680,7 +2686,7 @@ class Sheet(ttk.Frame):
                     i,
                     axis=axis,
                     N=N,
-                    data=deleted_arr,
+                    data=deleted_data,
                     sizes=deleted_sizes,
                     styles=deleted_styles,
                     was_reset=was_reset,
@@ -2757,8 +2763,9 @@ class Sheet(ttk.Frame):
         
         if isinstance(data, str):
             shape = (r_high-r_low+1, c_high-c_low+1)
-            _data = np.full(shape, data, dtype=object)
+            _data = np.full(shape, data, dtype=DType)
         else:
+            check_string_array(data)
             _data = data
         
         old_data = self.values[r_low:r_high+1, c_low:c_high+1].copy()
@@ -2893,7 +2900,7 @@ class Sheet(ttk.Frame):
         styles = self._cell_styles[idc]  # an sub array of dictionaries
         
         if not isinstance(values, np.ndarray):  # broadcast
-            values = np.full(styles.shape, values, dtype=object)
+            values = np.full(styles.shape, values, dtype=DType)
         assert values.shape == styles.shape, (values.shape, styles.shape)
         
         # Scale fonts
@@ -3205,7 +3212,7 @@ class Book(ttk.Frame):
             sidebar_width: int = 180,
             lock_number_of_sheets: bool = False,
             data: dict[str, np.ndarray] = {
-                "Sheet 1": np.full((10, 10), '', dtype=object)
+                "Sheet 0": np.full((10, 10), '', dtype=DType)
             },
             sheet_kw: dict = {
                 "shape": (10, 10),
@@ -3874,7 +3881,7 @@ if __name__ == '__main__':
     
     def _set_value_method2():
         sh.values[5, 3] = 'R5, C3 (method 2)'
-        sh.draw_cells(5, 3, 5, 3)
+        sh.draw_cells(5, 3, 5, 3)  # update the GUI
     
     sh.after(1000, _set_value_method1)
     sh.after(2000, _set_value_method2)
