@@ -7,6 +7,8 @@ Created on Sun Dec 11 19:18:31 2022
 """
 
 import sys
+from numpy.dtypes import StringDType
+
 
 PLATFORM = sys.platform
 LEFTCLICK = '<ButtonPress-1>'
@@ -47,4 +49,9 @@ BUILTIN_WIDGETS = [
     'TProgressbar', 'TRadiobutton', 'TScale', 'TScrollbar', 'TSeparator',
     'TSizegrip', 'Treeview'
 ]
+
+STRINGDTYPE = StringDType(coerce=False)
+
+
+del sys, StringDType
 

@@ -15,13 +15,13 @@ from contextlib import contextmanager
 from typing import Callable, Literal, Generator
 
 import numpy as np
-from numpy.dtypes import StringDType
 import ttkbootstrap as ttk
 from ttkbootstrap.icons import Icon
 from ttkbootstrap.colorutils import color_to_hsl
 
 from ..constants import (
-    RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK
+    RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK,
+    STRINGDTYPE
 )
 from ..utils import get_modifiers, center_window, modify_hsl
 from .. import dialogs
@@ -29,20 +29,18 @@ from .. import variables as vrb
 from .dnd import OrderlyDnDItem, RearrangedDnDContainer
 from .scrolled import AutoHiddenScrollbar, ScrolledFrame
 from ._others import OptionMenu
-
-DType = StringDType(coerce=False)
 # =============================================================================
 # ---- Functions
 # =============================================================================
 def check_string_array(data: np.ndarray) -> bool:
     if not isinstance(data, np.ndarray):
         raise TypeError(
-            f"`data` must be a `np.ndarray` of `{DType}` dtype "
+            f"`data` must be a `np.ndarray` of `{STRINGDTYPE}` dtype "
             f"but got a `{type(data)}` type."
         )
-    elif not np.issubdtype(data.dtype, DType):
+    elif not np.issubdtype(data.dtype, STRINGDTYPE):
         raise TypeError(
-            f"`data` must be a `np.ndarray` of `{DType}` dtype "
+            f"`data` must be a `np.ndarray` of `{STRINGDTYPE}` dtype "
             f"but got a `{data.dtype}` dtype."
         )
     
@@ -58,7 +56,7 @@ def string_to_array(string: str) -> np.ndarray:
     assert isinstance(string, str), type(string)
     return np.array(
         [ row.split('\t') for row in string.split('\n') ],
-        dtype=DType
+        dtype=STRINGDTYPE
     )
 
 
@@ -232,7 +230,7 @@ class Sheet(ttk.Frame):
             self,
             master,
             data: np.ndarray | None = None,
-            shape: tuple[int, int] | list[int] = (10, 10),
+            shape: tuple[int, int] | list[int] | None = None,
             cell_width: int = 80,
             cell_height: int = 25,
             min_width: int = 20,
@@ -299,7 +297,16 @@ class Sheet(ttk.Frame):
         canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         
         # Init the backend states
-        self.set_states(
+        if not ((data is None) ^ (shape is None)):
+            raise TypeError(
+                "If `shape` is `None`, `data` must be a numpy array. "
+                "If `shape` is a 2-item tuple or list, `data` must be `None`."
+                f"But got {data} and {shape}."
+            )
+        if shape is None:
+            assert data is not None, data
+            shape = data.shape
+        self._set_states(
             shape=shape,
             cell_width=cell_width,
             cell_height=cell_height,
@@ -309,8 +316,7 @@ class Sheet(ttk.Frame):
             get_style=get_style,
             max_undo=max_undo,
             lock_number_of_rows=lock_number_of_rows,
-            lock_number_of_cols=lock_number_of_cols,
-            draw=False
+            lock_number_of_cols=lock_number_of_cols
         )
         
         # Create an entry widget
@@ -341,26 +347,26 @@ class Sheet(ttk.Frame):
         # Update values
         if data is not None:
             selection_rcs = self._selection_rcs  # backup selection rcs
-            self.paste_values(0, 0, data, draw=False)
+            n_rows, n_cols = data.shape
+            self.set_values(0, 0, n_rows-1, n_cols-1, data=data, draw=False)
             self._selection_rcs = selection_rcs  # restore the selection rcs
         
         # Refresh the canvases and scrollbars
         self.refresh(trace='first')
         self.focus_set()
     
-    def set_states(
+    def _set_states(
             self,
-            shape: tuple[int, int] | list[int] = (10, 10),
-            cell_width: int = 80,
-            cell_height: int = 25,
-            min_width: int = 20,
-            min_height: int = 10,
-            scale: float = 1.0,
-            get_style: Callable | None = None,
-            max_undo: int = 20,
-            lock_number_of_rows: bool = False,
-            lock_number_of_cols: bool = False,
-            draw: bool = True
+            shape: tuple[int, int] | list[int],
+            cell_width: int,
+            cell_height: int,
+            min_width: int,
+            min_height: int,
+            scale: float,
+            get_style: Callable | None,
+            max_undo: int,
+            lock_number_of_rows: bool,
+            lock_number_of_cols: bool
     ):
         """
         Reset the cell sizes, table shape, contents, styles, and lock numbers.
@@ -369,6 +375,8 @@ class Sheet(ttk.Frame):
         assert cell_width >= 1 and cell_height >= 1, (cell_width, cell_height)
         assert min_width >= 1 and min_height >= 1, (min_width, min_height)
         assert get_style is None or callable(get_style), get_style
+        assert isinstance(lock_number_of_rows, bool), lock_number_of_rows
+        assert isinstance(lock_number_of_cols, bool), lock_number_of_cols
         
         shape = tuple( int(s) for s in shape )
         cell_width, cell_height = int(cell_width), int(cell_height)
@@ -379,10 +387,10 @@ class Sheet(ttk.Frame):
             self._history.set_max_height(max_undo)
         else:
             self._history = History(max_height=max_undo)
-        self._lock_number_of_rows: bool = bool(lock_number_of_rows)
-        self._lock_number_of_cols: bool = bool(lock_number_of_cols)
+        self._lock_number_of_rows: bool = lock_number_of_rows
+        self._lock_number_of_cols: bool = lock_number_of_cols
         
-        self._values = np.full(shape, '', dtype=DType)
+        self._values = np.full(shape, '', dtype=STRINGDTYPE)
         self._cell_sizes = [
             np.full(shape[0] + 1, cell_height, dtype=float),
             np.full(shape[1] + 1, cell_width, dtype=float)
@@ -427,9 +435,6 @@ class Sheet(ttk.Frame):
         self._resize_start: dict | None = None
         self._hover: dict[str, str] | None = None
         self._motion_select_id: str | None = None
-        
-        if draw:
-            self.refresh(trace='first')
     
     def set_scroll_sensitivities(
             self,
@@ -447,26 +452,34 @@ class Sheet(ttk.Frame):
     def set_autohide_scrollbars(
             self, enable: bool | None = None
     ) -> tuple[bool, bool]:
-        if self.hbar:
-            self.hbar.autohide = enable
-        if self.vbar:
-            self.vbar.autohide = enable
+        self.hbar.autohide = enable
+        self.vbar.autohide = enable
         
         return (self.hbar.autohide, self.vbar.autohide)
     
-    def show_scrollbars(
-            self, after_ms: int = -1, autohide: bool | None = None):
-        if self.hbar:
-            self.hbar.show(after_ms, autohide=autohide)
-        if self.vbar:
-            self.vbar.show(after_ms, autohide=autohide)
+    def show_scrollbars(self, after_ms: int = -1, autohide: bool | None = None):
+        self.hbar.show(after_ms, autohide=autohide)
+        self.vbar.show(after_ms, autohide=autohide)
     
-    def hide_scrollbars(
-            self, after_ms: int = -1, autohide: bool | None = None):
-        if self.hbar:
-            self.hbar.hide(after_ms, autohide=autohide)
-        if self.vbar:
-            self.vbar.hide(after_ms, autohide=autohide)
+    def hide_scrollbars(self, after_ms: int = -1, autohide: bool | None = None):
+        self.hbar.hide(after_ms, autohide=autohide)
+        self.vbar.hide(after_ms, autohide=autohide)
+    
+    def lock_number_of_rows(self, lock: bool | None = None) -> bool:
+        assert isinstance(lock, (bool, type(None))), lock
+        
+        if lock is not None:
+            self._lock_number_of_rows = lock
+        
+        return self._lock_number_of_rows
+    
+    def lock_number_of_cols(self, lock: bool | None = None) -> bool:
+        assert isinstance(lock, (bool, type(None))), lock
+        
+        if lock is not None:
+            self._lock_number_of_cols = lock
+        
+        return self._lock_number_of_cols
     
     def __view(self, axis: int, *args):
         """Update the view from the canvas
@@ -2545,7 +2558,7 @@ class Sheet(ttk.Frame):
         
         # Create a dataframe containing the new values (a 2-D dataframe)
         if data is None:
-            inserted_data = np.full(new_shape, '', dtype=DType)
+            inserted_data = np.full(new_shape, '', dtype=STRINGDTYPE)
         else:
             check_string_array(data)
             inserted_data = data
@@ -2560,7 +2573,7 @@ class Sheet(ttk.Frame):
         self._values = np.concat(
             [leading, inserted_data, trailing],
             axis=axis,
-            dtype=DType
+            dtype=STRINGDTYPE
         )
         
         # Insert the new sizes
@@ -2633,7 +2646,7 @@ class Sheet(ttk.Frame):
         self._values = np.concat(
             [leading, trailing],
             axis=axis,
-            dtype=DType
+            dtype=STRINGDTYPE
         )
         
         # Delete the sizes
@@ -2659,7 +2672,7 @@ class Sheet(ttk.Frame):
         # Redraw
         was_reset = False
         if self._values.size == 0:  # reset the Sheet if no cells exist
-            self.set_states(
+            self._set_states(
                 shape=self._default_cell_shape,
                 cell_width=self._default_cell_sizes[1],
                 cell_height=self._default_cell_sizes[0],
@@ -2669,11 +2682,12 @@ class Sheet(ttk.Frame):
                 max_undo=self._history._max_height,
                 lock_number_of_rows=self._lock_number_of_rows,
                 lock_number_of_cols=self._lock_number_of_cols,
-                scale=self._scale.get(),
-                draw=draw
+                scale=self._scale.get()
             )
             deleted_sizes = all_sizes
             was_reset = True
+            if draw:
+                self.refresh(trace='first')
         elif draw:
             self.refresh(trace=trace)
         
@@ -2763,7 +2777,7 @@ class Sheet(ttk.Frame):
         
         if isinstance(data, str):
             shape = (r_high-r_low+1, c_high-c_low+1)
-            _data = np.full(shape, data, dtype=DType)
+            _data = np.full(shape, data, dtype=STRINGDTYPE)
         else:
             check_string_array(data)
             _data = data
@@ -2900,7 +2914,7 @@ class Sheet(ttk.Frame):
         styles = self._cell_styles[idc]  # an sub array of dictionaries
         
         if not isinstance(values, np.ndarray):  # broadcast
-            values = np.full(styles.shape, values, dtype=DType)
+            values = np.full(styles.shape, values, dtype=STRINGDTYPE)
         assert values.shape == styles.shape, (values.shape, styles.shape)
         
         # Scale fonts
@@ -3212,7 +3226,7 @@ class Book(ttk.Frame):
             sidebar_width: int = 180,
             lock_number_of_sheets: bool = False,
             data: dict[str, np.ndarray] = {
-                "Sheet 0": np.full((10, 10), '', dtype=DType)
+                "Sheet 0": np.full((10, 10), '', dtype=STRINGDTYPE)
             },
             sheet_kw: dict = {
                 "shape": (10, 10),
@@ -3223,9 +3237,13 @@ class Book(ttk.Frame):
             },
             **kwargs
     ):
+        assert isinstance(lock_number_of_sheets, bool), lock_number_of_sheets
+        assert isinstance(data, dict), data
+        assert isinstance(sheet_kw, dict), sheet_kw
+        
         super().__init__(master, **kwargs)
         self._create_styles()
-        self._lock_number_of_sheets: bool = bool(lock_number_of_sheets)
+        self._lock_number_of_sheets: bool = lock_number_of_sheets
         
         
         # Build toolbar
@@ -3371,20 +3389,19 @@ class Book(ttk.Frame):
         self._panedwindow.sashpos(0, 0)  # init the sash position
         
         ### Build the initial sheet(s)
-        self._sheet_kw: dict = {
-            "shape": (10, 10),
-            "cell_width": 80,
-            "cell_height": 25,
-            "min_width": 20,
-            "min_height": 10
-        }
-        self._sheet_kw.update(scrollbar_bootstyle=scrollbar_bootstyle, **sheet_kw)
+        self._sheet_kw: dict = dict(
+            scrollbar_bootstyle=scrollbar_bootstyle,
+            **sheet_kw
+        )
         self._sheet_var = vrb.DoubleVar(self)
         self._sheet_var.trace_add('write', self._select_sheet, weak=True)
         self._sheet: Sheet | None = None
         self._sheets_props: dict[float, list] = dict()
-        for i, (name, array) in enumerate(data.items()):
-            self.insert_sheet(i, name=name, data=array)
+        if data:
+            for i, (name, array) in enumerate(data.items()):
+                self.insert_sheet(i, name=name, data=array, shape=None)
+        else:
+            self.insert_sheet(0)
         
         # Focus on current sheet if any of the frames or canvas is clicked
         for widget in [
@@ -3538,12 +3555,12 @@ class Book(ttk.Frame):
         sheets_props = self._sheets_props
         names_exist = [ props["name"] for props in sheets_props.values() ]
         if name is None:
-            i, name = (1, 'Sheet 1')
+            i, name = (0, 'Sheet 0')
             while name in names_exist:
                 i += 1
                 name = f'Sheet {i}'
         else:
-            i, prefix = (1, name)
+            i, prefix = (0, name)
             while name in names_exist:
                 i += 1
                 name = prefix + f' ({i})'
@@ -3869,7 +3886,7 @@ if __name__ == '__main__':
     
     win = ttk.Toplevel(title='Sheet', position=(100, 100), size=(800, 500))
     
-    sh = Sheet(win, scrollbar_bootstyle='light-round')
+    sh = Sheet(win, shape=(12, 16), scrollbar_bootstyle='light-round')
     sh.pack(fill='both', expand=True)
     
     sh.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)
