@@ -972,8 +972,8 @@ class RearrangedDnDContainer(DnDContainer):
     def _on_button_clicked(self):
         """
         This method will be called once the rearrangement button is clicked.
-        This will bring up a right-click menu containing some options related
-        to rearrangement.
+        This will bring up a menu containing some options related to 
+        selection and rearrangement.
         """
         rearrange_active = self._rearrange_active
         
@@ -983,10 +983,9 @@ class RearrangedDnDContainer(DnDContainer):
         y = bt.winfo_rooty() + bt.winfo_height()
         
         # Create a right-click menu
-        toggle = 'Done' if rearrange_active else 'Start'
         menu = tk.Menu(self)
         menu.add_command(
-            label=f'{toggle} Rearrangement',
+            label='Done' if rearrange_active else 'Select/Rearrange...',
             command=self.toggle_rearrangement
         )
         

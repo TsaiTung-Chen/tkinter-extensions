@@ -21,7 +21,6 @@ from ttkbootstrap.colorutils import color_to_hsl
 
 from ..constants import (
     RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK,
-    STRINGDTYPE
 )
 from ..utils import get_modifiers, center_window, modify_hsl
 from .. import dialogs
@@ -29,18 +28,20 @@ from .. import variables as vrb
 from .dnd import OrderlyDnDItem, RearrangedDnDContainer
 from .scrolled import AutoHiddenScrollbar, ScrolledFrame
 from ._others import OptionMenu
+
+stringDType = np.dtypes.StringDType(coerce=False)
 # =============================================================================
 # ---- Functions
 # =============================================================================
 def check_string_array(data: np.ndarray) -> bool:
     if not isinstance(data, np.ndarray):
         raise TypeError(
-            f"`data` must be a `np.ndarray` of `{STRINGDTYPE}` dtype "
+            f"`data` must be a `np.ndarray` of `{stringDType}` dtype "
             f"but got a `{type(data)}` type."
         )
-    elif not np.issubdtype(data.dtype, STRINGDTYPE):
+    elif not np.issubdtype(data.dtype, stringDType):
         raise TypeError(
-            f"`data` must be a `np.ndarray` of `{STRINGDTYPE}` dtype "
+            f"`data` must be a `np.ndarray` of `{stringDType}` dtype "
             f"but got a `{data.dtype}` dtype."
         )
     
@@ -56,7 +57,7 @@ def string_to_array(string: str) -> np.ndarray:
     assert isinstance(string, str), type(string)
     return np.array(
         [ row.split('\t') for row in string.split('\n') ],
-        dtype=STRINGDTYPE
+        dtype=stringDType
     )
 
 
@@ -300,7 +301,7 @@ class Sheet(ttk.Frame):
         if not ((data is None) ^ (shape is None)):
             raise TypeError(
                 "If `shape` is `None`, `data` must be a numpy array. "
-                "If `shape` is a 2-item tuple or list, `data` must be `None`."
+                "If `shape` is a 2-item tuple or list, `data` must be `None`. "
                 f"But got {data} and {shape}."
             )
         if shape is None:
@@ -390,7 +391,7 @@ class Sheet(ttk.Frame):
         self._lock_number_of_rows: bool = lock_number_of_rows
         self._lock_number_of_cols: bool = lock_number_of_cols
         
-        self._values = np.full(shape, '', dtype=STRINGDTYPE)
+        self._values = np.full(shape, '', dtype=stringDType)
         self._cell_sizes = [
             np.full(shape[0] + 1, cell_height, dtype=float),
             np.full(shape[1] + 1, cell_width, dtype=float)
@@ -2558,7 +2559,7 @@ class Sheet(ttk.Frame):
         
         # Create a dataframe containing the new values (a 2-D dataframe)
         if data is None:
-            inserted_data = np.full(new_shape, '', dtype=STRINGDTYPE)
+            inserted_data = np.full(new_shape, '', dtype=stringDType)
         else:
             check_string_array(data)
             inserted_data = data
@@ -2573,7 +2574,7 @@ class Sheet(ttk.Frame):
         self._values = np.concat(
             [leading, inserted_data, trailing],
             axis=axis,
-            dtype=STRINGDTYPE
+            dtype=stringDType
         )
         
         # Insert the new sizes
@@ -2646,7 +2647,7 @@ class Sheet(ttk.Frame):
         self._values = np.concat(
             [leading, trailing],
             axis=axis,
-            dtype=STRINGDTYPE
+            dtype=stringDType
         )
         
         # Delete the sizes
@@ -2777,7 +2778,7 @@ class Sheet(ttk.Frame):
         
         if isinstance(data, str):
             shape = (r_high-r_low+1, c_high-c_low+1)
-            _data = np.full(shape, data, dtype=STRINGDTYPE)
+            _data = np.full(shape, data, dtype=stringDType)
         else:
             check_string_array(data)
             _data = data
@@ -2914,7 +2915,7 @@ class Sheet(ttk.Frame):
         styles = self._cell_styles[idc]  # an sub array of dictionaries
         
         if not isinstance(values, np.ndarray):  # broadcast
-            values = np.full(styles.shape, values, dtype=STRINGDTYPE)
+            values = np.full(styles.shape, values, dtype=stringDType)
         assert values.shape == styles.shape, (values.shape, styles.shape)
         
         # Scale fonts
@@ -3226,7 +3227,7 @@ class Book(ttk.Frame):
             sidebar_width: int = 180,
             lock_number_of_sheets: bool = False,
             data: dict[str, np.ndarray] = {
-                "Sheet 0": np.full((10, 10), '', dtype=STRINGDTYPE)
+                "Sheet 0": np.full((10, 10), '', dtype=stringDType)
             },
             sheet_kw: dict = {
                 "shape": (10, 10),
@@ -3400,6 +3401,7 @@ class Book(ttk.Frame):
         if data:
             for i, (name, array) in enumerate(data.items()):
                 self.insert_sheet(i, name=name, data=array, shape=None)
+            self.switch_sheet(0)
         else:
             self.insert_sheet(0)
         

@@ -7,7 +7,6 @@ Created on Sun Dec 11 19:18:31 2022
 """
 
 import sys
-from numpy.dtypes import StringDType
 
 
 PLATFORM = sys.platform
@@ -50,8 +49,6 @@ BUILTIN_WIDGETS = [
     'TSizegrip', 'Treeview'
 ]
 
-STRINGDTYPE = StringDType(coerce=False)
 
-
-del sys, StringDType
+del sys
 
