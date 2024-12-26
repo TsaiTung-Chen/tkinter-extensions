@@ -13,10 +13,12 @@ from tkinter.font import nametofont
 import ttkbootstrap as ttk
 
 from ..constants import MODIFIER_MASKS, COMMAND, MOUSESCROLL
-from ..utils import (defer,
-                     bind_recursively,
-                     unbind_recursively,
-                     redirect_layout_managers)
+from ..utils import (
+    defer,
+    bind_recursively,
+    unbind_recursively,
+    redirect_layout_managers
+)
 # =============================================================================
 # ---- Scrollbar
 # =============================================================================

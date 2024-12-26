@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from typing import Callable, Literal, Generator
 
 import numpy as np
+from numpy.typing import NDArray
 import ttkbootstrap as ttk
 from ttkbootstrap.icons import Icon
 from ttkbootstrap.colorutils import color_to_hsl
@@ -30,10 +31,11 @@ from .scrolled import AutoHiddenScrollbar, ScrolledFrame
 from ._others import OptionMenu
 
 stringDType = np.dtypes.StringDType(coerce=False)
+stringArray = NDArray[stringDType]
 # =============================================================================
 # ---- Functions
 # =============================================================================
-def check_string_array(data: np.ndarray) -> bool:
+def check_string_array(data: stringArray) -> bool:
     if not isinstance(data, np.ndarray):
         raise TypeError(
             f"`data` must be a `np.ndarray` of `{stringDType}` dtype "
@@ -48,17 +50,27 @@ def check_string_array(data: np.ndarray) -> bool:
     return True
 
 
-def array_to_string(array: np.ndarray) -> str:
+def array_to_string(array: stringArray) -> str:
     check_string_array(array)
     return '\n'.join( '\t'.join(row) for row in array )
 
 
-def string_to_array(string: str) -> np.ndarray:
+def string_to_array(string: str) -> stringArray:
     assert isinstance(string, str), type(string)
-    return np.array(
-        [ row.split('\t') for row in string.split('\n') ],
-        dtype=stringDType
-    )
+    
+    # Count the leading and trailing newline characters
+    stripped = string.strip('\n')
+    n_leading = i_nonempty = string.index(stripped)
+    n_trailing = len(string) - len(stripped) - n_leading
+    
+    # Extend the rows having only 1 column of empty string.
+    # This is needed to prevent the resultant array from being non-rectangular
+    lists = [ row.split('\t') for row in string.split('\n') ]
+    empty_row = [''] * len(lists[i_nonempty])
+    for i in [*range(n_leading), *range(-n_trailing, 0)]:
+        lists[i] = empty_row
+    
+    return np.array(lists, dtype=stringDType)
 
 
 # =============================================================================
@@ -220,7 +232,7 @@ class Sheet(ttk.Frame):
         return self._vbar
     
     @property
-    def values(self) -> np.ndarray:
+    def values(self) -> stringArray:
         return self._values
     
     @property
@@ -230,7 +242,7 @@ class Sheet(ttk.Frame):
     def __init__(
             self,
             master,
-            data: np.ndarray | None = None,
+            data: stringArray | None = None,
             shape: tuple[int, int] | list[int] | None = None,
             cell_width: int = 80,
             cell_height: int = 25,
@@ -306,6 +318,7 @@ class Sheet(ttk.Frame):
             )
         if shape is None:
             assert data is not None, data
+            check_string_array(data)
             shape = data.shape
         self._set_states(
             shape=shape,
@@ -396,9 +409,9 @@ class Sheet(ttk.Frame):
             np.full(shape[0] + 1, cell_height, dtype=float),
             np.full(shape[1] + 1, cell_width, dtype=float)
         ]
-        self._cell_styles = np.array(
+        self._cell_styles: NDArray[dict] = np.array(
             [ [ dict() for c in range(shape[1]) ] for r in range(shape[0]) ],
-            dtype=object
+            dtype=dict
         )  # an array of dictionaries
         
         self._focus_old_value: str | None = None
@@ -2503,7 +2516,7 @@ class Sheet(ttk.Frame):
             *,
             axis: int,
             N: int = 1,
-            data: np.ndarray | None = None,
+            data: stringArray | None = None,
             sizes: np.ndarray | None = None,
             styles=None,
             dialog: bool = False,
@@ -2715,9 +2728,9 @@ class Sheet(ttk.Frame):
             i: int,
             axis: int,
             N: int,
-            data: np.ndarray,
+            data: stringArray,
             sizes: np.ndarray | list[np.ndarray],
-            styles: np.ndarray,
+            styles: NDArray[dict],
             was_reset: bool,
             draw: bool = True,
             trace: str | None = None
@@ -2765,7 +2778,7 @@ class Sheet(ttk.Frame):
             c1: int | None = None,
             r2: int | None = None,
             c2: int | None = None,
-            data: np.ndarray | str = '',
+            data: stringArray | str = '',
             draw: bool = True,
             trace: str | None = None,
             undo: bool = False
@@ -2822,7 +2835,7 @@ class Sheet(ttk.Frame):
             r2: int | None = None,
             c2: int | None = None,
             to_cpliboard: bool = True
-    ) -> np.ndarray:
+    ) -> stringArray:
         r1, c1, r2, c2 = self._set_selection(r1, c1, r2, c2)
         [r_low, r_high], [c_low, c_high] = sorted([r1, r2]), sorted([c1, c2])
         idc = (slice(r_low, r_high + 1), slice(c_low, c_high + 1))
@@ -2839,7 +2852,7 @@ class Sheet(ttk.Frame):
             self,
             r: int | None = None,
             c: int | None = None,
-            data: np.ndarray | None = None,
+            data: stringArray | None = None,
             draw: bool = True,
             trace: str | None = None,
             undo: bool = False
@@ -2915,7 +2928,7 @@ class Sheet(ttk.Frame):
         styles = self._cell_styles[idc]  # an sub array of dictionaries
         
         if not isinstance(values, np.ndarray):  # broadcast
-            values = np.full(styles.shape, values, dtype=stringDType)
+            values = np.full(styles.shape, values)
         assert values.shape == styles.shape, (values.shape, styles.shape)
         
         # Scale fonts
@@ -3226,7 +3239,7 @@ class Book(ttk.Frame):
             scrollbar_bootstyle='round',
             sidebar_width: int = 180,
             lock_number_of_sheets: bool = False,
-            data: dict[str, np.ndarray] = {
+            data: dict[str, stringArray] = {
                 "Sheet 0": np.full((10, 10), '', dtype=stringDType)
             },
             sheet_kw: dict = {

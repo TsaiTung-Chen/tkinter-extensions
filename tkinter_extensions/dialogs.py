@@ -8,7 +8,7 @@ Created on Sun Dec 11 19:18:31 2022
 
 import tkinter as tk
 import tkinter.font
-from typing import Union, Callable, Optional
+from typing import Callable
 
 import ttkbootstrap as ttk
 from ttkbootstrap.icons import Icon
@@ -23,16 +23,19 @@ from .widgets import Combobox, WrapLabel
 # ---- Classes
 # =============================================================================
 class _Positioned:
-    def show(self,
-             position: Union[tuple, list, Callable, None] = None,
-             wait: bool = True,
-             callback: Optional[Callable] = None):
+    def show(
+            self,
+            position: tuple | list | Callable | None = None,
+            wait: bool = True,
+            callback: Callable | None = None
+    ):
         #EDITED self._result = None
         self.build()
         self._callback = callback  #EDITED: run callback on destroy
         self._toplevel.wm_resizable(True, True)  #EDITED: make it resizable
         self._destroy_id = self._toplevel.bind(  #EDITED: new binding
-            '<Destroy>', self._on_destroy, add=True)
+            '<Destroy>', self._on_destroy, add=True
+        )
         
         if callable(position):  #EDITED: add support for position function
             position(self._toplevel)
@@ -134,11 +137,13 @@ class ColorChooserDialog(_Positioned, colorchooser.ColorChooserDialog):
 
 
 class FontDialog(_Positioned, dialogs.FontDialog):
-    def __init__(self,
-                 title='Font Selector',
-                 parent=None,
-                 initialvalue: Optional[tk.font.Font] = None,
-                 scale:float=1.):  # actual font size = int(option size * scale)
+    def __init__(
+            self,
+            title='Font Selector',
+            parent=None,
+            initialvalue: tk.font.Font | None = None,
+            scale:float=1.
+    ):  # actual font size = int(option size * scale)
         assert isinstance(initialvalue, (tk.font.Font, type(None))), initialvalue
         assert scale > 0, scale
         assert scale == 1 or hasattr(initialvalue, '_unscaled_size'), scale

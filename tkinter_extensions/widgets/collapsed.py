@@ -7,7 +7,6 @@ Created on Mon May 22 22:35:24 2023
 """
 
 import tkinter as tk
-from typing import Optional
 
 import ttkbootstrap as ttk
 
@@ -17,17 +16,19 @@ from ..utils import redirect_layout_managers
 # ---- Widgets
 # =============================================================================
 class CollapsedFrame(ttk.Frame):
-    def __init__(self,
-                 master=None,
-                 text='',
-                 orient: str = 'vertical',
-                 labelwidget: tk.BaseWidget = None,
-                 variable: Optional[tk.Variable] = None,
-                 onvalue='__on__',
-                 offvalue='__off__',
-                 button_style: Optional[str] = None,
-                 button_bootstyle: Optional[str] = None,
-                 **kw):
+    def __init__(
+            self,
+            master=None,
+            text='',
+            orient: str = 'vertical',
+            labelwidget: tk.BaseWidget = None,
+            variable: tk.Variable | None = None,
+            onvalue='__on__',
+            offvalue='__off__',
+            button_style: str | None = None,
+            button_bootstyle: str | None = None,
+            **kw
+    ):
         assert orient in ('vertical', 'horizontal'), orient
         assert text or labelwidget, (text, labelwidget)
         assert isinstance(variable, (tk.Variable, type(None))), variable

@@ -7,7 +7,6 @@ Created on Mon May 22 22:35:24 2023
 """
 
 import tkinter as tk
-from typing import Union, Optional
 from copy import deepcopy
 from functools import wraps
 from contextlib import contextmanager
@@ -28,7 +27,7 @@ from ._matplotlib_config import RC
 # ---- Functions
 # =============================================================================
 @contextmanager
-def rc_context(rc: Optional[dict] = None, fname=None):
+def rc_context(rc: dict | None = None, fname=None):
     backend_prev = plt.rcParams["backend"]
     try:
         with plt.rc_context(rc, fname):
@@ -37,7 +36,7 @@ def rc_context(rc: Optional[dict] = None, fname=None):
         plt.rcParams["backend"] = backend_prev
 
 
-def use_rc_style(rc: Optional[dict] = None, fname=None):
+def use_rc_style(rc: dict | None = None, fname=None):
     def _decorator(func):
         @wraps(func)
         def _wrapper(*args, **kwargs):
@@ -48,7 +47,7 @@ def use_rc_style(rc: Optional[dict] = None, fname=None):
     return _decorator
 
 
-def refresh_figcolors(fig, rc: Optional[dict] = None):
+def refresh_figcolors(fig, rc: dict | None = None):
     rc = rc or plt.rcParams
     
     if suptitle := fig._suptitle:
@@ -388,7 +387,7 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
             for ax in axes
         }
     
-    def _set_autoscales_on(self, autoscales: Union[dict, bool]):
+    def _set_autoscales_on(self, autoscales: dict | bool):
         """Restore the states of autoscales for each axes. This prevents 
         the autoscaling from always being off after setting axis' limits 
         while navigating

@@ -7,7 +7,6 @@ Created on Sun Jun 16 23:52:18 2024
 """
 
 import tkinter as tk
-from typing import Optional
 
 import ttkbootstrap as ttk
 from ttkbootstrap import Colors
@@ -29,23 +28,27 @@ class ErrorCatchingWindow(ttk.Window):
 
 
 class OptionMenu(ttk.OptionMenu):
-    def __init__(self,
-                 master,
-                 variable=None,
-                 values=(),
-                 default=None,
-                 command=None,
-                 direction='below',
-                 takefocus=False,
-                 style=None,
-                 **kwargs):
-        super().__init__(master,
-                         variable,
-                         default,
-                         *values,
-                         style=style,
-                         direction=direction,
-                         command=command)
+    def __init__(
+            self,
+            master,
+            variable=None,
+            values=(),
+            default=None,
+            command=None,
+            direction='below',
+            takefocus=False,
+            style=None,
+            **kwargs
+    ):
+        super().__init__(
+            master,
+            variable,
+            default,
+            *values,
+            style=style,
+            direction=direction,
+            command=command
+        )
         self.configure(takefocus=takefocus, **kwargs)
     
     def set_command(self, command=None):
@@ -97,7 +100,7 @@ class ColorButton(ttk.Button):
     def background(self) -> str:
         return self._background
     
-    def __init__(self, master, *args, background: Optional[str] = None, **kw):
+    def __init__(self, master, *args, background: str | None = None, **kw):
         super().__init__(master, *args, **kw)
         if background is None:
             style = ttk.Style.get_instance()
@@ -106,7 +109,7 @@ class ColorButton(ttk.Button):
         self.set_color(background)
         self.bind('<<ThemeChanged>>', lambda e: self.set_color())
     
-    def set_color(self, background: Optional[str] = None):
+    def set_color(self, background: str | None = None):
         """Ref: `ttkbootstrap.style.StyleBuilderTTK.create_button_style`
         """
         style_name = f'{id(self)}.TButton'
