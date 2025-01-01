@@ -757,9 +757,10 @@ class ScrolledLabelframe(_CanvasBasedScrolled, ttk.Labelframe): pass
 # =============================================================================
 if __name__ == '__main__':
     from ..utils import quit_if_all_closed
+    from ._others import Window
     
     
-    root = ttk.Window(themename='cyborg')
+    root = Window(themename='cyborg')
     root.withdraw()
     
     

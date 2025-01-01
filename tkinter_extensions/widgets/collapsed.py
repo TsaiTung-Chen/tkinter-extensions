@@ -126,7 +126,9 @@ class CollapsedFrame(ttk.Frame):
 # ---- Main
 # =============================================================================
 if __name__ == '__main__':
-    root = ttk.Window(themename='cyborg')
+    from ._others import Window
+    
+    root = Window(themename='cyborg')
     
     for orient, labelanchor, sep in [('vertical', 'n', ' '),
                                      ('horizontal', 'w', '\n')]:

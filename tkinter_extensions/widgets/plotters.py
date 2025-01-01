@@ -21,7 +21,7 @@ from matplotlib.backends._backend_tk import NavigationToolbar2Tk, ToolTip
 
 from .. import variables as vrb
 from ..utils import create_image_pair, quit_if_all_closed, defer
-from .undocked import UndockedFrame
+from ._others import UndockedFrame
 from ._matplotlib_config import RC
 # =============================================================================
 # ---- Functions
@@ -408,7 +408,7 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
         top.lift()
 
 
-class BasePlotter(UndockedFrame):
+class Plotter(UndockedFrame):
     @property
     def delete_on_destroy(self) -> list:
         return self._delete_on_destroy
@@ -530,7 +530,10 @@ class BasePlotter(UndockedFrame):
 if __name__ == '__main__':
     import numpy as np
     
-    root = ttk.Window(title='Embedding in Ttk', themename='cyborg')
+    from ._others import Window
+    
+    
+    root = Window(title='Embedding in Ttk', themename='cyborg')
     
     t = np.arange(0, 3, .01)
     x = 2 * np.sin(2 * np.pi * 1 * t)
@@ -544,7 +547,7 @@ if __name__ == '__main__':
     ax.set_ylabel("f(t)")
     ax.legend(loc='upper right')
     
-    plotter = BasePlotter(root, fig)
+    plotter = Plotter(root, fig)
     plotter.pack(side='top', fill='both', expand=True)
     
     def _update_frequency(new_val):

@@ -7,6 +7,7 @@ Created on Sun Dec 11 19:18:31 2022
 """
 
 import sys
+import numpy as np
 
 
 PLATFORM = sys.platform
@@ -42,12 +43,26 @@ MODIFIER_MASKS = {
     "Alt": int('0b100_000_000_000_000_000', base=2)
 }
 
+
 BUILTIN_WIDGETS = [
     'TButton', 'TCheckbutton', 'TCombobox', 'TEntry', 'TFrame', 'TLabel',
     'TLabelFrame', 'TMenubutton', 'TNotebook', 'TPandedwindow',
     'TProgressbar', 'TRadiobutton', 'TScale', 'TScrollbar', 'TSeparator',
     'TSizegrip', 'Treeview'
 ]
+
+
+if PLATFORM == 'darwin':  # macOS has a default DPI value of 72
+    DEFAULT_SCALE = 72./72.  # this is about 1.00
+else:  # Windows and Linux have a default DPI value of 96
+    DEFAULT_SCALE = 96./72.  # this is about 1.33
+
+
+Int = int | np.integer
+Float = float | np.floating
+Complex = complex | np.complexfloating
+Number = Int | Float | Complex
+IntFloat = Int | Float
 
 
 del sys

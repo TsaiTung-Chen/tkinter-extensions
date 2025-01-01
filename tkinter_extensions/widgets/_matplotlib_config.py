@@ -27,7 +27,7 @@ https://matplotlib.org/stable/tutorials/introductory/customizing.html
 """
 
 # =============================================================================
-# %% Styles ( default: `matplotlib.rcdefaults()` )
+# ---- Styles ( default: `matplotlib.rcdefaults()` )
 # =============================================================================
 common_style = {
     "interactive": False,

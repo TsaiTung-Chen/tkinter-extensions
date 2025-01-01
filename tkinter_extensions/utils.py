@@ -17,12 +17,54 @@ from PIL.ImageTk import PhotoImage
 import numpy as np
 import ttkbootstrap as ttk
 from ttkbootstrap import colorutils
-from ttkbootstrap.utility import scale_size
 
-from .constants import BUILTIN_WIDGETS, MODIFIERS, MODIFIER_MASKS
+from .constants import BUILTIN_WIDGETS, MODIFIERS, MODIFIER_MASKS, DEFAULT_SCALE
 # =============================================================================
 # ---- Functions
 # =============================================================================
+def scale_size(widget, *sizes) -> int | tuple[int] | list[int]:
+    """
+    Scale the size based on the scaling factor of tkinter. 
+    This is used most frequently to adjust the assets for image-based widget
+    layouts and font sizes.
+    
+    Parameters:
+    
+        widget (Widget):
+            The widget object.
+        
+        size (Union[int, List, Tuple]):
+            A single integer or an iterable of integers
+    
+    Returns:
+    
+        Union[int, List]:
+            An integer or list of integers representing the new size.
+    """
+    assert len(sizes) >= 1, sizes
+    
+    scaling = widget.tk.call('tk', 'scaling')
+    factor = scaling / DEFAULT_SCALE  # current UI scaling factor
+    
+    scaled = []
+    for size in sizes:
+        if isinstance(size, int):
+            scaled.append(round(size * factor))
+        elif isinstance(size, tuple):
+            scaled.append(tuple( round(x * factor) for x in size ))
+        elif isinstance(size, list):
+            scaled.append([ round(x * factor) for x in size ])
+        else:
+            raise TypeError(
+                "`size` must be of type `int`, `tuple`, or `list` "
+                f"but got {type(size)}."
+            )
+    
+    if len(scaled) == 1:
+        return scaled[0]
+    return scaled
+
+
 def quit_if_all_closed(window):
     def _wrapped(event=None):
         root = window._root()

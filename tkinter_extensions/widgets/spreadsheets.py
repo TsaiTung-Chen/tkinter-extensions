@@ -301,7 +301,8 @@ class Sheet(ttk.Frame):
         # become the focus if it is clicked
         for _canvas in [canvas, rowcanvas, colcanvas]:
             oid = _canvas.create_rectangle(
-                0, 0, 0, 0, width=0, tags='invisible-bg')
+                0, 0, 0, 0, width=0, tags='invisible-bg'
+            )
             _canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
             _canvas.tag_bind('invisible-bg', '<Button-1>', self._focus)
         
@@ -797,7 +798,7 @@ class Sheet(ttk.Frame):
         width, height = (max(width, 0), max(height, 0))
         canvas = self.canvas
         lines = text.split('\n')
-        oid = canvas.create_text(*self._canvas_size, text=text, font=font)
+        oid = canvas.create_text(0, 0, anchor='se', text=text, font=font)
         canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
         x1, y1, x2, y2 = canvas.bbox(oid)
         canvas.delete(oid)
@@ -3879,7 +3880,10 @@ class Book(ttk.Frame):
 # ---- Main
 # =============================================================================
 if __name__ == '__main__':
-    root = ttk.Window(
+    from ._others import Window
+    
+    
+    root = Window(
         title='Book (Root)',
         themename='morph',
         position=(100, 100),
@@ -3895,7 +3899,6 @@ if __name__ == '__main__':
     book.insert_sheet(0, name='index = 0')
     book.insert_sheet(-1, name='index = -1')
     
-    book.after(3000, lambda: root.style.theme_use('minty'))
     book.after(4000, lambda: root.style.theme_use('cyborg'))
     
     

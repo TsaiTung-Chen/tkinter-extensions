@@ -78,17 +78,20 @@ def _get_screen_info_else() -> float:
     
     # Screen size in pixels
     p_w, p_h = root.winfo_screenwidth(), root.winfo_screenheight()
-    
-    # Display PPI (pixels per inch)
-    ppi = root.winfo_fpixels('1i')
-    
-    # Scaling factor in PPD (pixels per dot)
-    scale = ppi / 72.  # ppi / dpi = ppd
+
+    # System DPI (dots per inch)
+    dpi_sys = root.winfo_fpixels('1i')
+
+    # Tk default DPI
+    dpi_tk = 72.
+
+    # Scaling factor
+    scale = dpi_sys / dpi_tk  # system DPI / Tk DPI
      # or root.tk.call('tk', 'scaling')
     
     print(f'Screen size = {p_w} x {p_h} pixels')
-    print(f'Display PPI = {ppi} ppi')
-    print(f'Scaling factor = {scale} pixels/dot')
+    print(f'System DPI = {dpi_sys} dots/inch')
+    print(f'Scaling factor = {scale}')
     
     root.destroy()
     
@@ -111,13 +114,13 @@ ttk.Label(root, textvariable=text).pack()
 
 ttk.Button(
     root,
-    text='show scaling factor (pixels per point)',
+    text='show scaling factor (~1.33 as Windows default, ~1 in macOS LoDPI mode, ~2 in macOS HiDPI mode)',
     command=lambda: text.set(root.tk.call('tk', 'scaling'))
 ).pack()
 
 ttk.Button(
     root,
-    text='show ppi (pixels per inch)',
+    text='show system DPI (dots per inch) (~96 as Windows default, ~72 in macOS LoDPI mode, ~144 in macOS HiDPI mode)',
     command=lambda: text.set(root.winfo_fpixels('1i'))
 ).pack()
 

@@ -1173,7 +1173,10 @@ class RearrangedDnDContainer(DnDContainer):
 if __name__ == '__main__':
     import random
     
-    root = ttk.Window(title='Drag and Drop', themename='cyborg')
+    from ._others import Window
+    
+    
+    root = Window(title='Drag and Drop', themename='cyborg')
     
     container = DnDContainer(root)
     container.pack(side='bottom', fill='both', expand=1)

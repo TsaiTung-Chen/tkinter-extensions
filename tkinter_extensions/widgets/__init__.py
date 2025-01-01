@@ -11,20 +11,19 @@ from .collapsed import CollapsedFrame
 from .scrolled import ScrolledWidget
 from .scrolled import ScrolledTkFrame, ScrolledFrame, ScrolledLabelframe
 from .scrolled import ScrolledText, ScrolledTreeview, ScrolledCanvas
-from .undocked import UndockedFrame
-from .plotters import BasePlotter
+from .plotters import Plotter
+from .figures import Figure
 from .spreadsheets import Sheet, Book
 from ._others import (
-    ErrorCatchingWindow, OptionMenu, Combobox, ColorButton, WrapLabel
+    Window, UndockedFrame, OptionMenu, Combobox, ColorButton, WrapLabel
 )
 
 
 __all__ = [
     'DnDItem', 'OrderlyDnDItem', 'DnDContainer', 'RearrangedDnDContainer',
-    'CollapsedFrame',
-    'ScrolledWidget', 'ScrolledTkFrame', 'ScrolledFrame', 'ScrolledLabelframe',
-    'ScrolledText', 'ScrolledTreeview', 'ScrolledCanvas', 'UndockedFrame',
-    'BasePlotter', 'Sheet', 'Book', 'ErrorCatchingWindow', 'OptionMenu',
+    'CollapsedFrame', 'ScrolledWidget', 'ScrolledTkFrame', 'ScrolledFrame',
+    'ScrolledLabelframe', 'ScrolledText', 'ScrolledTreeview', 'ScrolledCanvas',
+    'UndockedFrame', 'Plotter', 'Figure', 'Sheet', 'Book', 'Window', 'OptionMenu',
     'Combobox', 'ColorButton', 'WrapLabel'
 ]
 
