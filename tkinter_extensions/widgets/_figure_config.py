@@ -40,7 +40,7 @@ common_style = {
         "pady": ('2p', '2p')
     },
     
-    "taxis.title.text": {
+    "taxis.label.text": {
         "zorder": 4.0,
         "family": None,
         "size": 13,
@@ -54,7 +54,7 @@ common_style = {
         "pady": ('0p', '3p')
     },
     
-    "baxis.title.text": {
+    "baxis.label.text": {
         "zorder": 4.0,
         "family": None,
         "size": 13,
@@ -68,7 +68,7 @@ common_style = {
         "pady": ('3p', '0p')
     },
     
-    "laxis.title.text": {
+    "laxis.label.text": {
         "zorder": 4.0,
         "family": None,
         "size": 13,
@@ -82,7 +82,7 @@ common_style = {
         "pady": ('0p', '0p')
     },
     
-    "raxis.title.text": {
+    "raxis.label.text": {
         "zorder": 4.0,
         "family": None,
         "size": 13,
@@ -96,7 +96,7 @@ common_style = {
         "pady": ('0p', '0p')
     },
     
-    "tticks.label.text": {
+    "tticks.labels.text": {
         "zorder": 3.0,
         "family": None,
         "size": 11,
@@ -109,15 +109,15 @@ common_style = {
         "padx": ('0p', '0p'),
         "pady": ('0p', '2p')
     },
-    "tticks.label.scientific": 4,
-    "tticks.label.max_ticks": 13,
+    "tticks.labels.scientific": 4,
+    "tticks.labels.max_ticks": 13,
     "tticks.line": {
         "zorder": 2.0,
         "width": '1p',
         "smooth": False
     },
     
-    "bticks.label.text": {
+    "bticks.labels.text": {
         "zorder": 3.0,
         "family": None,
         "size": 11,
@@ -130,15 +130,15 @@ common_style = {
         "padx": ('0p', '0p'),
         "pady": ('2p', '0p')
     },
-    "bticks.label.scientific": 4,
-    "bticks.label.max_ticks": 13,
+    "bticks.labels.scientific": 4,
+    "bticks.labels.max_ticks": 13,
     "bticks.line": {
         "zorder": 2.0,
         "width": '1p',
         "smooth": False
     },
     
-    "lticks.label.text": {
+    "lticks.labels.text": {
         "zorder": 3.0,
         "family": None,
         "size": 11,
@@ -151,15 +151,15 @@ common_style = {
         "padx": ('0p', '2p'),
         "pady": ('0p', '0p')
     },
-    "lticks.label.scientific": 4,
-    "lticks.label.max_ticks": 13,
+    "lticks.labels.scientific": 4,
+    "lticks.labels.max_ticks": 13,
     "lticks.line": {
         "zorder": 2.0,
         "width": '1p',
         "smooth": False
     },
     
-    "rticks.label.text": {
+    "rticks.labels.text": {
         "zorder": 3.0,
         "family": None,
         "size": 11,
@@ -172,8 +172,8 @@ common_style = {
         "padx": ('2p', '0p'),
         "pady": ('0p', '0p')
     },
-    "rticks.label.scientific": 4,
-    "rticks.label.max_ticks": 13,
+    "rticks.labels.scientific": 4,
+    "rticks.labels.max_ticks": 13,
     "rticks.line": {
         "zorder": 2.0,
         "width": '1p',
@@ -230,12 +230,13 @@ common_style = {
     
     "marker": {
         "zorder": 5.0,
-        "size": '4.0p',
+        "size": '2.0p',
         "edgecolor": ''
     },
     
     "rect": {
         "zorder": 5.0,
+        "width": '2.0p',
         "edgecolor": ''
     },
     
@@ -265,28 +266,28 @@ light_style.update({
         "color": 'black'
     },
     
-    "taxis.title.text": {
-        **light_style["taxis.title.text"],
+    "taxis.label.text": {
+        **light_style["taxis.label.text"],
         "color": 'black'
     },
     
-    "baxis.title.text": {
-        **light_style["baxis.title.text"],
+    "baxis.label.text": {
+        **light_style["baxis.label.text"],
         "color": 'black'
     },
     
-    "laxis.title.text": {
-        **light_style["laxis.title.text"],
+    "laxis.label.text": {
+        **light_style["laxis.label.text"],
         "color": 'black'
     },
     
-    "raxis.title.text": {
-        **light_style["raxis.title.text"],
+    "raxis.label.text": {
+        **light_style["raxis.label.text"],
         "color": 'black'
     },
     
-    "tticks.label.text": {
-        **light_style["tticks.label.text"],
+    "tticks.labels.text": {
+        **light_style["tticks.labels.text"],
         "color": '#1A1A1A'
     },
     "tticks.line": {
@@ -294,8 +295,8 @@ light_style.update({
         "color": 'black'
     },
     
-    "bticks.label.text": {
-        **light_style["bticks.label.text"],
+    "bticks.labels.text": {
+        **light_style["bticks.labels.text"],
         "color": '#1A1A1A'
     },
     "bticks.line": {
@@ -303,8 +304,8 @@ light_style.update({
         "color": 'black'
     },
     
-    "lticks.label.text": {
-        **light_style["lticks.label.text"],
+    "lticks.labels.text": {
+        **light_style["lticks.labels.text"],
         "color": '#1A1A1A'
     },
     "lticks.line": {
@@ -312,8 +313,8 @@ light_style.update({
         "color": 'black'
     },
     
-    "rticks.label.text": {
-        **light_style["rticks.label.text"],
+    "rticks.labels.text": {
+        **light_style["rticks.labels.text"],
         "color": '#1A1A1A'
     },
     "rticks.line": {

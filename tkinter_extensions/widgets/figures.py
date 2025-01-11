@@ -116,169 +116,93 @@ class ZorderNotFoundError(RuntimeError):
 
 
 class _BaseTransform:
+    def __init__(
+            self,
+            x_interval: list[IntFloat] = [-np.inf, +np.inf],
+            y_interval: list[IntFloat] = [-np.inf, +np.inf]
+    ):
+        assert isinstance(x_interval, list), x_interval
+        assert isinstance(y_interval, list), y_interval
+        assert len(x_interval) == len(y_interval) == 2, (x_interval, y_interval)
+        assert all( isinstance(x, IntFloat) for x in x_interval ), x_interval
+        assert all( isinstance(y, IntFloat) for y in y_interval ), y_interval
+        self._x_interval: list[IntFloat] = x_interval
+        self._y_interval: list[IntFloat] = y_interval
+    
+    @property
+    def get_x_interval(self) -> tuple[IntFloat, IntFloat]:
+        return self._x_interval
+    
+    @property
+    def get_y_interval(self) -> tuple[IntFloat, IntFloat]:
+        return self._y_interval
+    
+    def __eq__(self, obj):
+        raise NotImplementedError
+    
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat]
-    ):
+    ) -> Float | NDArray[Float]:
         assert isinstance(xs, (IntFloat, np.ndarray)), xs
         if isinstance(xs, (int, float)):
             xs = np.float64(xs)
         dt = xs.dtype
         assert any( np.issubdtype(dt, d) for d in IntFloat.__args__ ), xs.dtype
+        return np.clip(xs, *self._x_interval)
     
     def get_inverse(self):
         raise NotImplementedError
 
 
 class _FirstOrderPolynomial(_BaseTransform):
-    def __init__(self, c0: IntFloat, c1: IntFloat):
+    def __init__(self, c0: IntFloat, c1: IntFloat, *args, **kwargs):
         assert isinstance(c0, IntFloat), c0
         assert isinstance(c1, IntFloat), c1
+        super().__init__(*args, **kwargs)
         self._c0 = np.float64(c0)
         self._c1 = np.float64(c1)
+    
+    def __eq__(self, obj):
+        if type(self) != type(obj):
+            return False
+        return self._c0 == obj._c0 and self._c1 == obj._c1 \
+            and self.get_x_interval == obj.get_x_interval \
+            and self.get_y_interval == obj.get_y_interval
     
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat]
-    ) -> IntFloat | NDArray[Float]:
-        super().__call__(xs)
-        return self._c0 + self._c1 * xs  # y(x) = c0 + c1 * x
+    ) -> Float | NDArray[Float]:
+        xs = super().__call__(xs)
+        return np.clip(self._c0 + self._c1 * xs, *self._y_interval)
+         # y(x) = c0 + c1 * x
     
     @classmethod
     def from_points(
-            cls,
-            xs: NDArray[IntFloat],
-            ys: NDArray[IntFloat]
+            cls, xs: ArrayLike, ys: ArrayLike, **kwargs
     ) -> _FirstOrderPolynomial:
-        assert isinstance(xs, np.ndarray), xs
-        assert isinstance(ys, np.ndarray), ys
-        assert xs.shape == ys.shape, (xs.shape, ys.shape)
-        assert xs.size == ys.size == 2, (xs.shape, ys.shape)
-        dt = xs.dtype
-        assert any( np.issubdtype(dt, d) for d in IntFloat.__args__ ), xs.dtype
-        dt = ys.dtype
-        assert any( np.issubdtype(dt, d) for d in IntFloat.__args__ ), ys.dtype
+        assert np.shape(xs) == np.shape(ys) == (2,), (np.shape(xs), np.shape(ys))
         
         # y(x) = c0 + c1 * x
         c1 = (ys[1] - ys[0]) / (xs[1] - xs[0])  # c1 = (y1 - y0) / (x1 - x0)
         c0 = ys[0] - c1 * xs[0]  # c0 = y0 - c1 * x0
         
-        return cls(c0=c0, c1=c1)
+        return cls(c0=c0, c1=c1, **kwargs)
     
     def get_inverse(self) -> _FirstOrderPolynomial:
         c1_inv = 1. / self._c1  # c1_inv = 1 / c1
         c0_inv = -self._c0 / self._c1  # c0_inv = -c0 / c1
-        return _FirstOrderPolynomial(c0=c0_inv, c1=c1_inv)
+        return _FirstOrderPolynomial(
+            c0=c0_inv,
+            c1=c1_inv,
+            x_interval=self._y_interval,
+            y_interval=self._x_interval
+        )
 
 
 class _BBox:#TODO: delete
-    def __init__(
-            self,
-            xys: tuple[Dimension, Dimension, Dimension, Dimension],
-            sticky: str | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None,
-            convert: bool = False
-    ):
-        root = tk._get_default_root('_BBox.__init__')
-        self._xys: tuple[IntFloat, IntFloat, IntFloat, IntFloat]
-        self._sticky: str | None
-        self._padx: tuple[IntFloat, IntFloat] | None
-        self._pady: tuple[IntFloat, IntFloat] | None
-        self._to_px = lambda dim: _to_px(root, dim)
-        self.set_xys(xys, convert=convert)
-        self.set_sticky(sticky)
-        self.set_padx(padx, convert=convert)
-        self.set_pady(pady, convert=convert)
-    
-    def __eq__(self, bbox: _BBox):
-        assert isinstance(bbox, _BBox), _BBox
-        return self.get_all() == bbox.get_all()
-    
-    def copy(self) -> _BBox:
-        return type(self)(**self.get_all())
-    
-    def set_xys(
-            self,
-            xys: tuple[Dimension, Dimension, Dimension, Dimension],
-            convert: bool = False
-    ):
-        assert isinstance(xys, tuple), xys
-        assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
-        
-        if convert:
-            x1, y1, x2, y2 = self._to_px(xys)
-        else:
-            x1, y1, x2, y2 = xys
-        
-        if x1 is not None and x2 is not None and x2 < x1:
-            x1 = x2 = (x1 + x2) / 2.
-        if y1 is not None and y2 is not None and y2 < y1:
-            y1 = y2 = (y1 + y2) / 2.
-        
-        self._xys = (x1, y1, x2, y2)
-    
-    def get_xys(self) -> tuple[IntFloat, IntFloat, IntFloat, IntFloat]:
-        return self._xys
-    
-    def set_sticky(self, sticky: str | None):
-        assert isinstance(sticky, (str, type(None))), sticky
-        self._sticky = sticky
-    
-    def get_sticky(self) -> str | None:
-        return self._sticky
-    
-    def set_padx(
-            self,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            convert: bool = False
-    ):
-        assert isinstance(padx, (Dimension, tuple, type(None))), padx
-        
-        if isinstance(padx, Dimension):
-            padx = (padx, padx)
-        elif isinstance(padx, tuple):
-            assert len(padx) == 2, padx
-            assert all( isinstance(p, Dimension) for p in padx ), padx
-        if convert:
-            padx = self._to_px(padx)
-        
-        self._padx = padx
-    
-    def get_padx(self) -> tuple[IntFloat, IntFloat] | None:
-        return self._padx
-    
-    def set_pady(
-            self,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None,
-            convert: bool = False
-    ):
-        assert isinstance(pady, (Dimension, tuple, type(None))), pady
-        
-        if isinstance(pady, Dimension):
-            pady = (pady, pady)
-        elif isinstance(pady, tuple):
-            assert len(pady) == 2, pady
-            assert all( isinstance(p, Dimension) for p in pady ), pady
-        if convert:
-            pady = self._to_px(pady)
-        
-        self._pady = pady
-    
-    def get_pady(self) -> tuple[IntFloat, IntFloat] | None:
-        return self._pady
-    
-    def get(self) -> tuple[IntFloat, IntFloat, IntFloat, IntFloat]:
-        return self.get_xys()
-    
-    def get_all(self) -> dict[str, Any]:
-        return {
-            "xys": self.get_xys(),
-            "sticky": self.get_sticky(),
-            "padx": self.get_padx(),
-            "pady": self.get_pady()
-        }
-
+    pass
 
 class _BaseElement:
     def __init__(self, canvas: _Plot | _Suptitle, tag: str = ''):
@@ -290,15 +214,9 @@ class _BaseElement:
         self._figure: Figure = canvas._figure
         self._to_px = lambda dim: _to_px(root, dim)
         self._tag: str = tag
-        self._default_style: dict[str, Any]
-        self._root_default_style: dict[str, Any]
-        self.update_theme()
     
     def __del__(self):
         _cleanup_tk_attributes(self)
-    
-    def update_theme(self):
-        raise NotImplementedError
     
     def draw(self):
         raise NotImplementedError
@@ -333,17 +251,20 @@ class _BaseArtist(_BaseElement):
         self._req_zorder: float | None = None
         self._req_style: dict[str, Any] = {}
     
+    @property
+    def _root_default_style(self) -> dict[str, Any]:
+        return self._figure._default_style[self._name]
+    
+    @property
+    def _default_style(self) -> dict[str, Any]:
+        return self._figure._default_style[self._tag]
+    
     def __del__(self):
         try:
             self.delete()
         except tk.TclError:
             pass
         self._canvas._zorder_tags.pop(self, None)
-    
-    def update_theme(self):
-        self._root_default_style = self._figure._default_style[self._name]
-        self._default_style = self._figure._default_style[self._tag]
-        self._stale = True
     
     def configure(self, *args, **kwargs) -> Any:
         return self._canvas.itemconfigure(self._id, *args, **kwargs)
@@ -360,6 +281,12 @@ class _BaseArtist(_BaseElement):
     def delete(self):
         self._canvas.delete(self._id)
     
+    def hide(self):
+        self._canvas.itemconfigure(self._id, state='hidden')
+    
+    def show(self):
+        self._canvas.itemconfigure(self._id, state='normal')
+    
     def set_transforms(
             self,
             x_transform: _BaseTransform | None = None,
@@ -369,10 +296,10 @@ class _BaseArtist(_BaseElement):
         assert isinstance(y_transform, _BaseTransform), y_transform
         
         if x_transform is not None and x_transform != self._req_transforms[0]:
-            self._req_transforms[0] = x_transform
+            self._req_transforms = (x_transform, self._req_transforms[1])
             self._stale = True
         if y_transform is not None and y_transform != self._req_transforms[1]:
-            self._req_transforms[1] = y_transform
+            self._req_transforms = (self._req_transforms[0], y_transform)
             self._stale = True
     
     def get_transforms(self) -> tuple[_BaseTransform, _BaseTransform]:
@@ -384,6 +311,9 @@ class _BaseArtist(_BaseElement):
         if ps and ps != self._req_coords:
             self._req_coords[:] = ps
             self._stale = True
+    
+    def get_coords(self) -> list[float]:
+        return self.coords()
     
     def set_zorder(self, zorder: IntFloat | None = None):
         assert isinstance(zorder, IntFloat), zorder
@@ -438,6 +368,8 @@ class _Text(_BaseArtist):
         
         super().__init__(canvas=canvas, **kwargs)
         self._req_bounds: dict[str, Any] = {}
+        self._padx: tuple[float, float] = (0., 0.)
+        self._pady: tuple[float, float] = (0., 0.)
         self._font: Font = Font() if font is None else font
         self._id: int = canvas.create_text(
             -1, -1, anchor='se', text=text, font=self._font, tags=self._tags
@@ -453,11 +385,6 @@ class _Text(_BaseArtist):
             underline=underline,
             overstrike=overstrike
         )
-    
-    def bbox(self) -> tuple[int, int, int, int] | None:
-        if self.cget('text'):
-            return super().bbox()
-        return None
     
     def draw(self):
         if not self._stale:
@@ -486,6 +413,7 @@ class _Text(_BaseArtist):
         if self._req_coords:
             x, y = self._req_coords
             anchor = 'center'
+            padx, pady = (0., 0.), (0., 0.)
         else:
             cf = self._req_bounds.copy()
             cf.update({
@@ -531,7 +459,19 @@ class _Text(_BaseArtist):
         self.configure(anchor=anchor)  # update anchor
         self.coords(x, y)  # update position
         self._update_zorder()
+        self._padx = padx
+        self._pady = pady
         self._stale = False
+    
+    def bbox(self) -> tuple[int, int, int, int] | None:
+        if self.cget('text'):
+            x1, y1, x2, y2 = super().bbox()
+            x1 -= self._padx[0]
+            x2 += self._padx[1]
+            y1 -= self._pady[0]
+            y2 += self._pady[1]
+            return (x1, y1, x2, y2)
+        return None
     
     def set_bounds(
             self,
@@ -541,10 +481,11 @@ class _Text(_BaseArtist):
             pady: Dimension | tuple[Dimension, Dimension] | None = None
     ):
         assert isinstance(xys, (tuple, type(None))), xys
-        assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
         assert isinstance(sticky, (str, type(None))), sticky
         assert isinstance(padx, (Dimension, tuple, type(None))), padx
         assert isinstance(pady, (Dimension, tuple, type(None))), pady
+        if xys is not None:
+            assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
         
         if xys is not None:
             x1, y1, x2, y2 = self._to_px(xys)
@@ -635,17 +576,16 @@ class _Line(_BaseArtist):
             color: str | None = None,
             width: Dimension | None = None,
             smooth: bool | None = None,
-            default_color: str = '',
             **kwargs
     ):
         super().__init__(canvas=canvas, **kwargs)
-        self._xymin: NDArray[Float]
-        self._xymax: NDArray[Float]
+        self._xymin: NDArray[Float] = np.array([0., 1.], float)
+        self._xymax: NDArray[Float] = np.array([0., 1.], float)
         self._req_xy: NDArray[Float] = np.array([[]], dtype=float)
+        self._req_default_color: str = ''
         self._id: int = self._canvas.create_line(
             -1, -1, -1, -1, fill='', width='0p', tags=self._tags
         )
-        self.set_default_color(default_color=default_color)
         self.set_data(x=x, y=y)
         self.set_style(color=color, width=width, smooth=smooth)
     
@@ -668,24 +608,17 @@ class _Line(_BaseArtist):
             xys = self._req_coords
         else:
             x_transform, y_transform = self._req_transforms
-            xys = np.asarray([  # x0, y0, x1, y1, x2, y2, ...
-                x_transform(self._req_xy[0])[:, None],
-                y_transform(self._req_xy[1])[:, None]
-            ]).ravel()
+            xys = np.concat(  # x0, y0, x1, y1, x2, y2, ...
+                (
+                    x_transform(self._req_xy[0])[:, None],
+                    y_transform(self._req_xy[1])[:, None]
+                ),
+                axis=1
+            ).ravel()
         
         self.coords(*xys)
         self._update_zorder()
         self._stale = False
-    
-    def set_default_color(self, color: str | None = None):
-        assert isinstance(color, (str, type(None))), color
-        
-        if color is not None and color != self._default_color:
-            self._default_color = color
-            self._stale = True
-    
-    def get_default_color(self) -> str:
-        return self._default_color
     
     def set_style(
             self,
@@ -748,8 +681,8 @@ class _Line(_BaseArtist):
         
         if not np.array_equal(xy, self._req_xy):
             self._req_xy = xy
-            self._xymin = self._req_xy.min(axis=0)
-            self._xymax = self._req_xy.max(axis=0)
+            self._xymin = xy.min(axis=1)
+            self._xymax = xy.max(axis=1)
             self._req_coords.clear()
             self._stale = True
     
@@ -825,8 +758,9 @@ class _Rectangle(_BaseArtist):
 # ---- Figure Regions
 # =============================================================================
 class _BaseRegion(_BaseElement):
-    def update_theme(self):
-        self._default_style = self._figure._default_style
+    @property
+    def _default_style(self) -> dict[str, Any]:
+        return self._figure._default_style
     
     def resize(
             self,
@@ -843,188 +777,136 @@ class _BaseRegion(_BaseElement):
         raise NotImplementedError
 
 
-class _Title(_BaseRegion):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._text: _Text = _Text(self._canvas, text='', tag=f'{self._tag}.text')
-    
-    def resize(
-            self,
-            xys: tuple[
-                Dimension | None,
-                Dimension | None,
-                Dimension | None,
-                Dimension | None
-            ]
-    ):
-        self.set_bounds(xys=xys)
-    
-    def draw(self):
-        self._text.draw()
-    
-    def delete(self):
-        self._text.delete()
-    
-    def get_text(self) -> _Text:
-        return self._text
-    
-    def set_bounds(self, *args, **kwargs):
-        self._text.set_bounds(*args, **kwargs)
-    
-    def bbox(self) -> tuple[int, int, int, int] | None:
-        return self._text.bbox()
-    
-    def set_style(self, *args, **kwargs):
-        self._text.set_style(*args, **kwargs)
-    
-    def get_style(self) -> dict[str, Any]:
-        return self._text.get_style()
-
-
-class _Axis(_BaseRegion):#TODO
+class _Axis(_BaseRegion):
     def __init__(
             self,
             canvas: _Plot | _Suptitle,
             side: Literal['t', 'b', 'l', 'r'],
+            *args, 
             **kwargs
     ):
-        super().__init__(canvas=canvas, **kwargs)
+        super().__init__(canvas=canvas, *args, **kwargs)
         self._side: Literal['t', 'b', 'l', 'r'] = side
-        self._extend: int = dict([('r', 0), ('b', 1), ('l', 2), ('t', 3)])[
-            side
-        ]
-        self._title: _Text = _Text(
-            self._canvas,
-            default_style=self._default_style["title"]["text"],
-            tags=(f'{self._tag}.title.text',)
+        self._label: _Text = _Text(
+            canvas=self._canvas, text='', tag=f'{self._tag}.label.text'
         )
-        self._ticks: list[_Text] = []
-        self._req_title_text: dict[str, Any] = {}
-        self._req_title_font: dict[str, Any] = {}
-        self._req_title_bbox: dict[str, Any] = {}
-        self._req_ticks: bool = False
-        self._req_ticks_text: dict[str, Any] = {}
-        self._req_ticks_font: dict[str, Any] = {}
-        self._req_ticks_bbox: dict[str, Any] = {}
-        self._req_ticks_scientific: Int | None = None
-        self._ticks_values: NDArray[Float] | None = None
-        self._ticks_positions: list[tuple[IntFloat]] | None = None
-    
-    def resize(
-            self,
-            xys: tuple[
-                Dimension | None,
-                Dimension | None,
-                Dimension | None,
-                Dimension | None
-            ]
-    ):
-        self.set_bbox(xys)
-    
-    def update_theme(self, default_style: dict[str, Any]):
-        super().update_theme(default_style)
-        self._title.update_theme(self._default_style["title"]["text"])
-        for tick in self._ticks:
-            tick.update_theme(self._default_style["tick"]["text"])
     
     def draw(self):
-        bbox = _BBox(self._req_bbox.get(), **self._req_title_bbox)
-        title = self._title
-        title.set_bbox(bbox)
-        title.set_font(**self._req_title_font)
-        title.set_text(**self._req_title_text)
-        title.draw()
-        
-        for tick in self._ticks:
-            tick.delete()
-        self._ticks.clear()
-        
-        if self._ticks_values is None:
-            xys = title.get_bbox().get()
-            self._bbox = _BBox(xys)
-        else:
-            default_style = self._default_style["tick"]["text"]
-            text_cf = self._req_ticks_text
-            font_cf = self._req_ticks_font
-            bbox_cf = self._req_ticks_bbox
-            scientific = self._default_style["tick"]["scientific"] \
-                if self._req_ticks_scientific is None \
-                else self._req_ticks_scientific
-            tags = (f'{self._tag}.tick.text',)
-            font = Font()
-            
-            for value, xys in zip(self._ticks_values, self._ticks_positions):
-                text = '{0:.{1}g}'.format(value, scientific).replace('e', '\ne')
-                tick = _Text(
-                    self._canvas,
-                    font=font,
-                    default_style=default_style,
-                    tags=tags
-                )
-                tick.set_font(**font_cf)
-                tick.set_text(text=text, **text_cf)
-                tick.set_bbox(_BBox(xys, **bbox_cf))
-                tick.draw()
-                self._ticks.append(tick)
+        self._label.draw()
     
     def delete(self):
-        self._title.delete()
-        for tick in self._ticks:
-            tick.delete()
+        self._label.delete()
     
-    def set_bbox(
-            self, xys: tuple[IntFloat, IntFloat, IntFloat, IntFloat]
-    ) -> _BBox:
-        assert xys[self._extend] is None, (self._side, xys)
-        self._req_bbox = _BBox(xys)
-        return self._req_bbox
+    def bbox(self) -> tuple[int, int, int, int] | None:
+        return self._label.bbox()
     
-    def get_bbox(self) -> _BBox:
-        return self._bbox
+    def get_label(self) -> _Text:
+        return self._label
     
-    def set_title(
-            self,
-            text: str = '',
-            color: str | None = None,
-            angle: IntFloat | None = None,
-            family: str | None = None,
-            size: Int | None = None,
-            weight: str | None = None,
-            slant: str | None = None,
-            underline: bool | None = None,
-            overstrike: bool | None = None,
-            sticky: str | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None,
-    ) -> dict[str, Any]:
-        req_title_text = {
-            "text": text,
-            "color": color,
-            "angle": angle
-        }
-        req_title_font = {
-            "family": family,
-            "size": size,
-            "weight": weight,
-            "slant": slant,
-            "underline": underline,
-            "overstrike": overstrike
-        }
-        req_title_bbox = {
-            "sticky": sticky,
-            "padx": padx,
-            "pady": pady
-        }
-        self._req_title_text = req_title_text
-        self._req_title_font = req_title_font
-        self._req_title_bbox = req_title_bbox
+    def set_bounds(self, *args, sticky: str | None = None, **kwargs):
+        invalid = {"t": 's', "b": 'n', "l": 'e', "r": 'w'}[self._side]
         
-        return self._req_title_text, self._req_title_font, self._req_title_bbox
+        if sticky is not None and (invalid in sticky or sticky == 'center'):
+            raise ValueError(
+                f"`sticky` for taxis label must not include {invalid} and not "
+                f"equal to 'center' but got {sticky}."
+            )
+        
+        self._label.set_bounds(*args, sticky=sticky, **kwargs)
     
-    def get_title(self) -> _Text:
-        return self._text
+    def set_label(self, *args, **kwargs):
+        self._label.set_style(*args, **kwargs)
+
+
+class _Ticks(_BaseRegion):
+    def __init__(
+            self,
+            canvas: _Plot | _Suptitle,
+            side: Literal['t', 'b', 'l', 'r'],
+            *args, 
+            **kwargs
+    ):
+        super().__init__(canvas=canvas, *args, **kwargs)
+        self._side: Literal['t', 'b', 'l', 'r'] = side
+        self._grow: int = {"r": 0, "b": 1, "l": 2, "t": 3}[side]
+        self._req_enable_labels: bool = False
+        self._req_scientific: Int | None = None
+        self._req_xys: tuple[Dimension, Dimension, Dimension, Dimension] | None \
+            = None
+        self._req_transform: _BaseTransform = _FirstOrderPolynomial(0, 1)
+        self._update_labels: bool = True
+        self._labels: list[_Text] = []
+        self._dummy_label: _Text = _Text(
+            canvas=self._canvas, text='', tag=f'{self._tag}.labels.text'
+        )
     
-    def set_ticks(
+    def draw(
+            self, dry: bool = False
+    ) -> tuple[dict[str, Any], _BaseTransform] | None:
+        if not self._req_enable_labels:
+            for label in self._labels:
+                label.delete()
+            self._labels.clear()
+            return
+        
+        if not self._update_labels:
+            return
+        
+        texts, positions = self._fit_labels()
+        canvas = self._canvas
+        tag = f'{self._tag}.labels.text'
+        font = self._dummy_label._font
+        style = self._dummy_label._req_style
+        style.pop('text', None)
+        bounds = self._dummy_label._req_bounds.copy()
+        bounds.pop('xys', None)
+        
+        if dry:
+            label = self._dummy_label
+            label.set_style(text=texts[0])
+            label.set_bounds(xys=positions[0])
+            label.show()
+            label.draw()
+            return self._req_xys, self._req_transform
+        
+        self._dummy_label.hide()
+        length_increase = len(texts) - len(self._labels)
+        if length_increase < 0:
+            for label in self._labels[length_increase:]:
+                label.delete()
+            self._labels[:] = self._labels[:-length_increase]
+        elif length_increase > 0:
+            self._labels.extend(
+                _Text(canvas, text='', font=font, tag=tag)
+                for i in range(length_increase)
+            )
+        
+        for label, text, xys in zip(self._labels, texts, positions):
+            label.set_style(text=text, **style)
+            label.set_bounds(xys=xys, **bounds)
+            label.draw()
+    
+    def delete(self):
+        for label in self._labels:
+            label.delete()
+        self._labels.clear()
+    
+    def bbox(self) -> tuple[int, int, int, int]:
+        x1y1x2y2 = np.asarray([
+            label.bbox() for label in self._labels
+        ])
+        xs = np.concat((x1y1x2y2[:, 0], x1y1x2y2[:, 2]))
+        ys = np.concat((x1y1x2y2[:, 1], x1y1x2y2[:, 3]))
+        xs.sort()
+        ys.sort()
+        x1, y1, x2, y2 = xs[0], ys[0], xs[-1], ys[-1]
+        
+        return x1, y1, x2, y2
+    
+    def get_labels(self) -> list[_Text]:
+        return self._labels
+    
+    def set_labels(
             self,
             enable: bool = True,
             color: str | None = None,
@@ -1038,99 +920,65 @@ class _Axis(_BaseRegion):#TODO
             padx: Dimension | tuple[Dimension, Dimension] | None = None,
             pady: Dimension | tuple[Dimension, Dimension] | None = None,
             scientific: Int | None = None
-    ) -> dict[str, Any]:
-        req_ticks_text = {
-            "color": color,
-            "angle": angle
-        }
-        req_ticks_font = {
-            "family": family,
-            "size": size,
-            "weight": weight,
-            "slant": slant,
-            "underline": underline,
-            "overstrike": overstrike
-        }
-        req_ticks_bbox = {
-            "padx": padx,
-            "pady": pady
-        }
-        self._req_ticks = enable
-        self._req_ticks_text = req_ticks_text
-        self._req_ticks_font = req_ticks_font
-        self._req_ticks_bbox = req_ticks_bbox
-        self._req_ticks_scientific = scientific
-        
-        return (
-            self._req_ticks,
-            self._req_ticks_text,
-            self._req_ticks_font,
-            self._req_ticks_bbox,
-            self._req_ticks_scientific
-        )
-    
-    def get_ticks(self) -> list[_Text]:
-        return self._ticks
-    
-    def _update_bbox(self) -> _BBox:
-        self.draw()
-        self._ticks_values = self._ticks_positions = None
-        
-        if not self._req_ticks:
-            return
-        
-        tx1, ty1, tx2, ty2 = self._title.get_bbox().get()
-        
-        tick = _Text(
-            self._canvas,
-            text='0123456789',
-            default_style=self._default_style["tick"]["text"],
-            tags=(f'{self._tag}.tick.text',)
-        )
-        tick.set_font(**self._req_ticks_font)
-        tick.set_text(**self._req_ticks_text)
-        tick.set_bbox(_BBox((0, 0, 0, 0), **self._req_ticks_bbox))
-        tick.draw()
-        tick.delete()
-        kx1, ky1, kx2, ky2 = tick.get_bbox().get()
-        kw, kh = (kx2 - kx1 + 1), (ky2 - ky1 + 1)
-        
-        if self._side == 'r':
-            xys = (tx1 - kw, ty1, tx2, ty2)
-        elif self._side == 'b':
-            xys = (tx1, ty1 - kh, tx2, ty2)
-        elif self._side == 'l':
-            xys = (tx1, ty1, tx2 + kw, ty2)
-        else:
-            xys = (tx1, ty1, tx2, ty2 + kh)
-        
-        self._bbox = _BBox(xys)
-    
-    def _set_ticks_values(
-            self,
-            values: NDArray[Float],
-            positions: NDArray[Float]
     ):
-        assert self._req_ticks, self._req_ticks
-        assert isinstance(values, np.ndarray), (type(values), values)
-        assert np.issubdtype(values.dtype, np.floating), values.dtype
-        assert isinstance(positions, np.ndarray), (type(positions), positions)
-        assert np.issubdtype(positions.dtype, np.floating), positions.dtype
-        assert values.shape == positions.shape, (values.shape, positions.shape)
-        assert values.ndim == 1, values.ndim
+        self._dummy_label.set_style(
+            color=color,
+            angle=angle,
+            family=family,
+            size=size,
+            weight=weight,
+            slant=slant,
+            underline=underline,
+            overstrike=overstrike
+        )
+        self._dummy_label.set_bounds(padx=padx, pady=pady)
+        self._req_enable_labels = enable
+        self._req_scientific = scientific
+    
+    def set_xys_and_transform(
+            self,
+            xys: tuple[Dimension, Dimension, Dimension, Dimension] | None = None,
+            transform: _BaseTransform | None = None,
+            update_labels: bool | None = True
+    ):
+        assert isinstance(xys, tuple) and len(xys) == 4, xys
+        assert sum( p is None for p in xys ) == 1, xys
+        assert xys[self._grow] is None, (self._side, xys)
+        assert isinstance(transform, _BaseTransform), transform
+        assert isinstance(update_labels, (bool, type(None))), update_labels
         
-        tx1, ty1, tx2, ty2 = self._title.get_bbox().get()
-        if self._side == 'r':
-            positions = [ (None, p, tx1 - 1, p) for p in positions ]
-        elif self._side == 'b':
-            positions = [ (p, None, p, ty1 - 1) for p in positions ]
-        elif self._side == 'l':
-            positions = [ (tx2 + 1, p, None, p) for p in positions ]
-        else:
-            positions = [ (p, ty2 + 1, p, None) for p in positions ]
+        if xys is not None and xys != self._req_xys:
+            self._req_xys = xys
+            if update_labels:
+                self._update_labels = update_labels
+        if transform is not None and transform != self._req_transform:
+            self._req_transform = transform
+            if update_labels:
+                self._update_labels = update_labels
+    
+    def _fit_labels(self) -> tuple[list[str], NDArray[Float]]:
+        assert self._update_labels, self._update_labels
         
-        self._ticks_values = values
-        self._ticks_positions = positions
+        x1, y1, x2, y2 = self._req_xys
+        transform = self._req_transform
+        scientific = self._default_style[f"{self._tag}.labels.scientific"] \
+            if self._req_scientific is None \
+            else self._req_scientific
+        
+        data = np.asarray(transform.get_x_interval)#TODO
+        texts = [
+            '{0:.{1}g}'.format(d, scientific).replace('e', '\ne')
+            for d in data
+        ]
+        
+        if self._side in ('t', 'b'):
+            positions = [ (x, y1, x, y2) for x in transform(data) ]
+        else:  # left or right
+            positions = [ (x1, y, x2, y) for y in transform(data) ]
+        
+        self._update_labels = False
+        
+        return texts, positions
 
 
 class _Frame(_BaseRegion):
@@ -1152,10 +1000,6 @@ class _Frame(_BaseRegion):
             ]
     ):
         self.set_bbox(xys)
-    
-    def update_theme(self, default_style: dict[str, Any]):
-        super().update_theme(default_style)
-        self._rect.update_theme(self._default_style)
     
     def draw(self):
         self._rect.draw()
@@ -1206,25 +1050,29 @@ class _BaseSubwidget:
         root = figure._root()
         self._figure = figure
         self._to_px = lambda dim: _to_px(root, dim)
-        self._default_style: dict[str, Any]
-        self._root_default_style: dict[str, Any]
         self._zorder_tags: dict[_BaseArtist, str] = {}
         self._size: tuple[int, int] = (
             self.winfo_reqwidth(), self.winfo_reqheight()
         )
         self._req_facecolor: str | None = None
-        self._update_theme()
         self.bind('<Configure>', self._on_configure, add=True)
+    
+    @property
+    def _default_style(self) -> dict[str, Any]:
+        return self._figure._default_style
     
     def _on_configure(self, event: tk.Event):
         self._size = (event.width, event.height)
     
-    def _update_theme(self):
-        self._default_style = self._figure._default_style
-    
     def update_theme(self):
-        self._update_theme()
         self.set_facecolor(self._req_facecolor)
+        
+        for artist in self._zorder_tags:
+            artist._stale = True
+        
+        event = tk.Event()
+        event.width, event.height = self._size
+        self._on_configure(event)
     
     def draw(self):
         raise NotImplementedError
@@ -1251,30 +1099,26 @@ class _Suptitle(_BaseSubwidget, tk.Canvas):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._title: _Title = _Title(self, tag=f'{self._tag}')
+        self._text: _Text = _Text(self, text='', tag=f'{self._tag}.text')
         self.set_facecolor()
     
     def _on_configure(self, event: tk.Event):
         super()._on_configure(event)
-        w, h = self._size
-        self._title.resize((0, 0, w-1, None))
-        self._title.draw()
-    
-    def update_theme(self):
-        super().update_theme()
-        self._title.update_theme()
-        event = tk.Event()
-        event.width, event.height = self._size
-        self._on_configure(event)
+        self.set_bounds()
+        self._text.draw()
     
     def draw(self):
-        self._title.draw()
-        x1, y1, x2, y2 = self._title.bbox()
-        self.configure(width=x2 - x1, height=y2 - y1)
-         # triggers `self._on_configure`
+        self._text.draw()
+        xys = self._text.bbox()
+        if xys is None:
+            self._text.draw()
+        else:
+            x1, y1, x2, y2 = xys
+            self.configure(width=x2 - x1, height=y2 - y1)
+            self.update_idletasks()  # triggers `self._on_configure`
     
-    def get_title(self) -> _Title:
-        return self._title
+    def get_title(self) -> _Text:
+        return self._text
     
     def set_bounds(
             self,
@@ -1289,15 +1133,15 @@ class _Suptitle(_BaseSubwidget, tk.Canvas):
             )
         
         w, h = self._size
-        self._title.set_bounds(
+        self._text.set_bounds(
             (0, 0, w-1, None), sticky=sticky, padx=padx, pady=pady
         )
     
     def set_style(self, *args, **kwargs):
-        return self._title.set_style(*args, **kwargs)
+        return self._text.set_style(*args, **kwargs)
     
     def get_style(self) -> dict[str, Any]:
-        return self._title.get_style()
+        return self._text.get_style()
 
 
 class _Plot(_BaseSubwidget, tk.Canvas):
@@ -1306,136 +1150,109 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._artists: dict[str, list[_BaseArtist]] = {"line": []}
-        self._x_transform: _FirstOrderPolynomial
-        self._y_transform: _FirstOrderPolynomial
-        self._req_facecolor: str | None
-        self._taxis: _Axis
-        self._baxis: _Axis
-        self._laxis: _Axis
-        self._raxis: _Axis
-        
-        self._title: _Title = _Title(
-            self,
-            default_style=self._root_default_style["title"],
-            tag=f'{self._tag}.title'
-        )
-        for side in ['t', 'b', 'l', 'r']:
-            name = f'{side}axis'
-            axis: _Axis = _Axis(
-               self,
-               side=side,
-               default_style=self._root_default_style[name],
-               tag=f'{self._tag}.{name}'
-            )
-            setattr(self, f'_{name}', axis)
-            self._set_axislabel(side)
-        self._frame: _Frame = _Frame(
-            self,
-            default_style=self._root_default_style["frame"],
-            tag=f'{self._tag}.frame'
-        )
+        self._x_transform: _BaseTransform
+        self._y_transform: _BaseTransform
+        self._title: _Text = _Text(self, text='', tag='title.text')
+        self._taxis: _Axis = _Axis(self, side='t', tag='taxis')
+        self._baxis: _Axis = _Axis(self, side='b', tag='baxis')
+        self._laxis: _Axis = _Axis(self, side='l', tag='laxis')
+        self._raxis: _Axis = _Axis(self, side='r', tag='raxis')
+        self._tticks: _Ticks = _Ticks(self, side='t', tag='tticks')
+        self._bticks: _Ticks = _Ticks(self, side='b', tag='bticks')
+        self._lticks: _Ticks = _Ticks(self, side='l', tag='lticks')
+        self._rticks: _Ticks = _Ticks(self, side='r', tag='rticks')
+        '''#TODO
+        self._frame: _Frame
         self._frame.set_bbox(self._get_xys_for_frame())
+        '''    
         self.set_facecolor()
-        self.set_title('')
+        self.set_btickslabels(True)
+        #self.set_ltickslabels(True)
     
     def _on_configure(self, event: tk.Event):
         super()._on_configure(event)
-        w, h = self._size
-        
-        self._title.resize((0, 0, w-1, None))
-        self._title.draw()
-        
-        if hasattr(self, '_legend'):
-            self._legend.resize(self._get_xys_for_legend())
-            self._legend.draw()
-        
-        for side in ['t', 'b', 'l', 'r']:
-            axis = self._get_axis(side)
-            axis.resize(
-                self._get_xys_for_axis(side, draw_dependencies=False)
-            )
-        
         self.draw()
     
-    def update_theme(self, default_style: dict[str, Any]):
-        super().update_theme(default_style)
-        self.set_facecolor(self._req_facecolor)
+    def draw(self):
+        w, h = self._size
+        cx1, cy1, cx2, cy2 = cxys = (0, 0, w-1, h-1)
         
-        self._title.update_theme(self._root_default_style["title"])
-        
-        if hasattr(self, '_legend'):
-            self._legend.update_theme(self._root_default_style["legend"])
-        
-        for side in ['t', 'b', 'l', 'r']:
-            self._get_axis(side).update_theme(
-                self._root_default_style[f'{side}axis']
-            )
-        
-        self._frame.update_theme(self._root_default_style["frame"])
-        
-        for artists in self._artists.values():
-            for artist in artists:
-                artist.update_theme(self._root_default_style[artist._name])
-        
-        event = tk.Event()
-        event.width, event.height = self._size
-        self._on_configure(event)
-    
-    def draw(self):#TODO: transform
+        self._title.set_bounds(xys=cxys)
         self._title.draw()
+        if xys := self._title.bbox():
+            tx1, ty1, tx2, ty2 = xys
+        else:
+            tx1, ty1, tx2, ty2 = cxys
         
-        self._baxis.set_ticks(True)#???
-        for side in ['t', 'b', 'l', 'r']:
-            self._get_axis(side)._update_bbox()
-        cx1, cy1, cx2, cy2 = self._get_xys_for_frame()
-        dx1, dy1 = np.asarray(
-            [ a._xymin for a in self._artists["line"] ]
-        ).min(axis=0)
-        dx2, dy2 = np.asarray(
-            [ a._xymax for a in self._artists["line"] ]
-        ).max(axis=0)
-        self._x_transform = x_tf = _FirstOrderPolynomial.from_points(
-            np.array([dx1, dx2]), np.array([cx1, cx2])
-        )
-        self._y_transform = y_tf = _FirstOrderPolynomial.from_points(
-            np.array([dy1, dy2]), np.array([cy1, cy2])
-        )
-        ticks_values = np.asarray([dx1, dx2])
-        ticks_positions = x_tf(ticks_values)
-        if self._baxis._req_ticks is not None:
-            self._baxis._set_ticks_values(ticks_values, ticks_positions)
-            self._baxis.draw()
+        axis_bboxes = []
+        xys = (0, ty2+1, w-1, h-1)
+        for i, side in enumerate(['r', 'b', 'l', 't']):
+            _xys = list(xys)
+            _xys[i] = None
+            axis = self._get_axis(side)
+            axis.set_bounds(tuple(_xys))
+            axis.draw()
+            axis_bboxes.append(axis.bbox())
+        if (bbox := axis_bboxes[0]) is not None:
+            cx2 = bbox[0] - 1
+        if (bbox := axis_bboxes[1]) is not None:
+            cy2 = bbox[1] - 1
+        if (bbox := axis_bboxes[2]) is not None:
+            cx1 = bbox[2] + 1
+        if (bbox := axis_bboxes[3]) is not None:
+            cy1 = bbox[3] + 1
         
+        if self._artists["line"]:
+            dx1, dy1 = np.asarray(
+                [ a._xymin for a in self._artists["line"] ]
+            ).min(axis=0)
+            dx2, dy2 = np.asarray(
+                [ a._xymax for a in self._artists["line"] ]
+            ).max(axis=0)
+        else:
+            dx1, dx2 = dy1, dy2 = (0., 1.)
+        x_tf = _FirstOrderPolynomial.from_points(
+            [dx1, dx2], [cx1, cx2], x_interval=[dx1, dx2]
+        )
+        y_tf = _FirstOrderPolynomial.from_points(
+            [dy1, dy2], [cy1, cy2], x_interval=[dx1, dx2]
+        )
+        self._bticks.set_xys_and_transform((cx1, None, cx2, cy2), transform=x_tf)
+        old_xys, old_tf = self._bticks.draw(dry=True)
+        _, ty2, _, _ = self._bticks._dummy_label.bbox()
+        
+        cx1, cy1, cx2, cy2 = xys = (cx1, cy1, cx2, ty2-1)#TODO
+        x_tf = _FirstOrderPolynomial.from_points(
+            [dx1, dx2], [cx1, cx2], x_interval=[dx1, dx2]
+        )
+        y_tf = _FirstOrderPolynomial.from_points(
+            [dy1, dy2], [cy1, cy2], x_interval=[dy1, dy2]
+        )
+        self._bticks.set_xys_and_transform(
+            xys=old_xys, transform=old_tf, update_labels=False
+        )
+        self._bticks.set_xys_and_transform((cx1, None, cx2, cy2), transform=x_tf)
+        self._bticks.draw()
+        
+        '''#TODO
         self._frame.set_bbox(self._get_xys_for_frame())
         self._frame.draw()
+        '''
         
         for artists in self._artists.values():
             for artist in artists:
+                artist.set_transforms(x_transform=x_tf, y_transform=y_tf)
                 artist.draw()
         
         for tag in sorted(self._zorder_tags.values()):
             self.tag_raise(tag)
     
     def _create_color_cycle(self) -> Cycle:
-        return Cycle(self._root_default_style["colors"])
-    
-    def set_facecolor(self, color: str | None = None) -> str | None:
-        assert isinstance(color, (str, type(None))), color
-        
-        # Get default style and update it with the new values
-        default_color = self._root_default_style["facecolor"]
-        new_color = default_color if color is None else color
-        self.configure(bg=new_color)
-        self._req_facecolor = color
-        
-        return self._req_facecolor
-    
-    def get_facecolor(self) -> str:
-        return self["background"]
+        return Cycle(self._default_style["colors"])
     
     def set_title(
             self,
-            text: str = '',
+            text: str | None = None,
             color: str | None = None,
             angle: IntFloat | None = None,
             family: str | None = None,
@@ -1447,7 +1264,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             sticky: str | None = None,
             padx: Dimension | tuple[Dimension, Dimension] | None = None,
             pady: Dimension | tuple[Dimension, Dimension] | None = None,
-    ) -> _Title:
+    ):
         if sticky is not None and ('s' in sticky or sticky == 'center'):
             raise ValueError(
                 "`sticky` for title must not include 's' and not equal to "
@@ -1455,7 +1272,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             )
         
         w, h = self._size
-        self._title.set_text(
+        self._title.set_style(
             text=text,
             color=color,
             angle=angle,
@@ -1466,16 +1283,14 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             underline=underline,
             overstrike=overstrike
         )
-        self._title.set_bbox(
+        self._title.set_bounds(
             xys=(0, 0, w-1, None),
             sticky=sticky,
             padx=padx,
             pady=pady
         )
-        
-        return self._title
     
-    def get_title(self) -> _Title:
+    def get_title(self) -> _Text:
         return self._title
     
     def _get_xys_for_legend(
@@ -1486,9 +1301,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         raise NotImplementedError
     
     def _get_xys_for_axis(
-            self,
-            side: Literal['t', 'b', 'l', 'r'],
-            draw_dependencies: bool = True
+            self, side: Literal['t', 'b', 'l', 'r']
     ) -> tuple[
         Dimension | None, Dimension | None, Dimension | None, Dimension | None
     ]:
@@ -1500,8 +1313,6 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             
             assert which in ('_title', '_legend'), which
             
-            if draw_dependencies:
-                region.draw()
             _x1, _y1, _x2, _y2 = region.get_bbox().get()
             
             if which in '_title':
@@ -1562,7 +1373,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def _set_axislabel(
             self,
             side: Literal['t', 'b', 'l', 'r'],
-            text: str = '',
+            text: str | None = None,
             color: str | None = None,
             angle: IntFloat | None = None,
             family: str | None = None,
@@ -1574,9 +1385,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             sticky: str | None = None,
             padx: Dimension | tuple[Dimension, Dimension] | None = None,
             pady: Dimension | tuple[Dimension, Dimension] | None = None
-    ) -> _Axis:
+    ):
         axis = self._get_axis(side)
-        axis.set_title(
+        axis.set_label(
             text=text,
             color=color,
             angle=angle,
@@ -1585,59 +1396,62 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             weight=weight,
             slant=slant,
             underline=underline,
-            overstrike=overstrike,
+            overstrike=overstrike
+        )
+        axis.set_bounds(
             sticky=sticky,
             padx=padx,
             pady=pady
         )
-        return axis
     
-    def set_tlabel(self, *args, sticky: str | None = None, **kwargs) -> _Axis:
-        if sticky is not None and ('s' in sticky or sticky == 'center'):
-            raise ValueError(
-                "`sticky` for taxis label must not include 's' and not equal to "
-                f"'center' but got {sticky}."
-            )
-        return self._set_axislabel('t', *args, sticky=sticky, **kwargs)
+    def set_tlabel(self, *args, **kwargs):
+        return self._set_axislabel('t', *args, **kwargs)
     
-    def set_blabel(self, *args, sticky: str | None = None, **kwargs) -> _Axis:
-        if sticky is not None and ('n' in sticky or sticky == 'center'):
-            raise ValueError(
-                "`sticky` for baxis label must not include 'n' and not equal to "
-                f"'center' but got {sticky}."
-            )
-        return self._set_axislabel('b', *args, sticky=sticky, **kwargs)
+    def set_blabel(self, *args, **kwargs):
+        return self._set_axislabel('b', *args, **kwargs)
     
-    def set_llabel(self, *args, sticky: str | None = None, **kwargs) -> _Axis:
-        if sticky is not None and ('e' in sticky or sticky == 'center'):
-            raise ValueError(
-                "`sticky` for laxis label must not include 'e' and not equal to "
-                f"'center' but got {sticky}."
-            )
-        return self._set_axislabel('l', *args, sticky=sticky, **kwargs)
+    def set_llabel(self, *args, **kwargs):
+        return self._set_axislabel('l', *args, **kwargs)
     
-    def set_rlabel(self, *args, sticky: str | None = None, **kwargs) -> _Axis:
-        if sticky is not None and ('w' in sticky or sticky == 'center'):
-            raise ValueError(
-                "`sticky` for raxis label must not include 'w' and not equal to "
-                f"'center' but got {sticky}."
-            )
-        return self._set_axislabel('r', *args, sticky=sticky, **kwargs)
+    def set_rlabel(self, *args, **kwargs):
+        return self._set_axislabel('r', *args, **kwargs)
     
-    def _get_axislabel(self, side: Literal['t', 'b', 'l', 'r']) -> _Title:
-        return self._get_axis(side)._title
+    def _get_ticks(self, side: Literal['t', 'b', 'l', 'r']) -> _Ticks:
+        assert side in ('t', 'b', 'l', 'r'), side
+        return getattr(self, f'_{side}ticks')
     
-    def get_tlabel(self, *args, **kwargs) -> _Axis:
-        return self._get_axislabel('t', *args, **kwargs)
+    def get_tticks(self) -> _Ticks:
+        return self._get_ticks('t')
     
-    def get_blabel(self, *args, **kwargs) -> _Axis:
-        return self._get_axislabel('b', *args, **kwargs)
+    def get_bticks(self) -> _Ticks:
+        return self._get_ticks('b')
     
-    def get_llabel(self, *args, **kwargs) -> _Axis:
-        return self._get_axislabel('l', *args, **kwargs)
+    def get_lticks(self) -> _Ticks:
+        return self._get_ticks('l')
     
-    def get_rlabel(self, *args, **kwargs) -> _Axis:
-        return self._get_axislabel('r', *args, **kwargs)
+    def get_rticks(self) -> _Ticks:
+        return self._get_ticks('r')
+    
+    def _set_tickslabels(
+            self,
+            side: Literal['t', 'b', 'l', 'r'],
+            *args,
+            **kwargs
+    ):
+        ticks = self._get_ticks(side)
+        ticks.set_labels(*args, **kwargs)
+    
+    def set_ttickslabels(self, *args, **kwargs):
+        return self._set_tickslabels('t', *args, **kwargs)
+    
+    def set_btickslabels(self, *args, **kwargs):
+        return self._set_tickslabels('b', *args, **kwargs)
+    
+    def set_ltickslabels(self, *args, **kwargs):
+        return self._set_tickslabels('l', *args, **kwargs)
+    
+    def set_rtickslabels(self, *args, **kwargs):
+        return self._set_tickslabels('r', *args, **kwargs)
     
     def plot(
             self,
@@ -1672,12 +1486,10 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             self,
             x=x.ravel(),
             y=y.ravel(),
-            default_color=next(cycle),
-            color=color,
+            color=next(cycle) if color is None else color,
             width=width,
             smooth=smooth,
-            default_style=self._root_default_style["line"],
-            tags=(f'{self._tag}.line',)
+            tag='line'
         )
         lines.append(line)
         
@@ -1855,7 +1667,7 @@ class Figure(UndockedFrame):
     
     def set_suptitle(
             self,
-            text: str = '',
+            text: str | None = None,
             color: str | None = None,
             angle: IntFloat | None = None,
             family: str | None = None,
@@ -1869,7 +1681,7 @@ class Figure(UndockedFrame):
             pady: Dimension | tuple[Dimension, Dimension] | None = None,
             facecolor: str | None = None
     ) -> _Suptitle | None:
-        if text:  # enable suptitle
+        if text is not None:  # enable suptitle
             if not hasattr(self, '_suptitle'):
                 self._suptitle = _Suptitle(self)
                 self._suptitle.grid(row=0, column=0, sticky='we')
@@ -1945,9 +1757,7 @@ class Figure(UndockedFrame):
         
         # Create plots
         self._plots: NDArray[_Plot] = np.array([
-            [ _Plot(self, default_style=self._default_style["plot"])
-              for c in range(n_cols) ]
-            for r in range(n_rows)
+            [ _Plot(self) for c in range(n_cols) ] for r in range(n_rows)
         ])
         for r, row in enumerate(self._plots, 1):  # plots start from 2nd row
             for c, plot in enumerate(row):
@@ -1991,7 +1801,6 @@ class Figure(UndockedFrame):
             else:
                 self._toolbar.grid(row=1, **kw)
                  # the toolbar will be `grid` again when `set_plots` is called
-                self.grid_rowconfigure(0, weight=1)
                 self.grid_columnconfigure(0, weight=1)
         elif not enable and hasattr(self, '_toolbar'):
             self._toolbar.destroy()
@@ -2013,13 +1822,12 @@ if __name__ == '__main__':
     root = Window(title='Figure Demo')
     
     x = np.arange(48000. * 10.) / 3.
-    y = x
+    y = np.sin(2*np.pi/20000*x)
     
     fig = Figure(root, toolbar=True)
     fig.pack(fill='both', expand=True)
     
     suptitle = fig.set_suptitle('<Suptitle>')
-    '''
     plt = fig.set_plots(1, 1)
     plt.plot(x, y)
     plt.set_title('<Title>')
@@ -2027,7 +1835,7 @@ if __name__ == '__main__':
     plt.set_blabel('<bottom-label>')
     plt.set_llabel('<left-label>')
     plt.set_rlabel('<right-label>')
-    '''
+    
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
     
     root.mainloop()
