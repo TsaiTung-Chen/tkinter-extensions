@@ -230,13 +230,13 @@ class DnDItem(ttk.Frame):
         self._offset_y: int = y - event.y_root
         self._motion_pattern = f'<B{button}-Motion>'
         self._release_pattern = f'<ButtonRelease-{button}>'
-        self._initial_widget: tk.BaseWidget | None = widget
+        self._initial_widget: tk.Misc | None = widget
         self._initial_items: list[DnDItem] | None = dnd_container.dnd_items.copy()
         self._initial_background = wrapper["background"]
         self._dnd_container_x: int = self._dnd_container.winfo_rootx()
         self._dnd_container_y: int = self._dnd_container.winfo_rooty()
         
-        focus_widget: tk.BaseWidget | None = self.focus_get()
+        focus_widget: tk.Misc | None = self.focus_get()
         tk.Wm.wm_manage(wrapper, wrapper)  # make wrapper become a toplevel
         tk.Wm.wm_overrideredirect(wrapper, True)
         tk.Wm.wm_attributes(wrapper, '-topmost', True)
@@ -790,7 +790,7 @@ class DnDContainer(tk.Canvas):
             self,
             sequence: str,
             *,
-            trigger: tk.BaseWidget,
+            trigger: tk.Misc,
             moved: DnDItem
     ):
         """

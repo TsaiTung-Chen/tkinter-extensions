@@ -21,7 +21,7 @@ class CollapsedFrame(ttk.Frame):
             master=None,
             text='',
             orient: str = 'vertical',
-            labelwidget: tk.BaseWidget = None,
+            labelwidget: tk.Misc | None = None,
             variable: tk.Variable | None = None,
             onvalue='__on__',
             offvalue='__off__',

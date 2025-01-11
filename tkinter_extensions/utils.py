@@ -18,11 +18,11 @@ import numpy as np
 import ttkbootstrap as ttk
 from ttkbootstrap import colorutils
 
-from .constants import BUILTIN_WIDGETS, MODIFIERS, MODIFIER_MASKS, DEFAULT_SCALE
+from .constants import BUILTIN_WIDGETS, MODIFIERS, MODIFIER_MASKS, DEFAULT_PPD
 # =============================================================================
 # ---- Functions
 # =============================================================================
-def scale_size(widget, *sizes) -> int | tuple[int] | list[int]:
+def scale_size(widget: tk.Misc | None, *sizes) -> int | tuple[int] | list[int]:
     """
     Scale the size based on the scaling factor of tkinter. 
     This is used most frequently to adjust the assets for image-based widget
@@ -34,7 +34,7 @@ def scale_size(widget, *sizes) -> int | tuple[int] | list[int]:
             The widget object.
         
         size (Union[int, List, Tuple]):
-            A single integer or an iterable of integers
+            A single integer or an iterable of integers.
     
     Returns:
     
@@ -43,8 +43,9 @@ def scale_size(widget, *sizes) -> int | tuple[int] | list[int]:
     """
     assert len(sizes) >= 1, sizes
     
-    scaling = widget.tk.call('tk', 'scaling')
-    factor = scaling / DEFAULT_SCALE  # current UI scaling factor
+    widget = tk._get_default_root('scale_size') if widget is None else widget
+    ppd = widget.winfo_fpixels('1p')  # current pixels per point
+    factor = ppd / DEFAULT_PPD # current UI scaling factor
     
     scaled = []
     for size in sizes:
@@ -76,7 +77,7 @@ def quit_if_all_closed(window):
     return _wrapped
 
 
-def get_center_position(widget:tk.BaseWidget) -> tuple[int, int]:
+def get_center_position(widget: tk.Misc) -> tuple[int, int]:
     widget.update_idletasks()
     if (width := widget.winfo_width()) == 1:
         width = widget.winfo_reqwidth()
@@ -87,7 +88,7 @@ def get_center_position(widget:tk.BaseWidget) -> tuple[int, int]:
     return (x_root + width//2, y_root + height//2)
 
 
-def center_window(to_center: tk.BaseWidget, center_of: tk.BaseWidget):
+def center_window(to_center: tk.Misc, center_of: tk.Misc):
     x_center, y_center = get_center_position(center_of)
     if (width := to_center.winfo_width()) == 1:
         width = to_center.winfo_reqwidth()
@@ -134,7 +135,7 @@ def unbind(widget, sequence, funcid=None):
 
 
 def bind_recursively(
-        widget: tk.BaseWidget,
+        widget: tk.Misc,
         seqs: str | list[str],
         funcs: Callable | list[Callable],
         add: bool | str | None = None,
@@ -172,7 +173,7 @@ def bind_recursively(
 
 
 def unbind_recursively(
-        widget: tk.BaseWidget,
+        widget: tk.Misc,
         seqs: str | list[str] | None = None,
         *,
         key: str,
@@ -214,8 +215,8 @@ def unbind_recursively(
 
 
 def redirect_layout_managers(
-        redirected: tk.BaseWidget,
-        source: tk.BaseWidget,
+        redirected: tk.Misc,
+        source: tk.Misc,
         orig_prefix: str = 'content_'
 ):
     """Redirect layout manager to the `source`'s layout manager
@@ -337,7 +338,7 @@ def recolor_black(
         image: Image.Image,
         new_color: tuple,   # RGB
         photoimage: bool = False,
-        master: tk.Tk | tk.BaseWidget | None = None
+        master: tk.Misc | None = None
 ) -> Image.Image | PhotoImage:
     assert isinstance(image, Image.Image), type(image)
     assert isinstance(new_color, tuple), type(new_color)
@@ -355,9 +356,9 @@ def recolor_black(
 
 def create_image_pair(
         image: Image.Image,
-        widget: tk.BaseWidget,
+        widget: tk.Misc,
         photoimage: bool = False,
-        master: tk.Tk | tk.BaseWidget | None = None
+        master: tk.Misc | None = None
 ) -> tuple[Image.Image, Image.Image] | tuple[PhotoImage, PhotoImage]:
     _convert_bitdepth = lambda x: round((255./65535.) * x)
     
@@ -379,7 +380,7 @@ def create_color_image(
         padding: int | tuple | list = (0, 0),
         autoscale: bool = True,
         photoimage: bool = False,
-        master: tk.Tk | tk.BaseWidget | None = None
+        master: tk.Misc | None = None
 ) -> Image.Image | PhotoImage:
     """Create an image of size `size` and color `color` with external padding 
     `padding`. The padded margin has the same rgb color but with zero alpha 

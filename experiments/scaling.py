@@ -9,8 +9,9 @@ Created on Sat Aug 17 16:11:40 2024
 import sys
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk
 from PIL.ImageTk import PhotoImage
+
+import ttkbootstrap as ttk
 # =============================================================================
 # ---- Show info for each screen
 # =============================================================================
@@ -76,22 +77,22 @@ def _get_screen_info_else() -> float:
     root = tk.Tk()
     root.wm_withdraw()
     
-    # Screen size in pixels
+    # System claimed screen size in pixels
     p_w, p_h = root.winfo_screenwidth(), root.winfo_screenheight()
 
-    # System DPI (dots per inch)
-    dpi_sys = root.winfo_fpixels('1i')
+    # System claimed PPI (pixels per inch)
+    ppi_sys = root.winfo_fpixels('1i')
 
-    # Tk default DPI
-    dpi_tk = 72.
+    # Tk default PPI
+    ppi_tk = 72.
 
     # Scaling factor
-    scale = dpi_sys / dpi_tk  # system DPI / Tk DPI
+    scale = ppi_sys / ppi_tk  # system PPI / Tk PPI
      # or root.tk.call('tk', 'scaling')
     
-    print(f'Screen size = {p_w} x {p_h} pixels')
-    print(f'System DPI = {dpi_sys} dots/inch')
-    print(f'Scaling factor = {scale}')
+    print(f'System claimed screen size = {p_w} x {p_h} pixels')
+    print(f'System claimed PPI = {ppi_sys} pixels/inch')
+    print(f'Scaling factor (system claimed / Tk default) = {scale}')
     
     root.destroy()
     
@@ -107,56 +108,68 @@ else:
 # =============================================================================
 # ---- Tk app
 # =============================================================================
-root = tk.Tk()
+root = ttk.Window(title='Tk Scaling Test')
 
 text = tk.StringVar()
 ttk.Label(root, textvariable=text).pack()
 
 ttk.Button(
     root,
-    text='show scaling factor (~1.33 as Windows default, ~1 in macOS LoDPI mode, ~2 in macOS HiDPI mode)',
+    text='Show scaling factor (~1.33 as Windows default, ~1 in macOS LoDPI mode, ~2 in macOS HiDPI mode)',
     command=lambda: text.set(root.tk.call('tk', 'scaling'))
 ).pack()
 
 ttk.Button(
     root,
-    text='show system DPI (dots per inch) (~96 as Windows default, ~72 in macOS LoDPI mode, ~144 in macOS HiDPI mode)',
+    text='Show system PPI (pixels per inch) (~96 as Windows default, ~72 in macOS LoDPI mode, ~144 in macOS HiDPI mode)',
     command=lambda: text.set(root.winfo_fpixels('1i'))
 ).pack()
 
 ttk.Button(
     root,
-    text='show screen width in pixels',
+    text='Show screen width in pixels',
     command=lambda: text.set(root.winfo_screenwidth())
 ).pack()
 
 ttk.Button(
     root,
-    text='set the scaling factor to 0.5',
+    text='Set the scaling factor to 0.5',
     command=lambda: text.set(root.tk.call('tk', 'scaling', 0.5))
 ).pack()
 
 ttk.Button(
     root,
-    text='set the scaling factor to 1.0',
+    text='Set the scaling factor to 1.0',
     command=lambda: text.set(root.tk.call('tk', 'scaling', 1.0))
 ).pack()
 
 ttk.Button(
     root,
-    text='set the scaling factor to 2.0',
+    text='Set the scaling factor to 2.0',
     command=lambda: text.set(root.tk.call('tk', 'scaling', 2.0))
 ).pack()
 
 ttk.Button(
     root,
-    text='create button',
+    text='root.winfo_fpixel(1)',
+    command=lambda: text.set(root.winfo_fpixels(1))
+).pack()
+
+ttk.Button(
+    root,
+    text="root.winfo_fpixel('1p')",
+    command=lambda: text.set(root.winfo_fpixels('1p'))
+).pack()
+
+ttk.Button(
+    root,
+    text='Create button',
     command=lambda: ttk.Button(root, text='new button').pack()
 ).pack()
 
 ttk.Button(
     root,
-    text='redraw',
+    text='Redraw',
     command=lambda: canvas.destroy() or draw()
 ).pack()
 

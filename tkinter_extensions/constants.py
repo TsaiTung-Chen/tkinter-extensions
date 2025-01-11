@@ -52,10 +52,13 @@ BUILTIN_WIDGETS = [
 ]
 
 
-if PLATFORM == 'darwin':  # macOS has a default DPI value of 72
-    DEFAULT_SCALE = 72./72.  # this is about 1.00
-else:  # Windows and Linux have a default DPI value of 96
-    DEFAULT_SCALE = 96./72.  # this is about 1.33
+TK_DPI = 72.  # Tk default points (physical dots) per inch
+if PLATFORM == 'darwin':  # macOS has a default PPI value of 72
+    SYSTEM_PPI = 72.
+    DEFAULT_PPD = SYSTEM_PPI / TK_DPI  # pixels per point => this is about 1.00
+else:  # Windows and Linux have a default PPI value of 96
+    SYSTEM_PPI = 96.
+    DEFAULT_PPD = SYSTEM_PPI / TK_DPI  # pixels per point => this is about 1.33
 
 
 Int = int | np.integer
@@ -63,6 +66,7 @@ Float = float | np.floating
 Complex = complex | np.complexfloating
 Number = Int | Float | Complex
 IntFloat = Int | Float
+Dimension = IntFloat | str
 
 
 del sys

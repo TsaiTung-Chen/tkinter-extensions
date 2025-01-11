@@ -531,7 +531,7 @@ class _Scrolled:
 # =============================================================================
 # ---- Scrolled Widgets with the GeneralXYView
 # =============================================================================
-def create_scrolledwidget(widget:tk.BaseWidget=ttk.Frame):
+def create_scrolledwidget(widget: tk.Misc = ttk.Frame):
     """Structure:
     <. Container (outer frame) >
         <.1 Cropper (inner frame) >
@@ -539,13 +539,13 @@ def create_scrolledwidget(widget:tk.BaseWidget=ttk.Frame):
         <.2 horizontal scrollbar >
         <.3 vertical scrollbar >
     """
-    assert issubclass(widget, tk.BaseWidget), widget
+    assert issubclass(widget, tk.Misc), widget
     class _ScrolledWidget(_Scrolled, _GeneralXYView, widget): pass
     return _ScrolledWidget
 
 
 def ScrolledWidget(master=None,
-                   widget: tk.BaseWidget = ttk.Frame,
+                   widget: tk.Misc = ttk.Frame,
                    **kwargs):
     """A convenience function working like a class instance init function.
     """

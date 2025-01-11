@@ -812,7 +812,7 @@ class Sheet(ttk.Frame):
         self._focus_out_cell()
         self.focus_set()
     
-    def _center_window(self, toplevel: tk.BaseWidget):
+    def _center_window(self, toplevel: tk.Misc):
         center_window(to_center=toplevel, center_of=self.winfo_toplevel())
     
     def _make_tags(
@@ -3468,7 +3468,7 @@ class Book(ttk.Frame):
             self._rearrange_sheets_props()
         self._focus_on_sheet()
     
-    def _center_window(self, toplevel: tk.BaseWidget):
+    def _center_window(self, toplevel: tk.Misc):
         center_window(to_center=toplevel, center_of=self.winfo_toplevel())
     
     def _rearrange_sheets_props(self, *_):
