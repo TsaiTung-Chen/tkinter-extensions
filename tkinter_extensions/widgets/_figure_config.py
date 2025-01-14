@@ -18,8 +18,6 @@ common_style = {
         "size": 20,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
         "angle": 0,
         "sticky": 'n',
         "padx": ('0p', '0p'),
@@ -32,8 +30,6 @@ common_style = {
         "size": 17,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
         "angle": 0,
         "sticky": 'n',
         "padx": ('0p', '0p'),
@@ -46,8 +42,6 @@ common_style = {
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
         "angle": 0,
         "sticky": 'n',
         "padx": ('0p', '0p'),
@@ -60,8 +54,6 @@ common_style = {
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
         "angle": 0,
         "sticky": 's',
         "padx": ('0p', '0p'),
@@ -74,8 +66,6 @@ common_style = {
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
         "angle": 90,
         "sticky": 'w',
         "padx": ('0p', '3p'),
@@ -88,8 +78,6 @@ common_style = {
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
         "angle": -90,
         "sticky": 'e',
         "padx": ('3p', '0p'),
@@ -102,8 +90,6 @@ common_style = {
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
         "angle": 0,
         "sticky": 'n',
         "padx": ('0p', '0p'),
@@ -113,8 +99,7 @@ common_style = {
     "tticks.labels.max_ticks": 13,
     "tticks.line": {
         "zorder": 2.0,
-        "width": '1p',
-        "smooth": False
+        "width": '1p'
     },
     
     "bticks.labels.text": {
@@ -123,8 +108,6 @@ common_style = {
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
         "angle": 0,
         "sticky": 's',
         "padx": ('0p', '0p'),
@@ -134,8 +117,7 @@ common_style = {
     "bticks.labels.max_ticks": 13,
     "bticks.line": {
         "zorder": 2.0,
-        "width": '1p',
-        "smooth": False
+        "width": '1p'
     },
     
     "lticks.labels.text": {
@@ -144,9 +126,7 @@ common_style = {
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
-        "angle": 90,
+        "angle": -90,
         "sticky": 'w',
         "padx": ('0p', '2p'),
         "pady": ('0p', '0p')
@@ -155,8 +135,7 @@ common_style = {
     "lticks.labels.max_ticks": 13,
     "lticks.line": {
         "zorder": 2.0,
-        "width": '1p',
-        "smooth": False
+        "width": '1p'
     },
     
     "rticks.labels.text": {
@@ -165,9 +144,7 @@ common_style = {
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
-        "angle": -90,
+        "angle": 90,
         "sticky": 'e',
         "padx": ('2p', '0p'),
         "pady": ('0p', '0p')
@@ -176,8 +153,7 @@ common_style = {
     "rticks.labels.max_ticks": 13,
     "rticks.line": {
         "zorder": 2.0,
-        "width": '1p',
-        "smooth": False
+        "width": '1p'
     },
     
     "frame.rect": {
@@ -199,8 +175,6 @@ common_style = {
         "size": 12,
         "weight": 'normal',
         "slant": 'roman',
-        "underline": False,
-        "overstrike": False,
         "angle": 0,
         "sticky": 'w',
         "padx": ('2p', '2p'),
