@@ -142,8 +142,8 @@ class _BaseTransform:
         assert len(x_interval) == len(y_interval) == 2, (x_interval, y_interval)
         assert all( isinstance(x, IntFloat) for x in x_interval ), x_interval
         assert all( isinstance(y, IntFloat) for y in y_interval ), y_interval
-        self._x_interval: list[IntFloat] = x_interval
-        self._y_interval: list[IntFloat] = y_interval
+        self._x_interval: list[IntFloat] = sorted(x_interval)
+        self._y_interval: list[IntFloat] = sorted(y_interval)
     
     @property
     def get_x_interval(self) -> tuple[IntFloat, IntFloat]:
@@ -249,8 +249,13 @@ class _BaseArtist(_BaseElement):
             *args,
             transforms: tuple[_BaseTransform, _BaseTransform] \
                 = (_FirstOrderPolynomial(0, 1), _FirstOrderPolynomial(0, 1)),
+            x_side: Literal['b', 't'] | None = None,
+            y_side: Literal['l', 'r'] | None = None,
             **kwargs
     ):
+        assert x_side in ('b', 't', None), x_side
+        assert y_side in ('l', 'r', None), y_side
+        
         super().__init__(*args, **kwargs)
         
         tag_length = len(self._tag)
@@ -262,6 +267,8 @@ class _BaseArtist(_BaseElement):
         
         self._stale: bool
         self._tags: tuple[str, ...] = tags
+        self._x_side: Literal['b', 't'] | None = x_side
+        self._y_side: Literal['l', 'r'] | None = y_side
         self._req_transforms: tuple[_BaseTransform, _BaseTransform] = transforms
         self._req_coords: list[Dimension] = []
         self._req_zorder: float | None = None
@@ -309,8 +316,8 @@ class _BaseArtist(_BaseElement):
             x_transform: _BaseTransform | None = None,
             y_transform: _BaseTransform | None = None,
     ):
-        assert isinstance(x_transform, _BaseTransform), x_transform
-        assert isinstance(y_transform, _BaseTransform), y_transform
+        assert isinstance(x_transform, (_BaseTransform, type(None))), x_transform
+        assert isinstance(y_transform, (_BaseTransform, type(None))), y_transform
         
         if x_transform is not None and x_transform != self._req_transforms[0]:
             self._req_transforms = (x_transform, self._req_transforms[1])
@@ -596,8 +603,8 @@ class _Line(_BaseArtist):
             **kwargs
     ):
         super().__init__(canvas=canvas, **kwargs)
-        self._xymin: NDArray[Float] = np.array([0., 1.], float)
-        self._xymax: NDArray[Float] = np.array([0., 1.], float)
+        self._xlims: NDArray[Float] = np.array([0., 1.], float)
+        self._ylims: NDArray[Float] = np.array([0., 1.], float)
         self._req_xy: NDArray[Float] = np.array([[]], dtype=float)
         self._req_default_color: str = ''
         self._id: int = self._canvas.create_line(
@@ -697,9 +704,11 @@ class _Line(_BaseArtist):
             xy[1] = y
         
         if not np.array_equal(xy, self._req_xy):
+            xmin, ymin = xy.min(axis=1)
+            xmax, ymax = xy.max(axis=1)
             self._req_xy = xy
-            self._xymin = xy.min(axis=1)
-            self._xymax = xy.max(axis=1)
+            self._xlims = np.array([xmin, xmax])
+            self._ylims = np.array([ymin, ymax])
             self._req_coords.clear()
             self._stale = True
     
@@ -1218,15 +1227,19 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     
     def draw(self):
         # Get data limits
-        dxss, dyss = [], []
-        for side in 'rblt':
-            if lines := getattr(self, f'_{side}artists')["lines"]:
-                dx1, dy1 = np.asarray([ a._xymin for a in lines ]).min(axis=0)
-                dx2, dy2 = np.asarray([ a._xymax for a in lines ]).max(axis=0)
+        dlimits = [
+            np.asarray([ a._ylims for a in self._rartists["lines"] ]),
+            np.asarray([ a._xlims for a in self._bartists["lines"] ]),
+            np.asarray([ a._ylims for a in self._lartists["lines"] ]),
+            np.asarray([ a._xlims for a in self._tartists["lines"] ])
+        ]
+        for i, dlims in enumerate(dlimits):
+            if dlims.size:
+                dlimits[i] = [dlims[:, 0].min(), dlims[:, 1].max()]
             else:
-                dx1, dx2 = dy1, dy2 = (1., 1e9)
-            dxss.append([dx1, dx2])
-            dyss.append([dy1, dy2])
+                dlimits[i] = [1., 1e9]
+        dlimits[0] = dlimits[0][::-1]  # flip y
+        dlimits[2] = dlimits[2][::-1]  # flip y
         
         # Draw items and get empty space for frame
         w, h = self._size
@@ -1258,12 +1271,15 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         
         ## Draw dummy ticks and get the empty space
         _cxys = (cx1, cy1, cx2, cy2)  # backup space for ticks
-        for i, (side, dxs, dys) in enumerate(zip('rblt', dxss, dyss)):
-            x_tf, y_tf = _get_transforms(dxs, dys, [cx1, cx2], [cy1, cy2])
+        climits = [[cy1, cy2], [cx1, cx2]] * 2
+        for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
+            tf = _FirstOrderPolynomial.from_points(
+                dlims, clims, x_interval=dlims, y_interval=clims
+            )
             xys = list(_cxys)
             xys[i] = None
             ticks = self._get_ticks(side)
-            ticks.draw_dummy(tuple(xys), x_tf if side in 'bt' else y_tf)
+            ticks.draw_dummy(tuple(xys), tf)
             ## Update empty space
             if bbox := self._rticks.bbox(dummy=True):
                 cx2 = bbox[0] - 1
@@ -1275,16 +1291,19 @@ class _Plot(_BaseSubwidget, tk.Canvas):
                 cy1 = bbox[3] + 1
         
         ## Draw ticks and get the empty space
-        for i, (side, dxs, dys) in enumerate(zip('rblt', dxss, dyss)):
-            x_tf, y_tf = _get_transforms(dxs, dys, [cx1, cx2], [cy1, cy2])
+        climits = [[cy1, cy2], [cx1, cx2]] * 2
+        tfs = {}
+        for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
+            tf = _FirstOrderPolynomial.from_points(
+                dlims, clims, x_interval=dlims, y_interval=clims
+            )
             xys = [cx1, cy1, cx2, cy2]
             xys[i] = None  # growing bound
             xys[i-2] = _cxys[i-2]  # use previous base bound
             ticks = self._get_ticks(side)
-            ticks.set_xys_and_transform(
-                tuple(xys), x_tf if side in 'bt' else y_tf
-            )
+            ticks.set_xys_and_transform(tuple(xys), tf)
             ticks.draw()
+            tfs[side] = tf
         
         '''#TODO
         self._frame.set_bbox(self._get_xys_for_frame())
@@ -1292,15 +1311,25 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         '''
         
         # Draw user defined artists
-        for side, dxs, dys in zip('rblt', dxss, dyss):
-            x_tf, y_tf = _get_transforms(dxs, dys, [cx1, cx2], [cy1, cy2])
+        drawn = set()
+        for side in 'rblt':
             for artists in getattr(self, f'_{side}artists').values():
                 for artist in artists:
-                    artist.set_transforms(x_tf, y_tf)
+                    if artist in drawn:
+                        continue
+                    if artist._x_side == 't':
+                        artist.set_transforms(x_transform=tfs["t"])
+                    elif artist._x_side == 'b':
+                        artist.set_transforms(x_transform=tfs["b"])
+                    if artist._y_side == 'l':
+                        artist.set_transforms(y_transform=tfs["l"])
+                    elif artist._y_side == 'r':
+                        artist.set_transforms(y_transform=tfs["r"])
                     artist.draw()
+                    drawn.add(artist)
         
         # Apply zorders
-        for tag in sorted(self._zorder_tags.values()):
+        for tag in sorted(set(self._zorder_tags.values())):
             self.tag_raise(tag)
     
     def _create_color_cycle(self) -> Cycle:
@@ -1468,15 +1497,19 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         #TODO: handle t and r
         
         if b is not None:  # b
+            x_side = 'b'
             x = np.asarray(b, dtype=float)
             x_artists = self._bartists
         else:  # t
+            x_side = 't'
             x = np.asarray(t, dtype=float)
             x_artists = self._tartists
         if l is not None:  # l
+            y_side = 'l'
             y = np.asarray(l, dtype=float)
             y_artists = self._lartists
         else:  # r
+            y_side = 'r'
             y = np.asarray(r, dtype=float)
             y_artists = self._rartists
         assert x.shape == y.shape, [x.shape, y.shape]
@@ -1492,6 +1525,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             color=next(color_cycle),
             width=width,
             smooth=smooth,
+            x_side=x_side,
+            y_side=y_side,
             tag='line'
         )
         x_lines.append(line)
