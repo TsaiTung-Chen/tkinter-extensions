@@ -12,10 +12,8 @@ import tkinter as tk
 from tkinter.font import Font
 from copy import deepcopy
 from itertools import cycle as Cycle
-from contextlib import contextmanager
 
 import numpy as np
-from numpy.dtypes import StringDType
 from numpy.typing import NDArray, ArrayLike
 import ttkbootstrap as ttk
 
@@ -131,48 +129,71 @@ class ZorderNotFoundError(RuntimeError):
     pass
 
 
-class _BaseTransform:
+class _BaseTransform:  # 1D transformation
     def __init__(
             self,
-            x_interval: list[IntFloat] = [-np.inf, +np.inf],
-            y_interval: list[IntFloat] = [-np.inf, +np.inf]
+            x_lims: ArrayLike = [-np.inf, np.inf],
+            y_lims: ArrayLike = [-np.inf, np.inf]
     ):
-        assert isinstance(x_interval, list), x_interval
-        assert isinstance(y_interval, list), y_interval
-        assert len(x_interval) == len(y_interval) == 2, (x_interval, y_interval)
-        assert all( isinstance(x, IntFloat) for x in x_interval ), x_interval
-        assert all( isinstance(y, IntFloat) for y in y_interval ), y_interval
-        self._x_interval: list[IntFloat] = sorted(x_interval)
-        self._y_interval: list[IntFloat] = sorted(y_interval)
+        x_lims = np.asarray(x_lims)
+        y_lims = np.asarray(y_lims)
+        assert x_lims.shape == y_lims.shape == (2,), [x_lims.shape, y_lims.shape]
+        t = x_lims.dtype
+        assert any( np.issubdtype(t, d) for d in IntFloat.__args__ ), x_lims.dtype
+        t = y_lims.dtype
+        assert any( np.issubdtype(t, d) for d in IntFloat.__args__ ), y_lims.dtype
+        
+        self._x_min, self._x_max = sorted(x_lims)
+        self._y_min, self._y_max = sorted(y_lims)
     
     @property
-    def get_x_interval(self) -> tuple[IntFloat, IntFloat]:
-        return self._x_interval
+    def x_lims(self) -> tuple[IntFloat, IntFloat]:
+        return self._x_min, self._x_max
     
     @property
-    def get_y_interval(self) -> tuple[IntFloat, IntFloat]:
-        return self._y_interval
+    def y_lims(self) -> tuple[IntFloat, IntFloat]:
+        return self._y_min, self._y_max
     
     def __eq__(self, obj):
         raise NotImplementedError
     
     def __call__(
             self,
-            xs: IntFloat | NDArray[IntFloat]
+            xs: IntFloat | NDArray[IntFloat],
+            in_bounds: bool = True
     ) -> Float | NDArray[Float]:
         assert isinstance(xs, (IntFloat, np.ndarray)), xs
-        if isinstance(xs, (int, float)):
+        if np.ndim(xs) == 0:
             xs = np.float64(xs)
         dt = xs.dtype
         assert any( np.issubdtype(dt, d) for d in IntFloat.__args__ ), xs.dtype
-        return np.clip(xs, *self._x_interval)
+        
+        if in_bounds:
+            return xs[self.in_bounds_x(xs)]  # 1D array
+        return xs  # 0D or 1D array
     
     def get_inverse(self):
         raise NotImplementedError
+    
+    def in_bounds_x(
+            self, xs: IntFloat | NDArray[IntFloat]
+    ) -> IntFloat | NDArray[IntFloat]:
+        assert isinstance(xs, (IntFloat, np.ndarray)), xs
+        if np.ndim(xs) == 0:
+            xs = np.float64(xs)
+        return (self._x_min <= xs) & (xs <= self._x_max)
+    
+    def in_bounds_y(
+            self, ys: IntFloat | NDArray[IntFloat]
+    ) -> IntFloat | NDArray[IntFloat]:
+        assert isinstance(ys, (IntFloat, np.ndarray)), ys
+        if np.ndim(ys) == 0:
+            ys = np.float64(ys)
+        return (self._y_min <= ys) & (ys <= self._y_max)
 
 
 class _FirstOrderPolynomial(_BaseTransform):
-    def __init__(self, c0: IntFloat, c1: IntFloat, *args, **kwargs):
+    def __init__(self, c0: IntFloat = 0., c1: IntFloat = 1., *args, **kwargs):
         assert isinstance(c0, IntFloat), c0
         assert isinstance(c1, IntFloat), c1
         super().__init__(*args, **kwargs)
@@ -182,21 +203,23 @@ class _FirstOrderPolynomial(_BaseTransform):
     def __eq__(self, obj):
         if type(self) != type(obj):
             return False
-        return self._c0 == obj._c0 and self._c1 == obj._c1 \
-            and self.get_x_interval == obj.get_x_interval \
-            and self.get_y_interval == obj.get_y_interval
+        return self._c0 == obj._c0 and self._c1 == obj._c1
     
     def __call__(
             self,
-            xs: IntFloat | NDArray[IntFloat]
+            xs: IntFloat | NDArray[IntFloat],
+            in_bounds: bool = True
     ) -> Float | NDArray[Float]:
-        xs = super().__call__(xs)
-        return np.clip(self._c0 + self._c1 * xs, *self._y_interval)
+        xs = super().__call__(xs, in_bounds=in_bounds)
+        ys = self._c0 + self._c1 * xs
          # y(x) = c0 + c1 * x
+        if in_bounds:
+            return ys[self.in_bounds_y(ys)]  # 1D array
+        return ys  # 0D or 1D array
     
     @classmethod
     def from_points(
-            cls, xs: ArrayLike, ys: ArrayLike, **kwargs
+            cls, xs: ArrayLike, ys: ArrayLike, *args, **kwargs
     ) -> _FirstOrderPolynomial:
         assert np.shape(xs) == np.shape(ys) == (2,), (np.shape(xs), np.shape(ys))
         
@@ -204,17 +227,71 @@ class _FirstOrderPolynomial(_BaseTransform):
         c1 = (ys[1] - ys[0]) / (xs[1] - xs[0])  # c1 = (y1 - y0) / (x1 - x0)
         c0 = ys[0] - c1 * xs[0]  # c0 = y0 - c1 * x0
         
-        return cls(c0=c0, c1=c1, **kwargs)
+        return cls(c0, c1, *args, **kwargs)
     
     def get_inverse(self) -> _FirstOrderPolynomial:
         c1_inv = 1. / self._c1  # c1_inv = 1 / c1
         c0_inv = -self._c0 / self._c1  # c0_inv = -c0 / c1
         return _FirstOrderPolynomial(
-            c0=c0_inv,
-            c1=c1_inv,
-            x_interval=self._y_interval,
-            y_interval=self._x_interval
+            c0=c0_inv, c1=c1_inv, x_lims=self.y_lims, y_lims=self.x_lims
         )
+
+
+class _Transformer:  # 2D transformation
+    def __init__(
+            self,
+            inp_xs: ArrayLike = [0., 1.],
+            inp_ys: ArrayLike = [0., 1.],
+            out_xs: ArrayLike = [0., 1.],
+            out_ys: ArrayLike = [0., 1.],
+            x_transform: type = _FirstOrderPolynomial,
+            y_transform: type = _FirstOrderPolynomial,
+            bounds: bool = True
+    ):
+        assert issubclass(x_transform, _BaseTransform), x_transform
+        assert issubclass(y_transform, _BaseTransform), y_transform
+        
+        if bounds:
+            inp_x_lims = sorted(inp_xs)
+            inp_y_lims = sorted(inp_ys)
+            out_x_lims = sorted(out_xs)
+            out_y_lims = sorted(out_ys)
+        else:
+            inp_x_lims = out_x_lims = inp_y_lims = out_y_lims = [-np.inf, np.inf]
+        
+        self._inp_x_min, self._inp_x_max = inp_x_lims
+        self._inp_y_min, self._inp_y_max = inp_y_lims
+        self._out_x_min, self._out_x_max = out_x_lims
+        self._out_y_min, self._out_y_max = out_y_lims
+        self._x_tf: _BaseTransform = x_transform.from_points(
+            inp_xs, out_xs, x_lims=inp_x_lims, y_lims=out_x_lims
+        )
+        self._y_tf: _BaseTransform = y_transform.from_points(
+            inp_ys, out_ys, x_lims=inp_y_lims, y_lims=out_y_lims
+        )
+    
+    def __call__(
+            self,
+            xs: IntFloat | NDArray[IntFloat],
+            ys: IntFloat | NDArray[IntFloat],
+            in_bounds: bool = True
+    ) -> tuple[NDArray[Float], NDArray[Float]]:
+        assert isinstance(xs, (IntFloat, np.ndarray)), xs
+        assert isinstance(ys, (IntFloat, np.ndarray)), ys
+        
+        if np.ndim(xs) == 0:
+            xs = np.float64(xs)
+        if np.ndim(ys) == 0:
+            ys = np.float64(ys)
+        
+        valid_inp = (self._inp_x_min <= xs) & (xs <= self._inp_x_max) \
+                  & (self._inp_y_min <= ys) & (ys <= self._inp_y_max)
+        xs = self._x_tf(xs[valid_inp], in_bounds=False)
+        ys = self._y_tf(ys[valid_inp], in_bounds=False)
+        valid_out = (self._out_x_min <= xs) & (xs <= self._out_x_max) \
+                  & (self._out_y_min <= ys) & (ys <= self._out_y_max)
+        
+        return xs[valid_out], ys[valid_out]  # two 1D array
 
 
 class _BBox:#TODO: delete
@@ -241,14 +318,13 @@ class _BaseElement:
 # =============================================================================
 # ---- Figure Artists
 # =============================================================================
-class _BaseArtist(_BaseElement):
+class _BaseArtist(_BaseElement):#TODO: drop duplicates
     _name: str
     
     def __init__(
             self,
             *args,
-            transforms: tuple[_BaseTransform, _BaseTransform] \
-                = (_FirstOrderPolynomial(0, 1), _FirstOrderPolynomial(0, 1)),
+            transformer: _Transformer = _Transformer(bounds=False),
             x_side: Literal['b', 't'] | None = None,
             y_side: Literal['l', 'r'] | None = None,
             **kwargs
@@ -269,7 +345,7 @@ class _BaseArtist(_BaseElement):
         self._tags: tuple[str, ...] = tags
         self._x_side: Literal['b', 't'] | None = x_side
         self._y_side: Literal['l', 'r'] | None = y_side
-        self._req_transforms: tuple[_BaseTransform, _BaseTransform] = transforms
+        self._req_transformer: _Transformer = transformer
         self._req_coords: list[Dimension] = []
         self._req_zorder: float | None = None
         self._req_style: dict[str, Any] = {}
@@ -311,23 +387,15 @@ class _BaseArtist(_BaseElement):
     def show(self):
         self._canvas.itemconfigure(self._id, state='normal')
     
-    def set_transforms(
-            self,
-            x_transform: _BaseTransform | None = None,
-            y_transform: _BaseTransform | None = None,
-    ):
-        assert isinstance(x_transform, (_BaseTransform, type(None))), x_transform
-        assert isinstance(y_transform, (_BaseTransform, type(None))), y_transform
+    def set_transformer(self, transformer: _Transformer | None):
+        assert isinstance(transformer, (_Transformer, type(None))), transformer
         
-        if x_transform is not None and x_transform != self._req_transforms[0]:
-            self._req_transforms = (x_transform, self._req_transforms[1])
-            self._stale = True
-        if y_transform is not None and y_transform != self._req_transforms[1]:
-            self._req_transforms = (self._req_transforms[0], y_transform)
+        if transformer is not None and transformer != self._req_transformer:
+            self._req_transformer = transformer
             self._stale = True
     
-    def get_transforms(self) -> tuple[_BaseTransform, _BaseTransform]:
-        return self._req_transforms
+    def get_transformer(self) -> _Transformer:
+        return self._req_transformer
     
     def set_coords(self, *ps: Dimension):
         assert all( isinstance(p, (Dimension, type(None))) for p in ps ), ps
@@ -475,10 +543,7 @@ class _Text(_BaseArtist):
                 shift = int((angle + 22.5) // 45)  # step with 45 deg
                 mapping = dict(zip(_anchors, _anchors[shift:] + _anchors[:shift]))
                 anchor = ''.join( mapping[x] for x in anchor )  # rolling
-        
-        x_transform, y_transform = self._req_transforms
-        x = x_transform(x)
-        y = y_transform(y)
+            (x,), (y,) = self._req_transformer(x, y)
         
         self.configure(anchor=anchor)  # update anchor
         self.coords(x, y)  # update position
@@ -631,13 +696,9 @@ class _Line(_BaseArtist):
         if self._req_coords:
             xys = self._req_coords
         else:
-            x_transform, y_transform = self._req_transforms
+            x, y = self._req_transformer(self._req_xy[0], self._req_xy[1])
             xys = np.concat(  # x0, y0, x1, y1, x2, y2, ...
-                (
-                    x_transform(self._req_xy[0])[:, None],
-                    y_transform(self._req_xy[1])[:, None]
-                ),
-                axis=1
+                (x[:, None], y[:, None]), axis=1
             ).ravel()
         
         self.coords(*xys)
@@ -859,7 +920,7 @@ class _Ticks(_BaseRegion):
         self._req_scientific: Int | None = None
         self._req_xys: tuple[Dimension, Dimension, Dimension, Dimension] | None \
             = None
-        self._req_transform: _BaseTransform = _FirstOrderPolynomial(0, 1)
+        self._req_transform: _BaseTransform = _FirstOrderPolynomial()
         self._update_labels: bool = True
         self._labels: list[_Text] = []
         self._dummy_label: _Text = _Text(
@@ -1003,7 +1064,7 @@ class _Ticks(_BaseRegion):
             if self._req_scientific is None \
             else self._req_scientific
         
-        data = np.asarray(transform.get_x_interval)#TODO
+        data = np.asarray(transform.x_lims)#TODO
         texts = [
             t.replace('e', '\ne') if 'e' in (t := '{0:.{1}g}'.format(d, sci))
                 else t + '\n'
@@ -1214,12 +1275,12 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self.set_ltickslabels(True)
     
     @property
-    def _artists(self) -> set:
+    def artists(self) -> set:
         artists = []
-        for side in 'rblt':
+        for side in 'bt':
             for arts in getattr(self, f'_{side}artists').values():
                 artists.extend(arts)
-        return set(artists)
+        return artists
     
     def _on_configure(self, event: tk.Event):
         super()._on_configure(event)
@@ -1274,7 +1335,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         climits = [[cy1, cy2], [cx1, cx2]] * 2
         for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
             tf = _FirstOrderPolynomial.from_points(
-                dlims, clims, x_interval=dlims, y_interval=clims
+                dlims, clims, x_lims=dlims, y_lims=clims
             )
             xys = list(_cxys)
             xys[i] = None
@@ -1292,10 +1353,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         
         ## Draw ticks and get the empty space
         climits = [[cy1, cy2], [cx1, cx2]] * 2
-        tfs = {}
         for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
             tf = _FirstOrderPolynomial.from_points(
-                dlims, clims, x_interval=dlims, y_interval=clims
+                dlims, clims, x_lims=dlims, y_lims=clims
             )
             xys = [cx1, cy1, cx2, cy2]
             xys[i] = None  # growing bound
@@ -1303,7 +1363,6 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             ticks = self._get_ticks(side)
             ticks.set_xys_and_transform(tuple(xys), tf)
             ticks.draw()
-            tfs[side] = tf
         
         '''#TODO
         self._frame.set_bbox(self._get_xys_for_frame())
@@ -1311,22 +1370,22 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         '''
         
         # Draw user defined artists
-        drawn = set()
-        for side in 'rblt':
-            for artists in getattr(self, f'_{side}artists').values():
-                for artist in artists:
-                    if artist in drawn:
-                        continue
-                    if artist._x_side == 't':
-                        artist.set_transforms(x_transform=tfs["t"])
-                    elif artist._x_side == 'b':
-                        artist.set_transforms(x_transform=tfs["b"])
-                    if artist._y_side == 'l':
-                        artist.set_transforms(y_transform=tfs["l"])
-                    elif artist._y_side == 'r':
-                        artist.set_transforms(y_transform=tfs["r"])
-                    artist.draw()
-                    drawn.add(artist)
+        dlimits = dict(zip('rblt', dlimits))
+        climits = dict(zip('rblt', climits))
+        transformers = {}
+        for artist in self.artists:
+            x_side, y_side = artist._x_side, artist._y_side
+            side_pair = x_side + y_side
+            if side_pair in transformers:
+                tf = transformers[side_pair]
+            else:
+                tf = _Transformer(
+                    inp_xs=dlimits[x_side], inp_ys=dlimits[y_side],
+                    out_xs=climits[x_side], out_ys=climits[y_side]
+                )
+                transformers[side_pair] = tf
+            artist.set_transformer(tf)
+            artist.draw()
         
         # Apply zorders
         for tag in sorted(set(self._zorder_tags.values())):
@@ -1494,7 +1553,6 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             raise ValueError('Either `b` ot `t` must be a arraylike value.')
         if not ((l is None) ^ (r is None)):
             raise ValueError('Either `l` ot `r` must be a arraylike value.')
-        #TODO: handle t and r
         
         if b is not None:  # b
             x_side = 'b'
@@ -1531,7 +1589,6 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         )
         x_lines.append(line)
         y_lines.append(line)
-        #TODO: set sides
         
         return line
 
