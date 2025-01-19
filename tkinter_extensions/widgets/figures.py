@@ -1126,6 +1126,7 @@ class _BaseSubwidget:
         root = figure._root()
         self._figure = figure
         self._to_px = lambda dim: _to_px(root, dim)
+        self._draw_idle_id: str = 'after#'
         self._zorder_tags: dict[_BaseArtist, str] = {}
         self._size: tuple[int, int] = (
             self.winfo_reqwidth(), self.winfo_reqheight()
@@ -1138,6 +1139,10 @@ class _BaseSubwidget:
         return self._figure._default_style
     
     def _on_configure(self, event: tk.Event):
+        self.after_cancel(self._draw_idle_id)
+        self._draw_idle_id = self.after_idle(self._resize, event)
+    
+    def _resize(self, event: tk.Event):
         self._size = (event.width, event.height)
     
     def update_theme(self):
@@ -1152,6 +1157,10 @@ class _BaseSubwidget:
     
     def draw(self):
         raise NotImplementedError
+    
+    def draw_idle(self):
+        self.after_cancel(self._draw_idle_id)
+        self._draw_idle_id = self.after_idle(self.draw)
     
     def _set_facecolor(self, color: str | None = None) -> str:
         assert isinstance(color, (str, type(None))), color
@@ -1178,8 +1187,8 @@ class _Suptitle(_BaseSubwidget, tk.Canvas):
         self._text: _Text = _Text(self, text='', tag=f'{self._tag}.text')
         self.set_facecolor()
     
-    def _on_configure(self, event: tk.Event):
-        super()._on_configure(event)
+    def _resize(self, event: tk.Event):
+        super()._resize(event)
         self.set_bounds()
         self._text.draw()
     
@@ -1254,8 +1263,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
                 artists.extend(arts)
         return artists
     
-    def _on_configure(self, event: tk.Event):
-        super()._on_configure(event)
+    def _resize(self, event: tk.Event):
+        super()._resize(event)
         self.draw()
     
     def draw(self):
@@ -1644,6 +1653,7 @@ class Figure(UndockedFrame):
         self._req_size: tuple[Int, Int]
         self._plots: NDArray[_Plot]
         self._to_px = lambda dim: _to_px(root, dim)
+        self._draw_idle_id: str = 'after#'
         self._default_style: dict[str, Any] = STYLES[
             self._root().style.theme.type
         ].copy()
@@ -1663,14 +1673,14 @@ class Figure(UndockedFrame):
         self.bind('<Destroy>', self._on_destroy, add=True)
         self.bind('<<ThemeChanged>>', self._on_theme_changed, add=True)
         
-        self.after_idle(self.draw)
+        self.draw_idle()
     
     def _on_destroy(self, event: tk.Event | None = None):
         _cleanup_tk_attributes(self)
     
     def _on_theme_changed(self, event: tk.Event):
         self.update_theme()
-        self.draw()
+        self.draw_idle()
     
     def update_theme(self):
         # Update undock button
@@ -1724,6 +1734,10 @@ class Figure(UndockedFrame):
             for plot in self._plots.flat:
                 if plot:
                     plot.draw()
+    
+    def draw_idle(self):
+        self.after_cancel(self._draw_idle_id)
+        self._draw_idle_id = self.after_idle(self.draw)
     
     def set_size(
             self,
