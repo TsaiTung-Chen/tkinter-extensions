@@ -70,11 +70,13 @@ def _get_sticky_p(
     else:  # tuple
         assert len(pad) == 2 and all( isinstance(p, IntFloat) for p in pad ), pad
     
-    if start == stop:
-        return (start + stop) / 2., ''
+    start2 = start + pad[0]
+    stop2 = stop - pad[1]
+    if start2 <= stop2:
+        start, stop = start2, stop2
     
-    start += pad[0]
-    stop -= pad[1]
+    if start > stop:
+        return (start + stop) / 2., ''
     
     if sticky == 'center':
         return (start + stop) / 2., ''
@@ -110,40 +112,27 @@ def _get_sticky_xy(  # returns (x, y, anchor)
     return (x, y, anchor)
 
 
-def __not_duplicates(x: ArrayLike) -> NDArray[bool]:
-    assert x.ndim <= 1, x
-    
-    not_duplicates = np.diff(x) != 0
-    not_duplicates = np.concat(([True], not_duplicates))
-    
-    return not_duplicates
-
-
-def _drop_duplicates(
-        *xs: ArrayLike
+def _drop_consecutive_duplicates(
+        *ps: ArrayLike
 ) -> IntFloat | NDArray[IntFloat]:
-    assert len(xs) > 0, xs
+    assert len(ps) > 0, ps
     
-    if len(xs) == 1:
-        x = xs[0]
-        if np.size(x) == 0:
-            return x
-        retain = __not_duplicates(x)
-        return x[retain]
+    ps = np.asarray(ps)  # [[x1, x2, ...], [y1, y2, ...], ...]
+    assert ps.ndim in (1, 2), ps.shape    
     
-    xs = np.asarray(xs)
-    if xs.size == 0:
-        return xs
+    if ps.size == 0:
+        return ps
     
-    retain = np.any([ __not_duplicates(x) for x in xs ], axis=0)
-    return xs[:, retain]
+    retain = np.diff(ps, axis=1).any(axis=0)
+    
+    return np.concat((ps[:, :1], ps[:, 1:][:, retain]), axis=1)
 
 
 class ZorderNotFoundError(RuntimeError):
     pass
 
 
-class _BaseTransform:  # 1D transformation
+class _Transform1D:  # 1D transformation
     def __init__(
             self,
             x_lims: ArrayLike = [-np.inf, np.inf],
@@ -211,7 +200,7 @@ class _BaseTransform:  # 1D transformation
         return (self._y_min <= ys) & (ys <= self._y_max)
 
 
-class _FirstOrderPolynomial(_BaseTransform):
+class _FirstOrderPolynomial(_Transform1D):
     def __init__(self, c0: IntFloat = 0., c1: IntFloat = 1., *args, **kwargs):
         assert isinstance(c0, IntFloat), c0
         assert isinstance(c1, IntFloat), c1
@@ -226,16 +215,16 @@ class _FirstOrderPolynomial(_BaseTransform):
     
     def __call__(
             self,
-            xs: IntFloat | NDArray[IntFloat]
+            xs: IntFloat | NDArray[IntFloat],
+            round_: bool = False
     ) -> Float | NDArray[Float]:
         xs = super().__call__(xs)
-        ys = self._c0 + self._c1 * xs
-         # y(x) = c0 + c1 * x
-        if not self._bound:
-            return ys.round()  # 0D or 1D array
-        
-        ys = ys[self.bound_y(ys)].round()  # 1D array
-        return _drop_duplicates(ys)
+        ys = self._c0 + self._c1 * xs  # y(x) = c0 + c1 * x (0D or 1D array)
+        if round_:
+            ys = ys.round()
+        if self._bound:
+            ys = ys[self.bound_y(ys)]  # 1D array
+        return ys
     
     @classmethod
     def from_points(
@@ -257,7 +246,7 @@ class _FirstOrderPolynomial(_BaseTransform):
         )
 
 
-class _Transformer:  # 2D transformation
+class _Transform2D:  # 2D transformation
     def __init__(
             self,
             inp_xs: ArrayLike = [0., 1.],
@@ -268,14 +257,14 @@ class _Transformer:  # 2D transformation
             y_transform: type = _FirstOrderPolynomial,
             bound: bool = True
     ):
-        assert issubclass(x_transform, _BaseTransform), x_transform
-        assert issubclass(y_transform, _BaseTransform), y_transform
+        assert issubclass(x_transform, _Transform1D), x_transform
+        assert issubclass(y_transform, _Transform1D), y_transform
         assert isinstance(bound, bool), bound
         
-        self._x_tf: _BaseTransform = x_transform.from_points(
+        self._x_tf: _Transform1D = x_transform.from_points(
             inp_xs, out_xs, x_lims=inp_xs, y_lims=out_xs, bound=bound
         )
-        self._y_tf: _BaseTransform = y_transform.from_points(
+        self._y_tf: _Transform1D = y_transform.from_points(
             inp_ys, out_ys, x_lims=inp_ys, y_lims=out_ys, bound=bound
         )
         self._x_tf._bound = False
@@ -289,7 +278,8 @@ class _Transformer:  # 2D transformation
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat],
-            ys: IntFloat | NDArray[IntFloat]
+            ys: IntFloat | NDArray[IntFloat],
+            round_: bool = False
     ) -> NDArray[Float]:
         assert isinstance(xs, (IntFloat, np.ndarray)), xs
         assert isinstance(ys, (IntFloat, np.ndarray)), ys
@@ -300,19 +290,19 @@ class _Transformer:  # 2D transformation
             ys = np.float64(ys)
         
         if not self._bound:
-            xs = self._x_tf(xs)
-            ys = self._y_tf(ys)
+            xs = self._x_tf(xs, round_=round_)
+            ys = self._y_tf(ys, round_=round_)
             return xs, ys
         
         valid_inp = (self._inp_x_min <= xs) & (xs <= self._inp_x_max) \
                   & (self._inp_y_min <= ys) & (ys <= self._inp_y_max)
-        xs = self._x_tf(xs[valid_inp])
-        ys = self._y_tf(ys[valid_inp])
+        xs = self._x_tf(xs[valid_inp], round_=round_)
+        ys = self._y_tf(ys[valid_inp], round_=round_)
         valid_out = (self._out_x_min <= xs) & (xs <= self._out_x_max) \
                   & (self._out_y_min <= ys) & (ys <= self._out_y_max)
-        xs, ys = xs[valid_out], ys[valid_out]  # two 1D array
+        xs, ys = xs[valid_out], ys[valid_out]  # two 1D arrays
         
-        return _drop_duplicates(xs, ys)
+        return np.asarray([xs, ys])
 
 
 class _BBox:#TODO: delete
@@ -345,7 +335,7 @@ class _BaseArtist(_BaseElement):
     def __init__(
             self,
             *args,
-            transformer: _Transformer = _Transformer(bound=False),
+            transform: _Transform2D = _Transform2D(bound=False),
             x_side: Literal['b', 't'] | None = None,
             y_side: Literal['l', 'r'] | None = None,
             **kwargs
@@ -366,7 +356,7 @@ class _BaseArtist(_BaseElement):
         self._tags: tuple[str, ...] = tags
         self._x_side: Literal['b', 't'] | None = x_side
         self._y_side: Literal['l', 'r'] | None = y_side
-        self._req_transformer: _Transformer = transformer
+        self._req_transform: _Transform2D = transform
         self._req_coords: list[Dimension] = []
         self._req_zorder: float | None = None
         self._req_style: dict[str, Any] = {}
@@ -407,15 +397,15 @@ class _BaseArtist(_BaseElement):
     def show(self):
         self._canvas.itemconfigure(self._id, state='normal')
     
-    def set_transformer(self, transformer: _Transformer | None):
-        assert isinstance(transformer, (_Transformer, type(None))), transformer
+    def set_transform(self, transform: _Transform2D | None):
+        assert isinstance(transform, (_Transform2D, type(None))), transform
         
-        if transformer is not None and transformer != self._req_transformer:
-            self._req_transformer = transformer
+        if transform is not None and transform != self._req_transform:
+            self._req_transform = transform
             self._stale = True
     
-    def get_transformer(self) -> _Transformer:
-        return self._req_transformer
+    def get_transform(self) -> _Transform2D:
+        return self._req_transform
     
     def set_coords(self, *ps: Dimension):
         assert all( isinstance(p, (Dimension, type(None))) for p in ps ), ps
@@ -534,11 +524,11 @@ class _Text(_BaseArtist):
             })
             
             # Get text size
-            if self.cget('text') == '':  # empty
-                itw, ith = (0, 0)
-            else:
-                itx1, ity1, itx2, ity2 = self.bbox()
+            if bbox := self.bbox():
+                itx1, ity1, itx2, ity2 = bbox
                 itw, ith = (itx2 - itx1), (ity2 - ity1)
+            else:  # empty
+                itw, ith = (0, 0)
             
             (x1, y1, x2, y2), sticky = cf["xys"], cf["sticky"]
             padx, pady = self._to_px(cf["padx"]), self._to_px(cf["pady"])
@@ -563,7 +553,7 @@ class _Text(_BaseArtist):
                 shift = int((angle + 22.5) // 45)  # step with 45 deg
                 mapping = dict(zip(_anchors, _anchors[shift:] + _anchors[:shift]))
                 anchor = ''.join( mapping[x] for x in anchor )  # rolling
-            x, y = self._req_transformer(x, y)
+            x, y = self._req_transform(x, y, round_=True)
         
         self.configure(anchor=anchor)  # update anchor
         self.coords(x, y)  # update position
@@ -691,7 +681,6 @@ class _Line(_BaseArtist):
         self._xlims: NDArray[Float] = np.array([0., 1.], float)
         self._ylims: NDArray[Float] = np.array([0., 1.], float)
         self._req_xy: NDArray[Float] = np.array([[]], dtype=float)
-        self._req_default_color: str = ''
         self._id: int = self._canvas.create_line(
             -1, -1, -1, -1, fill='', width='0p', tags=self._tags
         )
@@ -713,13 +702,18 @@ class _Line(_BaseArtist):
             fill=cf["color"], width=cf["width"], smooth=cf["smooth"]
         )
         
+        import time
+        t0 = time.monotonic()
         if self._req_coords:
             xys = self._req_coords
         else:
-            xy = self._req_transformer(self._req_xy[0], self._req_xy[1])
+            xy = self._req_transform(*self._req_xy, round_=True)
+            xy = _drop_consecutive_duplicates(*xy)
             xys = xy.T.ravel()  # x0, y0, x1, y1, x2, y2, ...
         
         self.coords(*xys)
+        t1 = time.monotonic()
+        print(t1-t0)#???
         self._update_zorder()
         self._stale = False
     
@@ -815,7 +809,6 @@ class _Rectangle(_BaseArtist):
     def draw(self):
         if not self._stale:
             return
-        
         
         root_defaults = self._root_default_style
         defaults = self._default_style
@@ -938,7 +931,7 @@ class _Ticks(_BaseRegion):
         self._req_scientific: Int | None = None
         self._req_xys: tuple[Dimension, Dimension, Dimension, Dimension] | None \
             = None
-        self._req_transform: _BaseTransform = _FirstOrderPolynomial(bound=False)
+        self._req_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
         self._update_labels: bool = True
         self._labels: list[_Text] = []
         self._dummy_label: _Text = _Text(
@@ -947,7 +940,7 @@ class _Ticks(_BaseRegion):
     
     def draw(
             self
-    ) -> tuple[dict[str, Any], _BaseTransform] | None:
+    ) -> tuple[dict[str, Any], _Transform1D] | None:
         self._dummy_label.hide()
         if not self._req_enable_labels:
             for label in self._labels:
@@ -1057,12 +1050,12 @@ class _Ticks(_BaseRegion):
     def set_xys_and_transform(
             self,
             xys: tuple[Dimension, Dimension, Dimension, Dimension] | None = None,
-            transform: _BaseTransform | None = None
+            transform: _Transform1D | None = None
     ):
         assert isinstance(xys, tuple) and len(xys) == 4, xys
         assert sum( p is None for p in xys ) == 1, xys
         assert xys[self._grow] is None, (self._side, xys)
-        assert isinstance(transform, _BaseTransform), transform
+        assert isinstance(transform, _Transform1D), transform
         
         if xys is not None and xys != self._req_xys:
             self._req_xys = xys
@@ -1094,9 +1087,9 @@ class _Ticks(_BaseRegion):
         ]
         
         if self._side in ('t', 'b'):
-            positions = [ (x, y1, x, y2) for x in transform(data) ]
+            positions = [ (x, y1, x, y2) for x in transform(data, round_=True) ]
         else:  # left or right
-            positions = [ (x1, y, x2, y) for y in transform(data) ]
+            positions = [ (x1, y, x2, y) for y in transform(data, round_=True) ]
         
         self._update_labels = False
         
@@ -1277,8 +1270,6 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self._bartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._lartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._rartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
-        self._x_transform: _BaseTransform
-        self._y_transform: _BaseTransform
         self._title: _Text = _Text(self, text='', tag='title.text')
         self._taxis: _Axis = _Axis(self, side='t', tag='taxis')
         self._baxis: _Axis = _Axis(self, side='b', tag='baxis')
@@ -1310,19 +1301,19 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     
     def draw(self):
         # Get data limits
-        dlimits = [
+        _dlimits = [
             np.asarray([ a._ylims for a in self._rartists["lines"] ]),
             np.asarray([ a._xlims for a in self._bartists["lines"] ]),
             np.asarray([ a._ylims for a in self._lartists["lines"] ]),
             np.asarray([ a._xlims for a in self._tartists["lines"] ])
         ]
-        for i, dlims in enumerate(dlimits):
+        dlimits = np.array([[1, 1e9]]*4, dtype=float)
+        for i, dlims in enumerate(_dlimits):
             if dlims.size:
                 dlimits[i] = [dlims[:, 0].min(), dlims[:, 1].max()]
-            else:
-                dlimits[i] = [1., 1e9]
         dlimits[0] = dlimits[0][::-1]  # flip y
         dlimits[2] = dlimits[2][::-1]  # flip y
+        del _dlimits
         
         # Draw items and get empty space for frame
         w, h = self._size
@@ -1390,19 +1381,19 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         # Draw user defined artists
         dlimits = dict(zip('rblt', dlimits))
         climits = dict(zip('rblt', climits))
-        transformers = {}
+        transforms = {}
         for artist in self.artists:
             x_side, y_side = artist._x_side, artist._y_side
             side_pair = x_side + y_side
-            if side_pair in transformers:
-                tf = transformers[side_pair]
+            if side_pair in transforms:
+                tf = transforms[side_pair]
             else:
-                tf = _Transformer(
+                tf = _Transform2D(
                     inp_xs=dlimits[x_side], inp_ys=dlimits[y_side],
                     out_xs=climits[x_side], out_ys=climits[y_side]
                 )
-                transformers[side_pair] = tf
-            artist.set_transformer(tf)
+                transforms[side_pair] = tf
+            artist.set_transform(tf)
             artist.draw()
         
         # Apply zorders
@@ -1938,6 +1929,8 @@ if __name__ == '__main__':
     
     x = np.arange(0, 10, 1/48000, dtype=float)
     y = np.sin(2*np.pi*1*x)
+    #x = np.array([3, 6, 6, 3, 3], dtype=float)
+    #y = np.array([-0.5, -0.5, 0.5, 0.5, -0.5], dtype=float)
     
     fig = Figure(root, toolbar=True)
     fig.pack(fill='both', expand=True)
