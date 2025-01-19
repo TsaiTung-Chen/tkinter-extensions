@@ -148,20 +148,9 @@ class _Transform1D:  # 1D transformation
         t = y_lims.dtype
         assert any( np.issubdtype(t, d) for d in IntFloat.__args__ ), y_lims.dtype
         
-        if not bound:
-            x_lims = y_lims = [-np.inf, np.inf]
-        
         self._bound: bool = bound
         self._x_min, self._x_max = sorted(x_lims)
         self._y_min, self._y_max = sorted(y_lims)
-    
-    @property
-    def x_lims(self) -> tuple[IntFloat, IntFloat]:
-        return self._x_min, self._x_max
-    
-    @property
-    def y_lims(self) -> tuple[IntFloat, IntFloat]:
-        return self._y_min, self._y_max
     
     def __eq__(self, obj):
         raise NotImplementedError
@@ -180,9 +169,6 @@ class _Transform1D:  # 1D transformation
             return xs[self.bound_x(xs)]  # 1D array
         return xs  # 0D or 1D array
     
-    def get_inverse(self):
-        raise NotImplementedError
-    
     def bound_x(
             self, xs: IntFloat | NDArray[IntFloat]
     ) -> IntFloat | NDArray[IntFloat]:
@@ -198,6 +184,15 @@ class _Transform1D:  # 1D transformation
         if np.ndim(ys) == 0:
             ys = np.float64(ys)
         return (self._y_min <= ys) & (ys <= self._y_max)
+    
+    def get_x_lims(self) -> tuple[IntFloat, IntFloat]:
+        return self._x_min, self._x_max
+    
+    def get_y_lims(self) -> tuple[IntFloat, IntFloat]:
+        return self._y_min, self._y_max
+    
+    def get_inverse(self):
+        raise NotImplementedError
 
 
 class _FirstOrderPolynomial(_Transform1D):
@@ -236,7 +231,7 @@ class _FirstOrderPolynomial(_Transform1D):
         c1 = (ys[1] - ys[0]) / (xs[1] - xs[0])  # c1 = (y1 - y0) / (x1 - x0)
         c0 = ys[0] - c1 * xs[0]  # c0 = y0 - c1 * x0
         
-        return cls(c0, c1, *args, **kwargs)
+        return cls(c0, c1, *args, x_lims=xs, y_lims=ys, **kwargs)
     
     def get_inverse(self) -> _FirstOrderPolynomial:
         c1_inv = 1. / self._c1  # c1_inv = 1 / c1
@@ -262,17 +257,15 @@ class _Transform2D:  # 2D transformation
         assert isinstance(bound, bool), bound
         
         self._x_tf: _Transform1D = x_transform.from_points(
-            inp_xs, out_xs, x_lims=inp_xs, y_lims=out_xs, bound=bound
+            inp_xs, out_xs, bound=False
         )
         self._y_tf: _Transform1D = y_transform.from_points(
-            inp_ys, out_ys, x_lims=inp_ys, y_lims=out_ys, bound=bound
+            inp_ys, out_ys, bound=False
         )
-        self._x_tf._bound = False
-        self._y_tf._bound = False
-        self._inp_x_min, self._inp_x_max = self._x_tf.x_lims
-        self._inp_y_min, self._inp_y_max = self._y_tf.x_lims
-        self._out_x_min, self._out_x_max = self._x_tf.y_lims
-        self._out_y_min, self._out_y_max = self._y_tf.y_lims
+        self._inp_x_min, self._inp_x_max = self._x_tf.get_x_lims()
+        self._inp_y_min, self._inp_y_max = self._y_tf.get_x_lims()
+        self._out_x_min, self._out_x_max = self._x_tf.get_y_lims()
+        self._out_y_min, self._out_y_max = self._y_tf.get_y_lims()
         self._bound: bool = bound
     
     def __call__(
@@ -711,6 +704,8 @@ class _Line(_BaseArtist):
             xy = _drop_consecutive_duplicates(*xy)
             xys = xy.T.ravel()  # x0, y0, x1, y1, x2, y2, ...
         
+        if len(xys) < 4:
+            xys = (-100, -100, -100, -100)
         self.coords(*xys)
         t1 = time.monotonic()
         print(t1-t0)#???
@@ -817,9 +812,13 @@ class _Rectangle(_BaseArtist):
             k: defaults.get(k, root_defaults[k])
             for k, v in cf.items() if v is None
         })
-        
         self.configure(fill=cf["facecolor"], outline=cf["edgecolor"])
-        self.coords(*self._req_coords)
+        
+        xys = self._req_coords
+        
+        if len(xys) < 4:
+            xys = (-100, -100, -100, -100)
+        self.coords(*xys)
         self._update_zorder()
         self._stale = False
     
@@ -1076,10 +1075,7 @@ class _Ticks(_BaseRegion):
             else self._req_scientific
         
         #TODO: temp value
-        if self._side in 'tb':
-            data = np.asarray([0., 10.])
-        else:
-            data = np.asarray([-1., 1.])
+        data = np.asarray(transform.get_x_lims())
         texts = [
             t.replace('e', '\ne') if 'e' in (t := '{0:.{1}g}'.format(d, sci))
                 else t + '\n'
@@ -1325,6 +1321,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         ## Update upper bound if title was drawn
         if bbox := self._title.bbox():
             cy1 = bbox[3] + 1
+            if cy1 > cy2:
+                cy1 = cy2 = round((cy1 + cy2) / 2)
         
         ## Draw axes
         for i, side in enumerate('rblt'):
@@ -1342,13 +1340,17 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             cx1 = bbox[2] + 1
         if bbox := self._taxis.bbox():
             cy1 = bbox[3] + 1
+        if cy1 > cy2:
+            cy1 = cy2 = round((cy1 + cy2) / 2)
+        if cx1 > cx2:
+            cx1 = cx2 = round((cx1 + cx2) / 2)
         
         ## Draw dummy ticks and get the empty space
-        _cxys = (cx1, cy1, cx2, cy2)  # backup space for ticks
+        cxys_backup = (cx1, cy1, cx2, cy2)  # backup space for ticks
         climits = [[cy1, cy2], [cx1, cx2]] * 2
         for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
             tf = _FirstOrderPolynomial.from_points(dlims, clims, bound=False)
-            xys = list(_cxys)
+            xys = list(cxys_backup)
             xys[i] = None
             ticks = self._get_ticks(side)
             ticks.draw_dummy(tuple(xys), tf)
@@ -1361,6 +1363,10 @@ class _Plot(_BaseSubwidget, tk.Canvas):
                 cx1 = bbox[2] + 1
             if bbox := self._tticks.bbox(dummy=True):
                 cy1 = bbox[3] + 1
+            if cy1 > cy2:
+                cy1 = cy2 = round((cy1 + cy2) / 2)
+            if cx1 > cx2:
+                cx1 = cx2 = round((cx1 + cx2) / 2)
         
         ## Draw ticks and get the empty space
         climits = [[cy1, cy2], [cx1, cx2]] * 2
@@ -1368,7 +1374,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             tf = _FirstOrderPolynomial.from_points(dlims, clims, bound=False)
             xys = [cx1, cy1, cx2, cy2]
             xys[i] = None  # growing bound
-            xys[i-2] = _cxys[i-2]  # use previous base bound
+            xys[i-2] = cxys_backup[i-2]  # use previous base bound
             ticks = self._get_ticks(side)
             ticks.set_xys_and_transform(tuple(xys), tf)
             ticks.draw()
