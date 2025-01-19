@@ -298,9 +298,6 @@ class _Transform2D:  # 2D transformation
         return np.asarray([xs, ys])
 
 
-class _BBox:#TODO: delete
-    pass
-
 class _BaseElement:
     def __init__(self, canvas: _Plot | _Suptitle, tag: str = ''):
         assert isinstance(canvas, (_Plot, _Suptitle)), canvas
@@ -812,7 +809,9 @@ class _Rectangle(_BaseArtist):
             k: defaults.get(k, root_defaults[k])
             for k, v in cf.items() if v is None
         })
-        self.configure(fill=cf["facecolor"], outline=cf["edgecolor"])
+        self.configure(
+            fill=cf["facecolor"], outline=cf["edgecolor"], width=cf["width"]
+        )
         
         xys = self._req_coords
         
@@ -859,17 +858,6 @@ class _BaseRegion(_BaseElement):
     def _default_style(self) -> dict[str, Any]:
         return self._figure._default_style
     
-    def resize(
-            self,
-            xys: tuple[
-                IntFloat | None,
-                IntFloat | None,
-                IntFloat | None,
-                IntFloat | None
-            ]
-    ):
-        raise NotImplementedError
-    
     def bbox(self):
         raise NotImplementedError
 
@@ -897,9 +885,6 @@ class _Axis(_BaseRegion):
     def bbox(self) -> tuple[int, int, int, int] | None:
         return self._label.bbox()
     
-    def get_label(self) -> _Text:
-        return self._label
-    
     def set_bounds(self, *args, sticky: str | None = None, **kwargs):
         invalid = {"t": 's', "b": 'n', "l": 'e', "r": 'w'}[self._side]
         
@@ -910,6 +895,9 @@ class _Axis(_BaseRegion):
             )
         
         self._label.set_bounds(*args, sticky=sticky, **kwargs)
+    
+    def get_label(self) -> _Text:
+        return self._label
     
     def set_label(self, *args, **kwargs):
         self._label.set_style(*args, **kwargs)
@@ -976,6 +964,9 @@ class _Ticks(_BaseRegion):
             label.draw()
     
     def draw_dummy(self, *args, **kwargs):
+        if not self._req_enable_labels:
+            return
+        
         update_labels = self._update_labels
         xys, transform = self._req_xys, self._req_transform
         try:
@@ -986,9 +977,13 @@ class _Ticks(_BaseRegion):
             self._update_labels = update_labels
             self._req_xys, self._req_transform = xys, transform
         
+        # Find possibly largest label
+        i = np.argmax([ max(len(t) for t in tx.split('\n', 1)) for tx in texts ])
+        text, xys = texts[i], positions[i]
+        
         label = self._dummy_label
-        label.set_style(text=texts[0])
-        label.set_bounds(xys=positions[0])
+        label.set_style(text=text)
+        label.set_bounds(xys=xys)
         label.show()
         label.draw()
     
@@ -1081,6 +1076,8 @@ class _Ticks(_BaseRegion):
                 else t + '\n'
             for d in data
         ]
+        if self._side != 'b':  # b\ne^a => e^a\nb (put the exponent above the base)
+            texts = [ '\n'.join(t.split('\n', 1)[::-1]) for t in texts ]
         
         if self._side in ('t', 'b'):
             positions = [ (x, y1, x, y2) for x in transform(data, round_=True) ]
@@ -1096,58 +1093,26 @@ class _Frame(_BaseRegion):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._rect: _Rectangle = _Rectangle(
-            self._canvas,
-            default_style=self._default_style,
-            tags=(f'{self._tag}.rect',)
+            self._canvas, tag=f'{self._tag}.rect'
         )
-    
-    def resize(
-            self,
-            xys: tuple[
-                Dimension | None,
-                Dimension | None,
-                Dimension | None,
-                Dimension | None
-            ]
-    ):
-        self.set_bbox(xys)
     
     def draw(self):
         self._rect.draw()
-        self._bbox = self._rect.get_bbox().copy()
     
     def delete(self):
         self._rect.delete()
     
-    def set_bbox(
-            self,
-            xys: tuple[
-                Dimension | None,
-                Dimension | None,
-                Dimension | None,
-                Dimension | None
-            ]
-    ) -> _BBox:
-        bbox = self._rect.set_bbox(
-            _BBox(xys, sticky='nesw', padx='0p', pady='0p', convert=True)
-        )
-        self._req_bbox = bbox.copy()
-        return self._req_bbox
+    def bbox(self) -> tuple[int, int, int, int] | None:
+        return self._rect.bbox()
     
-    def get_bbox(self) -> _BBox:
-        return self._bbox
+    def set_coords(self, *args, **kwargs):
+        self._rect.set_coords(*args, **kwargs)
     
-    def set_facecolor(self, *args, **kwargs) -> str | None:
-        return self._rect.set_facecolor(*args, **kwargs)
+    def get_rect(self) -> _Rectangle:
+        return self._rect
     
-    def get_facecolor(self) -> str:
-        return self._rect.get_facecolor()
-    
-    def set_edgecolor(self, *args, **kwargs) -> str | None:
-        return self._rect.set_edgecolor(*args, **kwargs)
-    
-    def get_edgecolor(self) -> str:
-        return self._rect.get_edgecolor()
+    def set_rect(self, *args, **kwargs):
+        self._rect.set_style(*args, **kwargs)
 
 
 # =============================================================================
@@ -1260,12 +1225,14 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        
         artists = {"lines": []}
         self._colors: dict[str, Cycle] = {"lines": self._create_color_cycle()}
         self._tartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._bartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._lartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._rartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
+        
         self._title: _Text = _Text(self, text='', tag='title.text')
         self._taxis: _Axis = _Axis(self, side='t', tag='taxis')
         self._baxis: _Axis = _Axis(self, side='b', tag='baxis')
@@ -1275,13 +1242,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self._bticks: _Ticks = _Ticks(self, side='b', tag='bticks')
         self._lticks: _Ticks = _Ticks(self, side='l', tag='lticks')
         self._rticks: _Ticks = _Ticks(self, side='r', tag='rticks')
-        '''#TODO
-        self._frame: _Frame
-        self._frame.set_bbox(self._get_xys_for_frame())
-        '''    
+        self._frame: _Frame = _Frame(self, tag='frame')
+        
         self.set_facecolor()
-        self.set_btickslabels(True)
-        self.set_ltickslabels(True)
     
     @property
     def artists(self) -> set:
@@ -1303,7 +1266,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             np.asarray([ a._ylims for a in self._lartists["lines"] ]),
             np.asarray([ a._xlims for a in self._tartists["lines"] ])
         ]
-        dlimits = np.array([[1, 1e9]]*4, dtype=float)
+        dlimits = np.array([[1, 1e+200]]*4, dtype=float)
         for i, dlims in enumerate(_dlimits):
             if dlims.size:
                 dlimits[i] = [dlims[:, 0].min(), dlims[:, 1].max()]
@@ -1379,10 +1342,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             ticks.set_xys_and_transform(tuple(xys), tf)
             ticks.draw()
         
-        '''#TODO
-        self._frame.set_bbox(self._get_xys_for_frame())
+        # Draw frame
+        self._frame.set_coords(cx1, cy1, cx2, cy2)
         self._frame.draw()
-        '''
         
         # Draw user defined artists
         dlimits = dict(zip('rblt', dlimits))
@@ -1550,6 +1512,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     
     def set_rtickslabels(self, *args, **kwargs):
         return self._set_tickslabels('r', *args, **kwargs)
+    
+    def get_frame(self) -> _Frame:
+        return self._frame
     
     def plot(
             self,
@@ -1834,8 +1799,8 @@ class Figure(UndockedFrame):
             n_cols: Int = 1,
             width_ratios: list[Int] = [],
             height_ratios: list[Int] = [],
-            padx: Dimension | tuple[Dimension, Dimension] = ('1p', '1p'),
-            pady: Dimension | tuple[Dimension, Dimension] = ('1p', '1p')
+            padx: Dimension | tuple[Dimension, Dimension] = ('3p', '3p'),
+            pady: Dimension | tuple[Dimension, Dimension] = ('3p', '3p')
     ) -> NDArray[_Plot] | _Plot:
         assert isinstance(n_rows, Int) and n_rows >= 1, n_rows
         assert isinstance(n_cols, Int) and n_cols >= 1, n_cols
@@ -1942,13 +1907,18 @@ if __name__ == '__main__':
     fig.pack(fill='both', expand=True)
     
     suptitle = fig.set_suptitle('<Suptitle>')
-    plt = fig.set_plots(1, 1)
-    plt.plot(x, y)
-    plt.set_title('<Title>')
-    plt.set_tlabel('<top-label>')
-    plt.set_blabel('<bottom-label>')
-    plt.set_llabel('<left-label>')
-    plt.set_rlabel('<right-label>')
+    plts = fig.set_plots(2, 1)
+    for plt in plts:
+        plt.plot(x, y)
+        plt.set_title('<Title>')
+        plt.set_tlabel('<top-label>')
+        plt.set_blabel('<bottom-label>')
+        plt.set_llabel('<left-label>')
+        plt.set_rlabel('<right-label>')
+        plt.set_btickslabels(True)
+        plt.set_ltickslabels(True)
+        #plt.set_ttickslabels(True)
+        #plt.set_rtickslabels(True)
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
     
