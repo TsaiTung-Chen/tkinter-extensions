@@ -515,21 +515,21 @@ class _Text(_BaseArtist):
             
             # Get text size
             if bbox := self.bbox():
-                itx1, ity1, itx2, ity2 = bbox
-                itw, ith = (itx2 - itx1), (ity2 - ity1)
+                tx1, ty1, tx2, ty2 = bbox
+                tw, th = (tx2 - tx1), (ty2 - ty1)
             else:  # empty
-                itw, ith = (0, 0)
+                tw, th = (0, 0)
             
             (x1, y1, x2, y2), sticky = cf["xys"], cf["sticky"]
             padx, pady = self._to_px(cf["padx"]), self._to_px(cf["pady"])
             if x1 is None:
-                x1 = x2 - itw - sum(padx)
+                x1 = x2 - tw - sum(padx)
             elif x2 is None:
-                x2 = x1 + itw + sum(padx)
+                x2 = x1 + tw + sum(padx)
             if y1 is None:
-                y1 = y2 - ith - sum(pady)
+                y1 = y2 - th - sum(pady)
             elif y2 is None:
-                y2 = y1 + ith + sum(pady)
+                y2 = y1 + th + sum(pady)
             
             # `anchor` must be 'n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw', or
             # 'center'
@@ -920,6 +920,9 @@ class _Ticks(_BaseRegion):
             = None
         self._req_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
         self._update_labels: bool = True
+        self._label_size: IntFloat = 0
+        self._vertical_label: bool = False
+        self._n_labels: int = 0
         self._labels: list[_Text] = []
         self._dummy_label: _Text = _Text(
             canvas=self._canvas, text='', tag=f'{self._tag}.labels.text'
@@ -938,7 +941,7 @@ class _Ticks(_BaseRegion):
         if not self._update_labels:
             return
         
-        texts, positions = self._fit_labels()
+        texts, positions = self._make_labels()
         canvas = self._canvas
         tag = f'{self._tag}.labels.text'
         font = self._dummy_label._font
@@ -948,11 +951,10 @@ class _Ticks(_BaseRegion):
         bounds.pop('xys', None)
         
         length_increase = len(texts) - len(self._labels)
-        if length_increase < 0:
-            for label in self._labels[length_increase:]:
-                label.delete()
-            self._labels[:] = self._labels[:-length_increase]
-        elif length_increase > 0:
+        if length_increase < 0:  # delete labels
+            for i in range(-length_increase):
+                self._labels.pop().delete()
+        elif length_increase > 0:  # create labels
             self._labels.extend(
                 _Text(canvas, text='', font=font, tag=tag)
                 for i in range(length_increase)
@@ -967,25 +969,37 @@ class _Ticks(_BaseRegion):
         if not self._req_enable_labels:
             return
         
+        # Temporarily set xys and transform to get the limits' texts and positions
         update_labels = self._update_labels
         xys, transform = self._req_xys, self._req_transform
         try:
             self.set_xys_and_transform(*args, **kwargs)
             self._update_labels = True
-            texts, positions = self._fit_labels()
+            texts, positions = self._make_labels(limits=True)
         finally:
             self._update_labels = update_labels
             self._req_xys, self._req_transform = xys, transform
         
         # Find possibly largest label
-        i = np.argmax([ max(len(t) for t in tx.split('\n', 1)) for tx in texts ])
+        n_chars = [ max(len(t) for t in tx.split('\n', 1)) for tx in texts ]
+        i = np.argmax(n_chars)
         text, xys = texts[i], positions[i]
         
+        # Update the text item and draw
         label = self._dummy_label
         label.set_style(text=text)
         label.set_bounds(xys=xys)
         label.show()
         label.draw()
+        
+        # Update current size of the text item
+        tx1, ty1, tx2, ty2 = self.bbox(dummy=True)
+        w, h = (tx2 - tx1), (ty2 - ty1)
+        angle = float(label.cget('angle'))
+        vertical = (angle - 90) % 180 == 0  # text direction
+        self._n_chars = n_chars[i]
+        self._label_size = w if self._side in 'tb' else h
+        self._vertical_label = vertical
     
     def delete(self):
         for label in self._labels:
@@ -1059,7 +1073,38 @@ class _Ticks(_BaseRegion):
             self._update_labels = True
     
     def _fit_labels(
-            self
+            self, dlimits: ArrayLike, climits: ArrayLike
+    ) -> list[IntFloat]:
+        (dmin, dmax), (cmin, cmax) = sorted(dlimits), sorted(climits)
+        
+        if not self._req_enable_labels:
+            return dlimits
+        
+        if self._side in 'tb':  # top or bottom
+            fixed_size = self._vertical_label
+        else:  # left or right
+            fixed_size = not self._vertical_label
+        if fixed_size:
+            size = self._label_size
+        else:
+            size = self._label_size / self._n_chars
+        size *= (self._n_chars + 2) * 1.2
+        
+        #TODO: optimize the step value
+        self._n_labels = int((cmax - cmin) // size)
+        step = (dmax - dmin) / (self._n_labels - 3)
+        print(self._n_labels, dmin, dmax, step)#???
+        
+        dmin -= step
+        dmax += step
+        
+        if dlimits[0] < dlimits[1]:
+            return [dmin, dmax]
+        return [dmax, dmin]
+    
+    def _make_labels(
+            self,
+            limits: bool = False
     ) -> tuple[list[str], NDArray[Float]]:
         assert self._update_labels, self._update_labels
         
@@ -1068,9 +1113,13 @@ class _Ticks(_BaseRegion):
         sci = self._default_style[f"{self._tag}.labels.scientific"] \
             if self._req_scientific is None \
             else self._req_scientific
+        dmin, dmax = sorted(transform.get_x_lims())
         
-        #TODO: temp value
-        data = np.asarray(transform.get_x_lims())
+        if limits:
+            data = np.asarray([dmin, dmax])
+        else:
+            data = np.linspace(dmin, dmax, self._n_labels, endpoint=True)
+        
         texts = [
             t.replace('e', '\ne') if 'e' in (t := '{0:.{1}g}'.format(d, sci))
                 else t + '\n'
@@ -1326,6 +1375,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             xys[i] = None
             ticks = self._get_ticks(side)
             ticks.draw_dummy(tuple(xys), tf)
+            
             ## Update empty space
             if bbox := self._rticks.bbox(dummy=True):
                 cx2 = bbox[0] - 1
@@ -1343,11 +1393,13 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         ## Draw ticks and get the empty space
         climits = [[cy1, cy2], [cx1, cx2]] * 2
         for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
+            ticks = self._get_ticks(side)
+            dlims[:] = ticks._fit_labels(dlims, clims)
             tf = _FirstOrderPolynomial.from_points(dlims, clims, bound=False)
+            
             xys = [cx1, cy1, cx2, cy2]
             xys[i] = None  # growing bound
             xys[i-2] = cxys_backup[i-2]  # use previous base bound
-            ticks = self._get_ticks(side)
             ticks.set_xys_and_transform(tuple(xys), tf)
             ticks.draw()
         
@@ -1921,18 +1973,17 @@ if __name__ == '__main__':
     fig.pack(fill='both', expand=True)
     
     suptitle = fig.set_suptitle('<Suptitle>')
-    plts = fig.set_plots(2, 1)
-    for plt in plts:
-        plt.plot(x, y)
-        plt.set_title('<Title>')
-        plt.set_tlabel('<top-label>')
-        plt.set_blabel('<bottom-label>')
-        plt.set_llabel('<left-label>')
-        plt.set_rlabel('<right-label>')
-        plt.set_btickslabels(True)
-        plt.set_ltickslabels(True)
-        #plt.set_ttickslabels(True)
-        #plt.set_rtickslabels(True)
+    plt = fig.set_plots(1, 1)
+    plt.plot(x, y)
+    plt.set_title('<Title>')
+    plt.set_tlabel('<top-label>')
+    plt.set_blabel('<bottom-label>')
+    plt.set_llabel('<left-label>')
+    plt.set_rlabel('<right-label>')
+    plt.set_btickslabels(True)
+    plt.set_ltickslabels(True)
+    #plt.set_ttickslabels(True)
+    #plt.set_rtickslabels(True)
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
     
