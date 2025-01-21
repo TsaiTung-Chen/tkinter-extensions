@@ -83,6 +83,7 @@ common_style = {
     },
     "tticks.labels.scientific": 4,
     "tticks.labels.max_ticks": 13,
+    "tticks.padding": ('4p', '4p'),
     "tticks.line": {
         "zorder": 2.0,
         "width": '1p'
@@ -99,6 +100,7 @@ common_style = {
     },
     "bticks.labels.scientific": 4,
     "bticks.labels.max_ticks": 13,
+    "bticks.padding": ('4p', '4p'),
     "bticks.line": {
         "zorder": 2.0,
         "width": '1p'
@@ -115,6 +117,7 @@ common_style = {
     },
     "lticks.labels.scientific": 4,
     "lticks.labels.max_ticks": 13,
+    "lticks.padding": ('4p', '4p'),
     "lticks.line": {
         "zorder": 2.0,
         "width": '1p'
@@ -131,6 +134,7 @@ common_style = {
     },
     "rticks.labels.scientific": 4,
     "rticks.labels.max_ticks": 13,
+    "rticks.padding": ('4p', '4p'),
     "rticks.line": {
         "zorder": 2.0,
         "width": '1p'
@@ -141,7 +145,7 @@ common_style = {
         "width": '1p'
     },
     
-    "grid.enabled": True,
+    "grid.enabled": ('b', 'l'),
     "grid.line": {
         "zorder": 1.0
     },

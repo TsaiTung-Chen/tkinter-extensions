@@ -34,7 +34,7 @@ def _cleanup_tk_attributes(obj):
 
 def _to_px(
         root: tk.Tk,
-        dimension: Dimension | ArrayLike[Dimension] | None
+        dimension: Dimension | ArrayLike | None
 ) -> float | tuple[float, ...]:
     assert isinstance(root, tk.Tk), root
     
@@ -43,9 +43,9 @@ def _to_px(
     if dimension is None:
         return None
     
-    if len(dimensions := list(dimension)) > 1:
-        return tuple( d if d is None else to_pixels(d) for d in dimensions )
-    return None if dimension is None else to_pixels(dimension)
+    if isinstance(dimension, (str, IntFloat)):
+        return None if dimension is None else to_pixels(dimension)
+    return tuple( d if d is None else to_pixels(d) for d in dimension )
 
 
 def _get_sticky_p(
@@ -319,7 +319,7 @@ class _BaseElement:
 # =============================================================================
 # ---- Figure Artists
 # =============================================================================
-class _BaseArtist(_BaseElement):
+class _BaseArtist(_BaseElement):#TODO: antialiasing
     _name: str
     
     def __init__(
@@ -896,11 +896,11 @@ class _Axis(_BaseRegion):
         
         self._label.set_bounds(*args, sticky=sticky, **kwargs)
     
-    def get_label(self) -> _Text:
-        return self._label
-    
     def set_label(self, *args, **kwargs):
         self._label.set_style(*args, **kwargs)
+    
+    def get_label(self) -> _Text:
+        return self._label
 
 
 class _Ticks(_BaseRegion):
@@ -914,11 +914,17 @@ class _Ticks(_BaseRegion):
         super().__init__(canvas=canvas, *args, **kwargs)
         self._side: Literal['t', 'b', 'l', 'r'] = side
         self._grow: int = {"r": 0, "b": 1, "l": 2, "t": 3}[side]
+        
         self._req_enable_labels: bool = False
         self._req_scientific: Int | None = None
         self._req_xys: tuple[Dimension, Dimension, Dimension, Dimension] | None \
             = None
         self._req_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
+        self._req_limits: list[IntFloat | None] = [None, None]
+        self._req_padding: list[Dimension | None] = [None, None]
+        
+        self._limits: list[IntFloat] = [1., 1e+200]
+        self._padding: list[float] = [0., 0.]
         self._update_labels: bool = True
         self._label_size: IntFloat = 0
         self._vertical_label: bool = False
@@ -973,7 +979,7 @@ class _Ticks(_BaseRegion):
         update_labels = self._update_labels
         xys, transform = self._req_xys, self._req_transform
         try:
-            self.set_xys_and_transform(*args, **kwargs)
+            self._set_xys_and_transform(*args, **kwargs)
             self._update_labels = True
             texts, positions = self._make_labels(limits=True)
         finally:
@@ -1023,9 +1029,6 @@ class _Ticks(_BaseRegion):
         
         return x1, y1, x2, y2
     
-    def get_labels(self) -> list[_Text]:
-        return self._labels
-    
     def set_labels(
             self,
             enable: bool = True,
@@ -1055,7 +1058,41 @@ class _Ticks(_BaseRegion):
         self._req_enable_labels = enable
         self._req_scientific = scientific
     
-    def set_xys_and_transform(
+    def get_labels(self) -> list[_Text]:
+        return self._labels
+    
+    def set_limits(
+            self,
+            limits: ArrayLike = [None, None],
+            padding: ArrayLike | Dimension | None = [None, None]
+    ):
+        limits = list(limits)
+        assert len(limits) == 2, limits
+        assert isinstance(limits[0], (IntFloat, type(None))), limits
+        assert isinstance(limits[1], (IntFloat, type(None))), limits
+        if limits[0] is not None and limits[1] is not None:
+            assert limits[0] <= limits[1], limits
+        if isinstance(padding, str):
+            padding = [padding, padding]
+        padding = list(padding)
+        assert len(padding) == 2, padding
+        assert isinstance(padding[0], (Dimension, type(None))), padding
+        assert isinstance(padding[1], (Dimension, type(None))), padding
+        
+        req_limits = self._req_limits
+        for i, lim in enumerate(limits):
+            if lim is not None:
+                req_limits[i] = lim
+        
+        req_padding = self._req_padding
+        for i, pad in enumerate(padding):
+            if pad is not None:
+                req_padding[i] = pad
+    
+    def get_limits(self) -> tuple[list[IntFloat], list[Dimension]]:
+        return self._limits, self._padding
+    
+    def _set_xys_and_transform(
             self,
             xys: tuple[Dimension, Dimension, Dimension, Dimension] | None = None,
             transform: _Transform1D | None = None
@@ -1074,33 +1111,48 @@ class _Ticks(_BaseRegion):
     
     def _fit_labels(
             self, dlimits: ArrayLike, climits: ArrayLike
-    ) -> list[IntFloat]:
+    ) -> tuple[list[IntFloat], list[IntFloat]]:
         (dmin, dmax), (cmin, cmax) = sorted(dlimits), sorted(climits)
+        req_dmin, req_dmax = self._req_limits
+        req_pad1, req_pad2 = self._req_padding
+        if req_dmin is not None:
+            dmin = req_dmin
+        if req_dmax is not None:
+            dmax = req_dmax
+        default_pad1, default_pad2 = self._default_style[f"{self._tag}.padding"]
+        pad1 = self._to_px(default_pad1 if req_pad1 is None else req_pad1)
+        pad2 = self._to_px(default_pad2 if req_pad2 is None else req_pad2)
+        cmin, cmax = (cmin + pad1), (cmax - pad2)
+        
+        self._limits = [dmin, dmax]
+        self._padding = [pad1, pad2]
         
         if not self._req_enable_labels:
-            return dlimits
+            if dlimits[0] < dlimits[1]:
+                return [dmin, dmax], [cmin, cmax]
+            return [dmax, dmin], [cmin, cmax]
+        
+        sci = self._default_style[f"{self._tag}.labels.scientific"] \
+            if self._req_scientific is None \
+            else self._req_scientific
         
         if self._side in 'tb':  # top or bottom
             fixed_size = self._vertical_label
         else:  # left or right
             fixed_size = not self._vertical_label
-        if fixed_size:
-            size = self._label_size
-        else:
-            size = self._label_size / self._n_chars
-        size *= (self._n_chars + 2) * 1.2
+        size = self._label_size
+        if not fixed_size:
+            size *= (max(self._n_chars, sci) + 2) / self._n_chars
+        size *= 1.2
         
-        #TODO: optimize the step value
-        self._n_labels = int((cmax - cmin) // size)
+        #TODO: optimize the step value and handle n_labels <= 3
+        self._n_labels = max(int((cmax - cmin) // size), 0)
         step = (dmax - dmin) / (self._n_labels - 3)
         print(self._n_labels, dmin, dmax, step)#???
         
-        dmin -= step
-        dmax += step
-        
         if dlimits[0] < dlimits[1]:
-            return [dmin, dmax]
-        return [dmax, dmin]
+            return [dmin, dmax], [cmin, cmax]
+        return [dmax, dmin], [cmin, cmax]
     
     def _make_labels(
             self,
@@ -1157,11 +1209,11 @@ class _Frame(_BaseRegion):
     def set_coords(self, *args, **kwargs):
         self._rect.set_coords(*args, **kwargs)
     
-    def get_rect(self) -> _Rectangle:
-        return self._rect
-    
     def set_rect(self, *args, **kwargs):
         self._rect.set_style(*args, **kwargs)
+    
+    def get_rect(self) -> _Rectangle:
+        return self._rect
 
 
 # =============================================================================
@@ -1394,13 +1446,13 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         climits = [[cy1, cy2], [cx1, cx2]] * 2
         for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
             ticks = self._get_ticks(side)
-            dlims[:] = ticks._fit_labels(dlims, clims)
+            dlims[:], clims[:] = ticks._fit_labels(dlims, clims)
             tf = _FirstOrderPolynomial.from_points(dlims, clims, bound=False)
             
             xys = [cx1, cy1, cx2, cy2]
             xys[i] = None  # growing bound
             xys[i-2] = cxys_backup[i-2]  # use previous base bound
-            ticks.set_xys_and_transform(tuple(xys), tf)
+            ticks._set_xys_and_transform(tuple(xys), tf)
             ticks.draw()
         
         # Draw frame
@@ -1576,6 +1628,30 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     
     def get_frame(self) -> _Frame:
         return self._frame
+    
+    def set_tlimits(self, *args, **kwargs):
+        self._tticks.set_limits(*args, **kwargs)
+    
+    def set_blimits(self, *args, **kwargs):
+        self._bticks.set_limits(*args, **kwargs)
+    
+    def set_llimits(self, *args, **kwargs):
+        self._lticks.set_limits(*args, **kwargs)
+    
+    def set_rlimits(self, *args, **kwargs):
+        self._rticks.set_limits(*args, **kwargs)
+    
+    def get_tlimits(self) -> tuple[list[IntFloat], list[Dimension]]:
+        return self._tticks.get_limits()
+    
+    def get_blimits(self) -> tuple[list[IntFloat], list[Dimension]]:
+        return self._bticks.get_limits()
+    
+    def get_llimits(self) -> tuple[list[IntFloat], list[Dimension]]:
+        return self._lticks.get_limits()
+    
+    def get_rlimits(self) -> tuple[list[IntFloat], list[Dimension]]:
+        return self._rticks.get_limits()
     
     def plot(
             self,
