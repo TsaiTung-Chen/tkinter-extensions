@@ -135,22 +135,23 @@ class ZorderNotFoundError(RuntimeError):
 class _Transform1D:  # 1D transformation
     def __init__(
             self,
-            x_lims: ArrayLike = [-np.inf, np.inf],
-            y_lims: ArrayLike = [-np.inf, np.inf],
+            x_limits: ArrayLike = [-np.inf, np.inf],
+            y_limits: ArrayLike = [-np.inf, np.inf],
             bound: bool = True
     ):
         assert isinstance(bound, bool), bound
-        x_lims = np.asarray(x_lims)
-        y_lims = np.asarray(y_lims)
-        assert x_lims.shape == y_lims.shape == (2,), [x_lims.shape, y_lims.shape]
-        t = x_lims.dtype
-        assert any( np.issubdtype(t, d) for d in IntFloat.__args__ ), x_lims.dtype
-        t = y_lims.dtype
-        assert any( np.issubdtype(t, d) for d in IntFloat.__args__ ), y_lims.dtype
+        x_limits = np.asarray(x_limits)
+        y_limits = np.asarray(y_limits)
+        assert x_limits.shape == (2,), x_limits.shape
+        assert y_limits.shape == (2,), y_limits.shape
+        t = x_limits.dtype
+        assert any( np.issubdtype(t, d) for d in IntFloat.__args__ ), x_limits.dtype
+        t = y_limits.dtype
+        assert any( np.issubdtype(t, d) for d in IntFloat.__args__ ), y_limits.dtype
         
         self._bound: bool = bound
-        self._x_min, self._x_max = sorted(x_lims)
-        self._y_min, self._y_max = sorted(y_lims)
+        self._x_min, self._x_max = sorted(x_limits)
+        self._y_min, self._y_max = sorted(y_limits)
     
     def __eq__(self, obj):
         raise NotImplementedError
@@ -185,10 +186,10 @@ class _Transform1D:  # 1D transformation
             ys = np.float64(ys)
         return (self._y_min <= ys) & (ys <= self._y_max)
     
-    def get_x_lims(self) -> tuple[IntFloat, IntFloat]:
+    def get_x_limits(self) -> tuple[IntFloat, IntFloat]:
         return self._x_min, self._x_max
     
-    def get_y_lims(self) -> tuple[IntFloat, IntFloat]:
+    def get_y_limits(self) -> tuple[IntFloat, IntFloat]:
         return self._y_min, self._y_max
     
     def get_inverse(self):
@@ -231,13 +232,13 @@ class _FirstOrderPolynomial(_Transform1D):
         c1 = (ys[1] - ys[0]) / (xs[1] - xs[0])  # c1 = (y1 - y0) / (x1 - x0)
         c0 = ys[0] - c1 * xs[0]  # c0 = y0 - c1 * x0
         
-        return cls(c0, c1, *args, x_lims=xs, y_lims=ys, **kwargs)
+        return cls(c0, c1, *args, **kwargs)
     
     def get_inverse(self) -> _FirstOrderPolynomial:
         c1_inv = 1. / self._c1  # c1_inv = 1 / c1
         c0_inv = -self._c0 / self._c1  # c0_inv = -c0 / c1
         return _FirstOrderPolynomial(
-            c0=c0_inv, c1=c1_inv, x_lims=self.y_lims, y_lims=self.x_lims
+            c0=c0_inv, c1=c1_inv, x_limits=self.y_limits, y_limits=self.x_limits
         )
 
 
@@ -250,6 +251,8 @@ class _Transform2D:  # 2D transformation
             out_ys: ArrayLike = [0., 1.],
             x_transform: type = _FirstOrderPolynomial,
             y_transform: type = _FirstOrderPolynomial,
+            x_transform_kw: dict[str, Any] = {},
+            y_transform_kw: dict[str, Any] = {},
             bound: bool = True
     ):
         assert issubclass(x_transform, _Transform1D), x_transform
@@ -257,15 +260,15 @@ class _Transform2D:  # 2D transformation
         assert isinstance(bound, bool), bound
         
         self._x_tf: _Transform1D = x_transform.from_points(
-            inp_xs, out_xs, bound=False
+            inp_xs, out_xs, bound=False, **x_transform_kw
         )
         self._y_tf: _Transform1D = y_transform.from_points(
-            inp_ys, out_ys, bound=False
+            inp_ys, out_ys, bound=False, **y_transform_kw
         )
-        self._inp_x_min, self._inp_x_max = self._x_tf.get_x_lims()
-        self._inp_y_min, self._inp_y_max = self._y_tf.get_x_lims()
-        self._out_x_min, self._out_x_max = self._x_tf.get_y_lims()
-        self._out_y_min, self._out_y_max = self._y_tf.get_y_lims()
+        self._inp_x_min, self._inp_x_max = self._x_tf.get_x_limits()
+        self._inp_y_min, self._inp_y_max = self._y_tf.get_x_limits()
+        self._out_x_min, self._out_x_max = self._x_tf.get_y_limits()
+        self._out_y_min, self._out_y_max = self._y_tf.get_y_limits()
         self._bound: bool = bound
     
     def __call__(
@@ -990,6 +993,7 @@ class _Ticks(_BaseRegion):
         n_chars = [ max(len(t) for t in tx.split('\n', 1)) for tx in texts ]
         i = np.argmax(n_chars)
         text, xys = texts[i], positions[i]
+        print(xys)#???
         
         # Update the text item and draw
         label = self._dummy_label
@@ -1165,12 +1169,13 @@ class _Ticks(_BaseRegion):
         sci = self._default_style[f"{self._tag}.labels.scientific"] \
             if self._req_scientific is None \
             else self._req_scientific
-        dmin, dmax = sorted(transform.get_x_lims())
+        dmin, dmax = sorted(transform.get_x_limits())
         
         if limits:
             data = np.asarray([dmin, dmax])
         else:
             data = np.linspace(dmin, dmax, self._n_labels, endpoint=True)
+        assert np.isfinite(data).all(), data
         
         texts = [
             t.replace('e', '\ne') if 'e' in (t := '{0:.{1}g}'.format(d, sci))
@@ -1422,7 +1427,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         cxys_backup = (cx1, cy1, cx2, cy2)  # backup space for ticks
         climits = [[cy1, cy2], [cx1, cx2]] * 2
         for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
-            tf = _FirstOrderPolynomial.from_points(dlims, clims, bound=False)
+            tf = _FirstOrderPolynomial.from_points(
+                dlims, clims, x_limits=dlims, y_limits=clims, bound=False
+            )
             xys = list(cxys_backup)
             xys[i] = None
             ticks = self._get_ticks(side)
@@ -1443,12 +1450,15 @@ class _Plot(_BaseSubwidget, tk.Canvas):
                 cx1 = cx2 = round((cx1 + cx2) / 2)
         
         ## Draw ticks and get the empty space
-        climits = [[cy1, cy2], [cx1, cx2]] * 2
+        dbounds = dlimits.copy()
+        climits = np.asarray([[cy1, cy2], [cx1, cx2]] * 2)
+        cbounds = climits.copy()
         for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
             ticks = self._get_ticks(side)
             dlims[:], clims[:] = ticks._fit_labels(dlims, clims)
-            tf = _FirstOrderPolynomial.from_points(dlims, clims, bound=False)
-            
+            tf = _FirstOrderPolynomial.from_points(
+                dlims, clims, x_limits=dlims, bound=False
+            )
             xys = [cx1, cy1, cx2, cy2]
             xys[i] = None  # growing bound
             xys[i-2] = cxys_backup[i-2]  # use previous base bound
@@ -1462,6 +1472,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         # Draw user defined artists
         dlimits = dict(zip('rblt', dlimits))
         climits = dict(zip('rblt', climits))
+        dbounds = dict(zip('rblt', dbounds))
+        cbounds = dict(zip('rblt', cbounds))
         transforms = {}
         for artist in self.artists:
             x_side, y_side = artist._x_side, artist._y_side
@@ -1471,7 +1483,13 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             else:
                 tf = _Transform2D(
                     inp_xs=dlimits[x_side], inp_ys=dlimits[y_side],
-                    out_xs=climits[x_side], out_ys=climits[y_side]
+                    out_xs=climits[x_side], out_ys=climits[y_side],
+                    x_transform_kw={
+                        "x_limits": dbounds[x_side], "y_limits": cbounds[x_side]
+                    },
+                    y_transform_kw={
+                        "x_limits": dbounds[y_side], "y_limits": cbounds[y_side]
+                    }
                 )
                 transforms[side_pair] = tf
             artist.set_transform(tf)
