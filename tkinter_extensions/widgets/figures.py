@@ -924,14 +924,14 @@ class _Ticks(_BaseRegion):
             = None
         self._req_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
         self._req_limits: list[IntFloat | None] = [None, None]
-        self._req_padding: list[Dimension | None] = [None, None]
+        self._req_margins: list[Dimension | None] = [None, None]
         
         self._limits: list[IntFloat] = [1., 1e+200]
         self._padding: list[float] = [0., 0.]
         self._update_labels: bool = True
         self._label_size: IntFloat = 0
         self._vertical_label: bool = False
-        self._n_labels: int = 0
+        self._fitted_labels: tuple[IntFloat, IntFloat, int] = (1., 1e+200, 2)
         self._labels: list[_Text] = []
         self._dummy_label: _Text = _Text(
             canvas=self._canvas, text='', tag=f'{self._tag}.labels.text'
@@ -984,7 +984,7 @@ class _Ticks(_BaseRegion):
         try:
             self._set_xys_and_transform(*args, **kwargs)
             self._update_labels = True
-            texts, positions = self._make_labels(limits=True)
+            texts, positions = self._make_labels(dummy=True)
         finally:
             self._update_labels = update_labels
             self._req_xys, self._req_transform = xys, transform
@@ -993,7 +993,6 @@ class _Ticks(_BaseRegion):
         n_chars = [ max(len(t) for t in tx.split('\n', 1)) for tx in texts ]
         i = np.argmax(n_chars)
         text, xys = texts[i], positions[i]
-        print(xys)#???
         
         # Update the text item and draw
         label = self._dummy_label
@@ -1067,34 +1066,28 @@ class _Ticks(_BaseRegion):
     
     def set_limits(
             self,
-            limits: ArrayLike = [None, None],
-            padding: ArrayLike | Dimension | None = [None, None]
+            min_: IntFloat | None = None,
+            max_: IntFloat | None = None,
+            margins: ArrayLike | Dimension | None = [None, None]
     ):
-        limits = list(limits)
-        assert len(limits) == 2, limits
-        assert isinstance(limits[0], (IntFloat, type(None))), limits
-        assert isinstance(limits[1], (IntFloat, type(None))), limits
-        if limits[0] is not None and limits[1] is not None:
-            assert limits[0] <= limits[1], limits
-        if isinstance(padding, str):
-            padding = [padding, padding]
-        padding = list(padding)
-        assert len(padding) == 2, padding
-        assert isinstance(padding[0], (Dimension, type(None))), padding
-        assert isinstance(padding[1], (Dimension, type(None))), padding
+        assert isinstance(min_, (IntFloat, type(None))), min_
+        assert isinstance(max_, (IntFloat, type(None))), max_
+        assert min_ is None or max_ is None or min_ <= max_, (min_, max_)
+        if isinstance(margins, str):
+            margins = [margins, margins]
+        margins = list(margins)
+        assert len(margins) == 2, margins
+        assert isinstance(margins[0], (Dimension, type(None))), margins
+        assert isinstance(margins[1], (Dimension, type(None))), margins
         
-        req_limits = self._req_limits
-        for i, lim in enumerate(limits):
-            if lim is not None:
-                req_limits[i] = lim
+        self._req_limits[:] = (min_, max_)
         
-        req_padding = self._req_padding
-        for i, pad in enumerate(padding):
+        for i, pad in enumerate(margins):
             if pad is not None:
-                req_padding[i] = pad
+                self._req_margins[i] = pad
     
     def get_limits(self) -> tuple[list[IntFloat], list[Dimension]]:
-        return self._limits, self._padding
+        return self._limits, self._margins
     
     def _set_xys_and_transform(
             self,
@@ -1113,23 +1106,27 @@ class _Ticks(_BaseRegion):
             self._req_transform = transform
             self._update_labels = True
     
-    def _fit_labels(
+    def _map_data_to_canvas(
             self, dlimits: ArrayLike, climits: ArrayLike
     ) -> tuple[list[IntFloat], list[IntFloat]]:
+        # Fetch user set min max values
         (dmin, dmax), (cmin, cmax) = sorted(dlimits), sorted(climits)
         req_dmin, req_dmax = self._req_limits
-        req_pad1, req_pad2 = self._req_padding
+        req_marg1, req_marg2 = self._req_margins
         if req_dmin is not None:
             dmin = req_dmin
         if req_dmax is not None:
             dmax = req_dmax
-        default_pad1, default_pad2 = self._default_style[f"{self._tag}.padding"]
-        pad1 = self._to_px(default_pad1 if req_pad1 is None else req_pad1)
-        pad2 = self._to_px(default_pad2 if req_pad2 is None else req_pad2)
-        cmin, cmax = (cmin + pad1), (cmax - pad2)
+        assert dmin <= dmax, (dmin, dmax)
+        
+        # Add margins
+        default_marg1, default_marg2 = self._default_style[f"{self._tag}.margins"]
+        marg1 = self._to_px(default_marg1 if req_marg1 is None else req_marg1)
+        marg2 = self._to_px(default_marg2 if req_marg2 is None else req_marg2)
+        cmin, cmax = (cmin + marg1), (cmax - marg2)
         
         self._limits = [dmin, dmax]
-        self._padding = [pad1, pad2]
+        self._margins = [marg1, marg2]
         
         if not self._req_enable_labels:
             if dlimits[0] < dlimits[1]:
@@ -1140,6 +1137,7 @@ class _Ticks(_BaseRegion):
             if self._req_scientific is None \
             else self._req_scientific
         
+        # Calculate the max number of labels fitting in the space
         if self._side in 'tb':  # top or bottom
             fixed_size = self._vertical_label
         else:  # left or right
@@ -1148,11 +1146,23 @@ class _Ticks(_BaseRegion):
         if not fixed_size:
             size *= (max(self._n_chars, sci) + 2) / self._n_chars
         size *= 1.2
+        max_n_labels = max(int((cmax - cmin) // size), 0)
         
-        #TODO: optimize the step value and handle n_labels <= 3
-        self._n_labels = max(int((cmax - cmin) // size), 0)
-        step = (dmax - dmin) / (self._n_labels - 3)
-        print(self._n_labels, dmin, dmax, step)#???
+        #TODO: fix the user defined limits
+        # Find appropriate min and max values and the actual number of labels
+        if max_n_labels <= 2:
+            a, b, n = (dmin, dmax, max_n_labels)
+        else:
+            s = np.ceil((dmax - dmin) / (max_n_labels - 2))
+            exponent, significand = divmod(np.log10(s), 1)
+            if significand != 0:
+                s = 10**exponent * (10**significand).round()
+    
+            a = np.floor(dmin / s) * s
+            b = np.ceil(dmax / s) * s
+            n = (b - a) / s + 1
+        assert n >= 0 and n % 1 == 0, n
+        self._fitted_labels = (a, b, int(n))
         
         if dlimits[0] < dlimits[1]:
             return [dmin, dmax], [cmin, cmax]
@@ -1160,7 +1170,7 @@ class _Ticks(_BaseRegion):
     
     def _make_labels(
             self,
-            limits: bool = False
+            dummy: bool = False
     ) -> tuple[list[str], NDArray[Float]]:
         assert self._update_labels, self._update_labels
         
@@ -1171,12 +1181,14 @@ class _Ticks(_BaseRegion):
             else self._req_scientific
         dmin, dmax = sorted(transform.get_x_limits())
         
-        if limits:
+        # Make the labels' values
+        if dummy:
             data = np.asarray([dmin, dmax])
         else:
-            data = np.linspace(dmin, dmax, self._n_labels, endpoint=True)
+            data = np.linspace(*self._fitted_labels, endpoint=True)
         assert np.isfinite(data).all(), data
         
+        # Formatting
         texts = [
             t.replace('e', '\ne') if 'e' in (t := '{0:.{1}g}'.format(d, sci))
                 else t + '\n'
@@ -1185,6 +1197,7 @@ class _Ticks(_BaseRegion):
         if self._side != 'b':  # b\ne^a => e^a\nb (put the exponent above the base)
             texts = [ '\n'.join(t.split('\n', 1)[::-1]) for t in texts ]
         
+        # Transform the data coordinates into the canvas coordinates
         if self._side in ('t', 'b'):
             positions = [ (x, y1, x, y2) for x in transform(data, round_=True) ]
         else:  # left or right
@@ -1455,9 +1468,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         cbounds = climits.copy()
         for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
             ticks = self._get_ticks(side)
-            dlims[:], clims[:] = ticks._fit_labels(dlims, clims)
+            dlims[:], clims[:] = ticks._map_data_to_canvas(dlims, clims)
             tf = _FirstOrderPolynomial.from_points(
-                dlims, clims, x_limits=dlims, bound=False
+                dlims, clims, x_limits=dlims, y_limits=clims, bound=False
             )
             xys = [cx1, cy1, cx2, cy2]
             xys[i] = None  # growing bound
