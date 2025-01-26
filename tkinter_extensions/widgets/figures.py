@@ -19,6 +19,7 @@ import ttkbootstrap as ttk
 
 from .. import variables as vrb
 from ..constants import Int, IntFloat, Float, Dimension
+from ..utils import defer
 from ._others import UndockedFrame
 from ._figure_config import STYLES
 
@@ -1243,6 +1244,7 @@ class _BaseSubwidget:
         
         super().__init__(master=figure, **kwargs)
         root = figure._root()
+        self._on_configure = defer(100)(self._on_configure)
         self._figure = figure
         self._to_px = lambda dim: _to_px(root, dim)
         self._draw_idle_id: str = 'after#'
@@ -1884,6 +1886,7 @@ class Figure(UndockedFrame):
             self._toolbar.update_theme()
     
     def draw(self):
+        self.event_generate('<<DrawStarted>>')
         self._initialized = True
         
         if hasattr(self, '_suptitle'):
@@ -1893,6 +1896,8 @@ class Figure(UndockedFrame):
             for plot in self._plots.flat:
                 if plot:
                     plot.draw()
+        
+        self.event_generate('<<DrawEnded>>')
     
     def draw_idle(self):
         self.after_cancel(self._draw_idle_id)
