@@ -196,9 +196,6 @@ common_style = {
         "zorder": 5.0,
         "width": '2p',
         "edgecolor": ''
-    },
-    
-    "toolbar": {
     }
 }
 

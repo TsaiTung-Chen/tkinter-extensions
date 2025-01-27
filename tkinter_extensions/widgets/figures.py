@@ -332,6 +332,7 @@ class _BaseArtist(_BaseElement):#TODO: antialiasing
             transform: _Transform2D = _Transform2D(bound=False),
             x_side: Literal['b', 't'] | None = None,
             y_side: Literal['l', 'r'] | None = None,
+            user: bool = False,
             **kwargs
     ):
         assert x_side in ('b', 't', None), x_side
@@ -344,6 +345,7 @@ class _BaseArtist(_BaseElement):#TODO: antialiasing
         tags = [
             '.'.join(subtags[:i]) for i in range(1, tag_length)
         ]
+        tags.append(f'user={user}')
         tags = tuple(dict.fromkeys(tags))  # unique elements
         
         self._stale: bool
@@ -352,6 +354,7 @@ class _BaseArtist(_BaseElement):#TODO: antialiasing
         self._y_side: Literal['l', 'r'] | None = y_side
         self._req_transform: _Transform2D = transform
         self._req_coords: list[Dimension] = []
+        self._req_state: Literal['normal', 'hidden', 'disabled'] = 'normal'
         self._req_zorder: float | None = None
         self._req_style: dict[str, Any] = {}
     
@@ -410,6 +413,16 @@ class _BaseArtist(_BaseElement):#TODO: antialiasing
     
     def get_coords(self) -> list[float]:
         return self.coords()
+    
+    def set_state(self, state: Literal['normal', 'hidden', 'disabled'] = None):
+        assert state in ('normal', 'hidden', 'disabled')
+        
+        if state is not None and state != self._req_state:
+            self._req_state = state
+            self._stale = True
+    
+    def get_state(self) -> str:
+        return self.cget('state')
     
     def set_zorder(self, zorder: IntFloat | None = None):
         assert isinstance(zorder, IntFloat), zorder
@@ -483,9 +496,13 @@ class _Text(_BaseArtist):
         )
     
     def draw(self):
+        # Update state
+        self.configure(state=self._req_state)
+        
         if not self._stale:
             return
         
+        # Update style
         root_defaults = self._root_default_style
         defaults = self._default_style
         cf = self._req_style.copy()
@@ -493,8 +510,6 @@ class _Text(_BaseArtist):
             k: defaults.get(k, root_defaults[k])
             for k, v in cf.items() if v is None
         })
-        
-        # Update style
         self._font.configure(
             family=cf["family"],
             size=cf["size"],
@@ -682,9 +697,13 @@ class _Line(_BaseArtist):
         self.set_style(color=color, width=width, smooth=smooth)
     
     def draw(self):
+        # Update state
+        self.configure(state=self._req_state)
+        
         if not self._stale:
             return
         
+        # Update style
         root_defaults = self._root_default_style
         defaults = self._default_style
         cf = self._req_style.copy()
@@ -803,9 +822,13 @@ class _Rectangle(_BaseArtist):
         self.set_style(facecolor=facecolor, edgecolor=edgecolor, width=width)
     
     def draw(self):
+        # Update state
+        self.configure(state=self._req_state)
+        
         if not self._stale:
             return
         
+        # Update style
         root_defaults = self._root_default_style
         defaults = self._default_style
         cf = self._req_style.copy()
@@ -1154,14 +1177,14 @@ class _Ticks(_BaseRegion):
         if max_n_labels <= 2:
             a, b, n = (dmin, dmax, max_n_labels)
         else:
-            s = np.ceil((dmax - dmin) / (max_n_labels - 2))
+            s = (dmax - dmin) / (max_n_labels - 2)
             exponent, significand = divmod(np.log10(s), 1)
-            if significand != 0:
-                s = 10**exponent * (10**significand).round()
-    
+            s = 10**exponent * (10**significand).round()
+            
             a = np.floor(dmin / s) * s
             b = np.ceil(dmax / s) * s
             n = (b - a) / s + 1
+            print(self._side, size, max_n_labels, s, a, b)#???
         assert n >= 0 and n % 1 == 0, n
         self._fitted_labels = (a, b, int(n))
         
@@ -1244,24 +1267,35 @@ class _BaseSubwidget:
         
         super().__init__(master=figure, **kwargs)
         root = figure._root()
-        self._on_configure = defer(100)(self._on_configure)
+        self._resize = defer(100)(self._resize)
         self._figure = figure
         self._to_px = lambda dim: _to_px(root, dim)
+        self._resizing: bool = False
         self._draw_idle_id: str = 'after#'
         self._zorder_tags: dict[_BaseArtist, str] = {}
         self._size: tuple[int, int] = (
             self.winfo_reqwidth(), self.winfo_reqheight()
         )
         self._req_facecolor: str | None = None
-        self.bind('<Configure>', self._on_configure, add=True)
+        
+        if isinstance(self, tk.Canvas):
+            self.bind('<Configure>', self._on_configure, add=True)
     
     @property
     def _default_style(self) -> dict[str, Any]:
         return self._figure._default_style
     
     def _on_configure(self, event: tk.Event):
+        def _resize():
+            self._resize(event)
+            self._resizing = False
+        #- end of _resize()
+        
+        if not self._resizing:
+            self._resizing = True
+            self.itemconfigure('user=True', state='hidden')
         self.after_cancel(self._draw_idle_id)
-        self._draw_idle_id = self.after_idle(self._resize, event)
+        self._draw_idle_id = self.after_idle(_resize)
     
     def _resize(self, event: tk.Event):
         self._size = (event.width, event.height)
@@ -1272,9 +1306,10 @@ class _BaseSubwidget:
         for artist in self._zorder_tags:
             artist._stale = True
         
-        event = tk.Event()
-        event.width, event.height = self._size
-        self._on_configure(event)
+        if isinstance(self, tk.Canvas):
+            event = tk.Event()
+            event.width, event.height = self._size
+            self._on_configure(event)
     
     def draw(self):
         raise NotImplementedError
@@ -1735,6 +1770,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             smooth=smooth,
             x_side=x_side,
             y_side=y_side,
+            user=True,
             tag='line'
         )
         x_lines.append(line)
@@ -1757,17 +1793,22 @@ class _Toolbar(_BaseSubwidget, tk.Frame):
         self._home_bt = ttk.Button(self, text='Home', command=self._home_view)
         self._home_bt.pack(side='left')
         self._prev_bt = ttk.Button(self, text='Prev', command=self._prev_view)
-        self._prev_bt.pack(side='left', padx=(3, 0))
+        self._prev_bt.pack(side='left', padx=('3p', '0p'))
         self._next_bt = ttk.Button(self, text='Next', command=self._next_view)
-        self._next_bt.pack(side='left', padx=(3, 0))
+        self._next_bt.pack(side='left', padx=('3p', '0p'))
         self._pan_bt = ttk.Button(self, text='Pan', command=self._pan_view)
-        self._pan_bt.pack(side='left', padx=(6, 0))
+        self._pan_bt.pack(side='left', padx=('6p', '0p'))
         self._zoom_bt = ttk.Button(self, text='Zoom', command=self._zoom_view)
-        self._zoom_bt.pack(side='left', padx=(3, 0))
+        self._zoom_bt.pack(side='left', padx=('3p', '0p'))
         self._xyz_lb = tk.Label(self, textvariable=var_coord)
-        self._xyz_lb.pack(side='left', padx=(6, 0))
+        self._xyz_lb.pack(side='left', padx=('6p', '0p'))
         
         self.set_facecolor()
+    
+    def update_theme(self):
+        super().update_theme()
+        text_color = self._default_style["text"]["color"]
+        self._xyz_lb.configure(fg=text_color)
     
     def set_facecolor(self, color: str | None = None):
         new_color = super()._set_facecolor(color=color)
