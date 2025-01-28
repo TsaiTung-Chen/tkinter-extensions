@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter.font import Font
 from copy import deepcopy
 from itertools import cycle as Cycle
+from decimal import Decimal, ROUND_FLOOR, ROUND_CEILING
 
 import numpy as np
 from numpy.typing import NDArray, ArrayLike
@@ -1133,7 +1134,7 @@ class _Ticks(_BaseRegion):
     def _map_data_to_canvas(
             self, dlimits: ArrayLike, climits: ArrayLike
     ) -> tuple[list[IntFloat], list[IntFloat]]:
-        # Fetch user set min max values
+        # Fetch the min and max values set by user
         (dmin, dmax), (cmin, cmax) = sorted(dlimits), sorted(climits)
         req_dmin, req_dmax = self._req_limits
         req_marg1, req_marg2 = self._req_margins
@@ -1172,21 +1173,26 @@ class _Ticks(_BaseRegion):
         size *= 1.2
         max_n_labels = max(int((cmax - cmin) // size), 0)
         
-        #TODO: fix the user defined limits
         # Find appropriate min and max values and the actual number of labels
-        if max_n_labels <= 2:
-            a, b, n = (dmin, dmax, max_n_labels)
+        if max_n_labels <= 1:
+            n = max_n_labels
         else:
-            s = (dmax - dmin) / (max_n_labels - 2)
-            exponent, significand = divmod(np.log10(s), 1)
-            s = 10**exponent * (10**significand).round()
+            ## Use `Decimal` to represent numbers exactly
+            dmin, dmax = Decimal(str(dmin)), Decimal(str(dmax))
             
-            a = np.floor(dmin / s) * s
-            b = np.ceil(dmax / s) * s
-            n = (b - a) / s + 1
-            print(self._side, size, max_n_labels, s, a, b)#???
+            s = (dmax - dmin) / (max_n_labels - 1)  # step size excluding limits
+            log_exp, log_sig = divmod(float(s.log10()), 1)
+            log_exp, log_sig = Decimal(str(log_exp)), Decimal(str(log_sig))
+            if (sig := round(10**log_sig, 0)) > 5:
+                sig = 10
+            s = 10**log_exp * sig
+             # find the nearest a*10^b, where a is an integer
+            
+            dmin = (dmin / s).quantize(Decimal('1.'), rounding=ROUND_FLOOR) * s
+            dmax = (dmax / s).quantize(Decimal('1.'), rounding=ROUND_CEILING) * s
+            n = (dmax - dmin) / s + 1
         assert n >= 0 and n % 1 == 0, n
-        self._fitted_labels = (a, b, int(n))
+        self._fitted_labels = (float(dmin), float(dmax), int(n))
         
         if dlimits[0] < dlimits[1]:
             return [dmin, dmax], [cmin, cmax]
