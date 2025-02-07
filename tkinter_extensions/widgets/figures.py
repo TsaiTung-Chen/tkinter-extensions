@@ -115,19 +115,126 @@ def _get_sticky_xy(  # returns (x, y, anchor)
 
 
 def _drop_consecutive_duplicates(
-        *ps: ArrayLike
-) -> IntFloat | NDArray[IntFloat]:
-    assert len(ps) > 0, ps
+        xs: NDArray[IntFloat], ys: NDArray[IntFloat]
+) -> NDArray[IntFloat]:
+    xys = np.asarray([xs, ys])
+    assert xys.ndim == 2, xys.shape
     
-    ps = np.asarray(ps)  # [[x1, x2, ...], [y1, y2, ...], ...]
-    assert ps.ndim in (1, 2), ps.shape    
+    if xys.shape[1] < 3:
+        return xys
     
-    if ps.size == 0:
-        return ps
+    retain = np.diff(xys[:, :-1], axis=1).any(axis=0)
     
-    retain = np.diff(ps, axis=1).any(axis=0)
+    return np.concat(
+        (xys[:, :1], xys[:, 1:-1][:, retain], xys[:, -1:]),
+        axis=1
+    )
+
+
+def _drop_linearly_redundant_points(xy: NDArray[IntFloat]) -> NDArray[IntFloat]:
+    """
+    Simplifies a series of points based on the perpendicular distance. Drop the
+    points having a 0 perpendicular distance.
     
-    return np.concat((ps[:, :1], ps[:, 1:][:, retain]), axis=1)
+    Ref: https://psimpl.sourceforge.net/perpendicular-distance.html
+    """
+    assert isinstance(xy, np.ndarray), type(xy)
+    assert xy.ndim == 2, xy.shape
+    assert xy.shape[0] == 2, xy.shape
+    
+    if xy.shape[1] < 3:
+        return xy
+    
+    # Get xy
+    x0s, y0s = xy[:, :-2]  # front points
+    x1s, y1s = xy1 = xy[:, 1:-1]  # middle points
+    x2s, y2s = xy2 = xy[:, 2:]  # back points
+    
+    # Calculate the perpendicular distances from middle points to front-back lines
+    numerator = np.abs((y2s - y0s)*x1s - (x2s - x0s)*y1s + x2s*y0s - y2s*x0s)
+    denominator = np.sqrt((x2s - x0s)**2 + (y2s - y0s)**2)
+    with np.errstate(divide='ignore', invalid='ignore'):  # address 1/0 or 0/0
+        dists = numerator / denominator
+    
+    round_trip = denominator == 0  # x0 == x2 and y0 == y2
+    x1s_round, y1s_round = xy1[:, round_trip]
+    x2s_round, y2s_round = xy2[:, round_trip]
+    dists[round_trip] = np.sqrt(
+        (x2s_round - x1s_round)**2 + (y2s_round - y1s_round)**2
+    )  # from x1 to x2
+    
+    retain = dists > 0
+    
+    return np.concat(
+        (xy[:, :1], xy[:, 1:-1][:, retain], xy[:, -1:]),
+        axis=1
+    )
+
+
+def _cutoff_z_patterns(xy: NDArray[IntFloat]) -> NDArray[IntFloat]:
+    """
+    Z patterns usually result from rounding the points (x, y) from a tilt
+    line segment. For example,
+        a size-1 vertical line in between two horizontal lines:
+        -...-
+             |
+             -...-
+        
+        or a size-1 horizontal line in between two vertical lines:
+        |
+        .
+        .
+        .
+        |
+        -
+         |
+         .
+         .
+         .
+         |
+    
+    We simplify the z patterns by dropping the turning points.
+    """
+    def _find_z_patterns(dup1, dun1, dvp, dvn):
+        du1_idc = []
+        for du1 in [dup1, dun1]:
+            _du1_idc = du1.nonzero()[0]
+            if _du1_idc.size:
+                if _du1_idc[0] == 0:
+                    _du1_idc = _du1_idc[1:]
+                if _du1_idc[-1] == dup1.size - 1:
+                    _du1_idc = _du1_idc[:-1]
+            du1_idc.append(_du1_idc)
+        du1_idc = np.concat(du1_idc)
+        
+        z_pattern = (dvp[du1_idc - 1] & dvp[du1_idc + 1]) \
+                  | (dvn[du1_idc - 1] & dvn[du1_idc + 1])
+        
+        return du1_idc[z_pattern]
+    #> end of _find_z_patterns()
+    
+    assert isinstance(xy, np.ndarray), type(xy)
+    assert xy.ndim == 2, xy.shape
+    assert xy.shape[0] == 2, xy.shape
+    
+    if xy.shape[1] < 4:
+        return xy
+    
+    dx, dy = np.diff(xy, axis=1)
+    dx0, dy0 = (dx == 0), (dy == 0)
+    dxp, dxn = dy0 & (dx > 0), dy0 & (dx < 0)
+    dyp, dyn = dx0 & (dy > 0), dx0 & (dy < 0)
+    dxp1, dxn1 = (dx == 1), (dx == -1)
+    dyp1, dyn1 = (dy == 1), (dy == -1)
+    
+    z_pattern_idc_x = _find_z_patterns(dxp1, dxn1, dyp, dyn)
+    z_pattern_idc_y = _find_z_patterns(dyp1, dyn1, dxp, dxn)
+    
+    retain = np.ones(dx.size, dtype=bool)
+    retain[z_pattern_idc_x - 1] = False  # drop front points
+    retain[z_pattern_idc_y] = False  # drop back points
+    
+    return np.concat((xy[:, :1], xy[:, 1:][:, retain]), axis=1)
 
 
 class ZorderNotFoundError(RuntimeError):
@@ -482,7 +589,8 @@ class _Text(_BaseArtist):
         self._pady: tuple[float, float] = (0., 0.)
         self._font: Font = Font() if font is None else font
         self._id: int = canvas.create_text(
-            -1, -1, anchor='se', text=text, font=self._font, tags=self._tags
+            -100, -100, anchor='se',
+            text=text, font=self._font, tags=self._tags
         )
         self.set_style(
             text=text,
@@ -692,7 +800,8 @@ class _Line(_BaseArtist):
         self._ylims: NDArray[Float] = np.array([0., 1.], float)
         self._req_xy: NDArray[Float] = np.array([[]], dtype=float)
         self._id: int = self._canvas.create_line(
-            -1, -1, -1, -1, fill='', width='0p', tags=self._tags
+            -100, -100, -100, -100,
+            fill='', width='0p', tags=self._tags
         )
         self.set_data(x=x, y=y)
         self.set_style(color=color, width=width, smooth=smooth)
@@ -723,10 +832,13 @@ class _Line(_BaseArtist):
         else:
             xy = self._req_transform(*self._req_xy, round_=True)
             xy = _drop_consecutive_duplicates(*xy)
-            xys = xy.T.ravel()  # x0, y0, x1, y1, x2, y2, ...
+            xy = _drop_linearly_redundant_points(xy)
+            xy = _cutoff_z_patterns(xy)
+            xys = xy.ravel(order='F')  # x0, y0, x1, y1, x2, y2, ...
         
         if len(xys) < 4:
             xys = (-100, -100, -100, -100)
+        
         self.coords(*xys)
         t1 = time.monotonic()
         print(t1-t0)#???
@@ -818,7 +930,8 @@ class _Rectangle(_BaseArtist):
     ):
         super().__init__(canvas=canvas, **kwargs)
         self._id: int = self._canvas.create_rectangle(
-            -1, -1, -1, -1, fill='', outline='', width='0p', tags=self._tags
+            -100, -100, -100, -100,
+            fill='', outline='', width='0p', tags=self._tags
         )
         self.set_style(facecolor=facecolor, edgecolor=edgecolor, width=width)
     
