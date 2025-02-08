@@ -437,14 +437,18 @@ class _BaseArtist(_BaseElement):
     def __init__(
             self,
             *args,
+            state: Literal['normal', 'hidden', 'disabled'] = 'normal',
             transform: _Transform2D = _Transform2D(bound=False),
             x_side: Literal['b', 't'] | None = None,
             y_side: Literal['l', 'r'] | None = None,
             user: bool = False,
+            antialias: bool = True,
+            antialias_bg: Callable[[], str] | None = None,
             **kwargs
     ):
         assert x_side in ('b', 't', None), x_side
         assert y_side in ('l', 'r', None), y_side
+        assert antialias_bg is None or callable(antialias_bg), antialias_bg
         
         super().__init__(*args, **kwargs)
         
@@ -456,15 +460,20 @@ class _BaseArtist(_BaseElement):
         tags.append(f'user={user}')
         tags = tuple(dict.fromkeys(tags))  # unique elements
         
-        self._stale: bool
         self._tags: tuple[str, ...] = tags
         self._x_side: Literal['b', 't'] | None = x_side
         self._y_side: Literal['l', 'r'] | None = y_side
+        self._antialias_enabled: bool = bool(antialias)
+        self._antialias_bg: Callable[[], str] | None = antialias_bg
         self._req_transform: _Transform2D = transform
         self._req_coords: list[Dimension] = []
         self._req_state: Literal['normal', 'hidden', 'disabled'] = 'normal'
         self._req_zorder: float | None = None
         self._req_style: dict[str, Any] = {}
+        self._id: int
+        self._id_aa: int
+        self._stale: bool
+        self.set_state(state)
     
     @property
     def _root_default_style(self) -> dict[str, Any]:
@@ -475,11 +484,7 @@ class _BaseArtist(_BaseElement):
         return self._figure._default_style[self._tag]
     
     def __del__(self):
-        try:
-            self.delete()
-        except tk.TclError:
-            pass
-        self._canvas._zorder_tags.pop(self, None)
+        self.delete()
     
     def coords(self, *args, **kwargs) -> list[float]:
         return self._canvas.coords(self._id, *args, **kwargs)
@@ -490,18 +495,22 @@ class _BaseArtist(_BaseElement):
     def cget(self, *args, **kwargs) -> Any:
         return self._canvas.itemcget(self._id, *args, **kwargs)
     
-    def _set_state(
-            self,
-            state: Literal['normal', 'hidden', 'disabled'] = None
-    ):
-        assert state in ('normal', 'hidden', 'disabled')
-        self._canvas.itemconfigure(self._id, state=state)
-    
     def bbox(self) -> tuple[int, int, int, int] | None:
         return self._canvas.bbox(self._id)
     
     def delete(self):
-        self._canvas.delete(self._id)
+        for side in (self._x_side, self._y_side):
+            if side is not None:
+                artists = getattr(self._canvas, f'_{side}artists')
+                try:
+                    artists[f'{self._name}s'].remove(self)
+                except ValueError:
+                    pass
+        self._canvas._zorder_tags.pop(self, None)
+        try:
+            self._canvas.delete(self._id)
+        except tk.TclError:
+            pass
     
     def set_transform(self, transform: _Transform2D | None):
         assert isinstance(transform, (_Transform2D, type(None))), transform
@@ -523,11 +532,24 @@ class _BaseArtist(_BaseElement):
     def get_coords(self) -> list[float]:
         return self.coords()
     
+    def _set_state(
+            self,
+            state: Literal['normal', 'hidden', 'disabled']
+    ):
+        assert state in ('normal', 'hidden', 'disabled')
+        
+        self._canvas.itemconfigure(self._id, state=state)
+        
+        if self._antialias_enabled and self._canvas._windowingsystem != 'aqua':
+            self._canvas.itemconfigure(self._id_aa, state=state)
+        elif hasattr(self, '_id_aa'):
+            self._canvas.itemconfigure(self._id_aa, state='hidden')
+    
     def set_state(
             self,
             state: Literal['normal', 'hidden', 'disabled'] = None
     ):
-        assert state in ('normal', 'hidden', 'disabled')
+        assert state in ('normal', 'hidden', 'disabled', None), state
         
         if state is not None and state != self._req_state:
             self._req_state = state
@@ -543,25 +565,36 @@ class _BaseArtist(_BaseElement):
             self._req_zorder = float(zorder)
             self._stale = True
     
-    def get_zorder(self) -> float:
-        for tag in self._canvas.gettags(self._id):
+    def _get_zorder(self, oid: int) -> float:
+        for tag in self._canvas.gettags(oid):
             if tag.startswith('zorder='):
                 return float(tag[7:])
         raise ZorderNotFoundError('Zorder has not been initialized yet.')
     
+    def get_zorder(self) -> float:
+        return self._get_zorder(self._id)
+    
     def _update_zorder(self):  # update the zorder tag
-        try:
-            old_zorder = self.get_zorder()
-        except ZorderNotFoundError:
-            pass
-        else:
-            self._canvas.dtag(self._id, f'zorder={old_zorder}')
+        def _delete_zorder(oid: int):
+            try:
+                old_zorder = self._get_zorder(oid)
+            except ZorderNotFoundError:
+                pass
+            else:
+                self._canvas.dtag(oid, f'zorder={old_zorder}')
+        #> end of _delete_zorder()
         
         zorder = self._default_style["zorder"] if self._req_zorder is None \
             else self._req_zorder
         new_tag = f'zorder={zorder}'
+        
+        _delete_zorder(self._id)
         self._canvas.addtag_withtag(new_tag, self._id)
         self._canvas._zorder_tags[self] = new_tag
+        
+        if hasattr(self, '_id_aa'):
+            _delete_zorder(self._id_aa)
+            self._canvas.addtag_withtag(new_tag, self._id_aa)
     
     def set_style(self, *args, **kwargs):
         raise NotImplementedError
@@ -587,12 +620,12 @@ class _Text(_BaseArtist):
     ):
         assert isinstance(text, str), text
         
-        super().__init__(canvas=canvas, **kwargs)
+        super().__init__(canvas=canvas, antialias=False, **kwargs)
         self._req_bounds: dict[str, Any] = {}
         self._padx: tuple[float, float] = (0., 0.)
         self._pady: tuple[float, float] = (0., 0.)
         self._font: Font = Font() if font is None else font
-        self._id: int = canvas.create_text(
+        self._id = canvas.create_text(
             -100, -100, anchor='se',
             text=text, font=self._font, state='hidden', tags=self._tags
         )
@@ -802,22 +835,17 @@ class _Line(_BaseArtist):
             color: str | None = None,
             width: Dimension | None = None,
             smooth: bool | None = None,
-            antialias: bool = True,
-            antialias_bg: Callable[[], str] | None = None,
             **kwargs
     ):
-        assert antialias_bg is None or callable(antialias_bg), antialias_bg
         super().__init__(canvas=canvas, **kwargs)
-        self._antialias_enabled: bool = bool(antialias)
-        self._antialias_bg: Callable[[], str] | None = antialias_bg
         self._xlims: NDArray[Float] = np.array([0., 1.], float)
         self._ylims: NDArray[Float] = np.array([0., 1.], float)
         self._req_xy: NDArray[Float] = np.array([[]], dtype=float)
-        self._id: int = self._canvas.create_line(
+        self._id = self._canvas.create_line(
             -100, -100, -100, -100,
             fill='', width='0p', state='hidden', tags=self._tags
         )
-        self._id_aa: int = self._canvas.create_line(
+        self._id_aa = self._canvas.create_line(
             -100, -100, -100, -100,
             fill='', width='0p', state='hidden', tags=self._tags
         )
@@ -871,27 +899,6 @@ class _Line(_BaseArtist):
         
         t1 = time.monotonic()
         print(t1-t0)#???
-    
-    def _set_state(
-            self,
-            state: Literal['normal', 'hidden', 'disabled'] = None
-    ):
-        super()._set_state(state)
-        if self._antialias_enabled and self._canvas._windowingsystem != 'aqua':
-            state_aa = state
-        else:
-            state_aa = 'hidden'
-        self._canvas.itemconfigure(self._id_aa, state=state_aa)
-    
-    def _update_zorder(self):
-        super()._update_zorder()
-        
-        id_og = self._id
-        self._id = self._id_aa
-        try:
-            super()._update_zorder()
-        finally:
-            self._id = id_og
     
     def _antialias(
             self, xys: ArrayLike, fill: str, width: Dimension, smooth: bool
@@ -1002,8 +1009,8 @@ class _Rectangle(_BaseArtist):
             width: Dimension | None = None,
             **kwargs
     ):
-        super().__init__(canvas=canvas, **kwargs)
-        self._id: int = self._canvas.create_rectangle(
+        super().__init__(canvas=canvas, antialias=False, **kwargs)
+        self._id = self._canvas.create_rectangle(
             -100, -100, -100, -100,
             fill='', outline='', width='0p', state='hidden', tags=self._tags
         )
@@ -1077,6 +1084,9 @@ class _BaseRegion(_BaseElement):
     def _default_style(self) -> dict[str, Any]:
         return self._figure._default_style
     
+    def _delete(self):
+        raise NotImplementedError
+    
     def bbox(self):
         raise NotImplementedError
 
@@ -1098,7 +1108,7 @@ class _Axis(_BaseRegion):
     def draw(self):
         self._label.draw()
     
-    def delete(self):
+    def _delete(self):
         self._label.delete()
     
     def bbox(self) -> tuple[int, int, int, int] | None:
@@ -1226,7 +1236,7 @@ class _Ticks(_BaseRegion):
         self._label_size = w if self._side in 'tb' else h
         self._vertical_label = vertical
     
-    def delete(self):
+    def _delete(self):
         for label in self._labels:
             label.delete()
         self._labels.clear()
@@ -1486,7 +1496,7 @@ class _BaseSubwidget:
         def _resize():
             self._resize(event)
             self._resizing = False
-        #- end of _resize()
+        #> end of _resize()
         
         if not self._resizing:
             self._resizing = True
@@ -1623,10 +1633,16 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def draw(self):
         # Get data limits
         _dlimits = [
-            np.asarray([ a._ylims for a in self._rartists["lines"] ]),
-            np.asarray([ a._xlims for a in self._bartists["lines"] ]),
-            np.asarray([ a._ylims for a in self._lartists["lines"] ]),
-            np.asarray([ a._xlims for a in self._tartists["lines"] ])
+            np.asarray([
+                getattr(a, lims) for a in sum(artists.values(), [])
+                if a._req_state != 'hidden'
+            ])
+            for artists, lims in [
+                (self._rartists, '_ylims'),
+                (self._bartists, '_xlims'),
+                (self._lartists, '_ylims'),
+                (self._tartists, '_xlims')
+            ]
         ]
         dlimits = np.array([[1, 1e+200]]*4, dtype=float)
         for i, dlims in enumerate(_dlimits):
@@ -1636,14 +1652,15 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         dlimits[2] = dlimits[2][::-1]  # flip y
         del _dlimits
         
-        # Draw items and get empty space for frame
+        # Draw items and get empty space for the frame
         w, h = self._size
         cx1, cy1, cx2, cy2 = (0, 0, w-1, h-1)
         
         ## Draw title
         self._title.set_bounds((cx1, cy1, cx2, cy2))
         self._title.draw()
-        ## Update upper bound if title was drawn
+        
+        ## Update upper bound if the title exists
         if bbox := self._title.bbox():
             cy1 = bbox[3] + 1
             if cy1 > cy2:
@@ -1656,6 +1673,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             axis = self._get_axis(side)
             axis.set_bounds(tuple(xys))
             axis.draw()
+        
         ## Update empty space
         if bbox := self._raxis.bbox():
             cx2 = bbox[0] - 1
@@ -1742,9 +1760,16 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             artist.set_transform(tf)
             artist.draw()
         
-        # Apply zorders
+        # Raise artists in order
         for tag in sorted(set(self._zorder_tags.values())):
             self.tag_raise(tag)
+    
+    def delete_all(self, draw: bool = False):
+        for artist in self.artists:
+            artist.delete()
+        
+        if draw:
+            self.draw()
     
     def _create_color_cycle(self) -> Cycle:
         return Cycle(self._default_style["colors"])
@@ -1927,15 +1952,16 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             color: str | None = None,
             width: Dimension | None = None,
             smooth: bool | None = None,
+            state: Literal['normal', 'hidden', 'disabled'] = 'normal',
             antialias: bool = True,
             label: str = ''#TODO: legend
     ) -> _Line:
         assert isinstance(label, str), label
         
         if not ((b is None) ^ (t is None)):
-            raise ValueError('Either `b` ot `t` must be a arraylike value.')
+            raise ValueError('Either `b` or `t` must be a array-like value.')
         if not ((l is None) ^ (r is None)):
-            raise ValueError('Either `l` ot `r` must be a arraylike value.')
+            raise ValueError('Either `l` or `r` must be a array-like value.')
         
         if b is not None:  # b
             x_side = 'b'
@@ -1966,6 +1992,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             color=next(color_cycle),
             width=width,
             smooth=smooth,
+            state=state,
             antialias=antialias,
             antialias_bg=lambda: self._frame.get_rect().get_style()["facecolor"],
             x_side=x_side,
