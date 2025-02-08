@@ -7,7 +7,7 @@ Created on Sat Dec 28 21:39:51 2024
 """
 
 from __future__ import annotations
-from typing import Any, Literal
+from typing import Any, Literal, Callable
 import tkinter as tk
 from tkinter.font import Font
 from copy import deepcopy
@@ -431,7 +431,7 @@ class _BaseElement:
 # =============================================================================
 # ---- Figure Artists
 # =============================================================================
-class _BaseArtist(_BaseElement):#TODO: antialiasing
+class _BaseArtist(_BaseElement):
     _name: str
     
     def __init__(
@@ -481,26 +481,27 @@ class _BaseArtist(_BaseElement):#TODO: antialiasing
             pass
         self._canvas._zorder_tags.pop(self, None)
     
+    def coords(self, *args, **kwargs) -> list[float]:
+        return self._canvas.coords(self._id, *args, **kwargs)
+    
     def configure(self, *args, **kwargs) -> Any:
         return self._canvas.itemconfigure(self._id, *args, **kwargs)
     
     def cget(self, *args, **kwargs) -> Any:
         return self._canvas.itemcget(self._id, *args, **kwargs)
     
-    def coords(self, *args, **kwargs) -> list[float]:
-        return self._canvas.coords(self._id, *args, **kwargs)
+    def _set_state(
+            self,
+            state: Literal['normal', 'hidden', 'disabled'] = None
+    ):
+        assert state in ('normal', 'hidden', 'disabled')
+        self._canvas.itemconfigure(self._id, state=state)
     
     def bbox(self) -> tuple[int, int, int, int] | None:
         return self._canvas.bbox(self._id)
     
     def delete(self):
         self._canvas.delete(self._id)
-    
-    def hide(self):
-        self._canvas.itemconfigure(self._id, state='hidden')
-    
-    def show(self):
-        self._canvas.itemconfigure(self._id, state='normal')
     
     def set_transform(self, transform: _Transform2D | None):
         assert isinstance(transform, (_Transform2D, type(None))), transform
@@ -522,7 +523,10 @@ class _BaseArtist(_BaseElement):#TODO: antialiasing
     def get_coords(self) -> list[float]:
         return self.coords()
     
-    def set_state(self, state: Literal['normal', 'hidden', 'disabled'] = None):
+    def set_state(
+            self,
+            state: Literal['normal', 'hidden', 'disabled'] = None
+    ):
         assert state in ('normal', 'hidden', 'disabled')
         
         if state is not None and state != self._req_state:
@@ -545,7 +549,7 @@ class _BaseArtist(_BaseElement):#TODO: antialiasing
                 return float(tag[7:])
         raise ZorderNotFoundError('Zorder has not been initialized yet.')
     
-    def _update_zorder(self):
+    def _update_zorder(self):  # update the zorder tag
         try:
             old_zorder = self.get_zorder()
         except ZorderNotFoundError:
@@ -590,7 +594,7 @@ class _Text(_BaseArtist):
         self._font: Font = Font() if font is None else font
         self._id: int = canvas.create_text(
             -100, -100, anchor='se',
-            text=text, font=self._font, tags=self._tags
+            text=text, font=self._font, state='hidden', tags=self._tags
         )
         self.set_style(
             text=text,
@@ -605,11 +609,13 @@ class _Text(_BaseArtist):
         )
     
     def draw(self):
-        # Update state
-        self.configure(state=self._req_state)
+        state = self._req_state
         
         if not self._stale:
+            self._set_state(state)
             return
+        
+        self._set_state('hidden')
         
         # Update style
         root_defaults = self._root_default_style
@@ -673,8 +679,11 @@ class _Text(_BaseArtist):
                 anchor = ''.join( mapping[x] for x in anchor )  # rolling
             x, y = self._req_transform(x, y, round_=True)
         
-        self.configure(anchor=anchor)  # update anchor
         self.coords(x, y)  # update position
+        self.configure(anchor=anchor)  # update anchor
+        
+        # Update zorder and state
+        self._set_state(state)
         self._update_zorder()
         self._padx = padx
         self._pady = pady
@@ -793,25 +802,53 @@ class _Line(_BaseArtist):
             color: str | None = None,
             width: Dimension | None = None,
             smooth: bool | None = None,
+            antialias: bool = True,
+            antialias_bg: Callable[[], str] | None = None,
             **kwargs
     ):
+        assert antialias_bg is None or callable(antialias_bg), antialias_bg
         super().__init__(canvas=canvas, **kwargs)
+        self._antialias_enabled: bool = bool(antialias)
+        self._antialias_bg: Callable[[], str] | None = antialias_bg
         self._xlims: NDArray[Float] = np.array([0., 1.], float)
         self._ylims: NDArray[Float] = np.array([0., 1.], float)
         self._req_xy: NDArray[Float] = np.array([[]], dtype=float)
         self._id: int = self._canvas.create_line(
             -100, -100, -100, -100,
-            fill='', width='0p', tags=self._tags
+            fill='', width='0p', state='hidden', tags=self._tags
+        )
+        self._id_aa: int = self._canvas.create_line(
+            -100, -100, -100, -100,
+            fill='', width='0p', state='hidden', tags=self._tags
         )
         self.set_data(x=x, y=y)
         self.set_style(color=color, width=width, smooth=smooth)
     
     def draw(self):
-        # Update state
-        self.configure(state=self._req_state)
+        import time
+        t0 = time.monotonic()
+        
+        state = self._req_state
         
         if not self._stale:
+            self._set_state(state)
             return
+        
+        self._set_state('hidden')
+        
+        # Update coordinates
+        if self._req_coords:
+            xys = self._req_coords
+        else:
+            xy = self._req_transform(*self._req_xy, round_=True)
+            xy = _drop_consecutive_duplicates(*xy)
+            xy = _drop_linearly_redundant_points(xy)
+            if self._antialias_enabled:
+                xy = _cutoff_z_patterns(xy)
+            xys = xy.ravel(order='F')  # x0, y0, x1, y1, x2, y2, ...
+        if len(xys) < 4:
+            xys = (-100, -100, -100, -100)
+        self.coords(*xys)
         
         # Update style
         root_defaults = self._root_default_style
@@ -821,29 +858,66 @@ class _Line(_BaseArtist):
             k: defaults.get(k, root_defaults[k])
             for k, v in cf.items() if v is None
         })
-        self.configure(
-            fill=cf["color"], width=cf["width"], smooth=cf["smooth"]
-        )
+        cf.update(fill=cf.pop('color'))
+        self.configure(**cf)
         
-        import time
-        t0 = time.monotonic()
-        if self._req_coords:
-            xys = self._req_coords
-        else:
-            xy = self._req_transform(*self._req_xy, round_=True)
-            xy = _drop_consecutive_duplicates(*xy)
-            xy = _drop_linearly_redundant_points(xy)
-            xy = _cutoff_z_patterns(xy)
-            xys = xy.ravel(order='F')  # x0, y0, x1, y1, x2, y2, ...
+        if self._antialias_enabled and self._canvas._windowingsystem != 'aqua':
+            self._antialias(xys, **cf)
         
-        if len(xys) < 4:
-            xys = (-100, -100, -100, -100)
+        # Update zorder and state
+        self._update_zorder()
+        self._set_state(state)
+        self._stale = False
         
-        self.coords(*xys)
         t1 = time.monotonic()
         print(t1-t0)#???
-        self._update_zorder()
-        self._stale = False
+    
+    def _set_state(
+            self,
+            state: Literal['normal', 'hidden', 'disabled'] = None
+    ):
+        super()._set_state(state)
+        if self._antialias_enabled and self._canvas._windowingsystem != 'aqua':
+            state_aa = state
+        else:
+            state_aa = 'hidden'
+        self._canvas.itemconfigure(self._id_aa, state=state_aa)
+    
+    def _update_zorder(self):
+        super()._update_zorder()
+        
+        id_og = self._id
+        self._id = self._id_aa
+        try:
+            super()._update_zorder()
+        finally:
+            self._id = id_og
+    
+    def _antialias(
+            self, xys: ArrayLike, fill: str, width: Dimension, smooth: bool
+    ):
+        width = self._to_px(width) + 1.
+        
+        # Mix the foreground and background colors
+        w = 0.3  # the weight for the foreground color
+        canvas = self._canvas
+        if self._antialias_bg:
+            bg = self._antialias_bg()
+        else:
+            bg = canvas.cget('bg')
+        bg = canvas.winfo_rgb(bg)
+        fg = canvas.winfo_rgb(fill)
+        rgb = [  # RGB (0~65535) => (0~255)
+            int((f*w + b*(1. - w)) / 65535. * 255.) for f, b in zip(fg, bg)
+        ]
+        fill = '#{:02x}{:02x}{:02x}'.format(*rgb)
+        
+        # Update the transparent line
+        id_og = self._id
+        id_aa = self._id_aa
+        canvas.itemconfigure(id_aa, fill=fill, width=width, smooth=smooth)
+        canvas.coords(id_aa, *xys)
+        canvas.tag_lower(id_aa, id_og)
     
     def set_style(
             self,
@@ -931,16 +1005,24 @@ class _Rectangle(_BaseArtist):
         super().__init__(canvas=canvas, **kwargs)
         self._id: int = self._canvas.create_rectangle(
             -100, -100, -100, -100,
-            fill='', outline='', width='0p', tags=self._tags
+            fill='', outline='', width='0p', state='hidden', tags=self._tags
         )
         self.set_style(facecolor=facecolor, edgecolor=edgecolor, width=width)
     
     def draw(self):
-        # Update state
-        self.configure(state=self._req_state)
+        state = self._req_state
         
         if not self._stale:
+            self._set_state(state)
             return
+        
+        self._set_state('hidden')
+        
+        # Update coordinates
+        xys = self._req_coords
+        if len(xys) < 4:
+            xys = (-100, -100, -100, -100)
+        self.coords(*xys)
         
         # Update style
         root_defaults = self._root_default_style
@@ -950,15 +1032,11 @@ class _Rectangle(_BaseArtist):
             k: defaults.get(k, root_defaults[k])
             for k, v in cf.items() if v is None
         })
-        self.configure(
-            fill=cf["facecolor"], outline=cf["edgecolor"], width=cf["width"]
-        )
+        cf.update(fill=cf.pop('facecolor'), outline=cf.pop('edgecolor'))
+        self.configure(**cf)
         
-        xys = self._req_coords
-        
-        if len(xys) < 4:
-            xys = (-100, -100, -100, -100)
-        self.coords(*xys)
+        # Update zorder and state
+        self._set_state(state)
         self._update_zorder()
         self._stale = False
     
@@ -1056,7 +1134,7 @@ class _Ticks(_BaseRegion):
         self._side: Literal['t', 'b', 'l', 'r'] = side
         self._grow: int = {"r": 0, "b": 1, "l": 2, "t": 3}[side]
         
-        self._req_enable_labels: bool = False
+        self._req_labels_enabled: bool = False
         self._req_scientific: Int | None = None
         self._req_xys: tuple[Dimension, Dimension, Dimension, Dimension] | None \
             = None
@@ -1078,8 +1156,8 @@ class _Ticks(_BaseRegion):
     def draw(
             self
     ) -> tuple[dict[str, Any], _Transform1D] | None:
-        self._dummy_label.hide()
-        if not self._req_enable_labels:
+        self._dummy_label._set_state('hidden')
+        if not self._req_labels_enabled:
             for label in self._labels:
                 label.delete()
             self._labels.clear()
@@ -1113,7 +1191,7 @@ class _Ticks(_BaseRegion):
             label.draw()
     
     def draw_dummy(self, *args, **kwargs):
-        if not self._req_enable_labels:
+        if not self._req_labels_enabled:
             return
         
         # Temporarily set xys and transform to get the limits' texts and positions
@@ -1136,7 +1214,7 @@ class _Ticks(_BaseRegion):
         label = self._dummy_label
         label.set_style(text=text)
         label.set_bounds(xys=xys)
-        label.show()
+        label.set_state('normal')
         label.draw()
         
         # Update current size of the text item
@@ -1196,7 +1274,7 @@ class _Ticks(_BaseRegion):
             overstrike=overstrike
         )
         self._dummy_label.set_bounds(padx=padx, pady=pady)
-        self._req_enable_labels = enable
+        self._req_labels_enabled = enable
         self._req_scientific = scientific
     
     def get_labels(self) -> list[_Text]:
@@ -1266,7 +1344,7 @@ class _Ticks(_BaseRegion):
         self._limits = [dmin, dmax]
         self._margins = [marg1, marg2]
         
-        if not self._req_enable_labels:
+        if not self._req_labels_enabled:
             if dlimits[0] < dlimits[1]:
                 return [dmin, dmax], [cmin, cmax]
             return [dmax, dmin], [cmin, cmax]
@@ -1849,7 +1927,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             color: str | None = None,
             width: Dimension | None = None,
             smooth: bool | None = None,
-            label: str = ''
+            antialias: bool = True,
+            label: str = ''#TODO: legend
     ) -> _Line:
         assert isinstance(label, str), label
         
@@ -1887,6 +1966,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             color=next(color_cycle),
             width=width,
             smooth=smooth,
+            antialias=antialias,
+            antialias_bg=lambda: self._frame.get_rect().get_style()["facecolor"],
             x_side=x_side,
             y_side=y_side,
             user=True,
