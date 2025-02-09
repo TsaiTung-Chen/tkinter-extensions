@@ -267,32 +267,36 @@ class _Transform1D:  # 1D transformation
     
     def __call__(
             self,
-            xs: IntFloat | NDArray[IntFloat]
-    ) -> Float | NDArray[Float]:
+            xs: IntFloat | NDArray[IntFloat],
+            return_filter: bool = False
+    ) -> NDArray[IntFloat] | tuple[
+        NDArray[IntFloat], np.bool | NDArray[bool]
+    ]:
         assert isinstance(xs, (IntFloat, np.ndarray)), xs
-        if np.ndim(xs) == 0:
-            xs = np.float64(xs)
+        
+        if np.ndim(xs) == 0:  # scalar
+            xs = np.asarray(xs)
         dt = xs.dtype
         assert any( np.issubdtype(dt, d) for d in IntFloat.__args__ ), xs.dtype
         
         if self._bound:
-            return xs[self.bound_x(xs)]  # 1D array
-        return xs  # 0D or 1D array
+            retain = self.bound_x(xs)
+            xs = xs[retain]
+        else:
+            retain = np.ones(xs.shape, dtype=bool)
+        
+        if return_filter:
+            return xs, retain
+        return xs
     
-    def bound_x(
-            self, xs: IntFloat | NDArray[IntFloat]
-    ) -> IntFloat | NDArray[IntFloat]:
-        assert isinstance(xs, (IntFloat, np.ndarray)), xs
-        if np.ndim(xs) == 0:
-            xs = np.float64(xs)
+    def bound_x(self, xs: NDArray[IntFloat]) -> NDArray[bool]:
+        assert isinstance(xs, np.ndarray), xs
+        assert xs.ndim > 0, xs
         return (self._x_min <= xs) & (xs <= self._x_max)
     
-    def bound_y(
-            self, ys: IntFloat | NDArray[IntFloat]
-    ) -> IntFloat | NDArray[IntFloat]:
-        assert isinstance(ys, (IntFloat, np.ndarray)), ys
-        if np.ndim(ys) == 0:
-            ys = np.float64(ys)
+    def bound_y(self, ys: NDArray[IntFloat]) -> NDArray[bool]:
+        assert isinstance(ys, np.ndarray), ys
+        assert ys.ndim > 0, ys
         return (self._y_min <= ys) & (ys <= self._y_max)
     
     def get_x_limits(self) -> tuple[IntFloat, IntFloat]:
@@ -310,8 +314,8 @@ class _FirstOrderPolynomial(_Transform1D):
         assert isinstance(c0, IntFloat), c0
         assert isinstance(c1, IntFloat), c1
         super().__init__(*args, **kwargs)
-        self._c0 = np.float64(c0)
-        self._c1 = np.float64(c1)
+        self._c0: np.float64 = np.float64(c0)
+        self._c1: np.float64 = np.float64(c1)
     
     def __eq__(self, obj):
         if type(self) != type(obj):
@@ -321,27 +325,38 @@ class _FirstOrderPolynomial(_Transform1D):
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat],
-            round_: bool = False
-    ) -> Float | NDArray[Float]:
-        xs = super().__call__(xs)
+            round_: bool = False,
+            return_filter: bool = False
+    ) -> IntFloat | NDArray[IntFloat] | tuple[
+        IntFloat | NDArray[IntFloat], np.bool | NDArray[bool]
+    ]:
+        xs, retain = super().__call__(xs, return_filter=True)
         ys = self._c0 + self._c1 * xs  # y(x) = c0 + c1 * x (0D or 1D array)
+        
+        if self._bound:
+            retain_y = self.bound_y(ys)
+            retain[retain] = retain_y
+            ys = ys[retain_y]  # 1D array
+        
         if round_:
             ys = ys.round()
-        if self._bound:
-            ys = ys[self.bound_y(ys)]  # 1D array
+        
+        if return_filter:
+            return ys, retain
         return ys
     
     @classmethod
     def from_points(
             cls, xs: ArrayLike, ys: ArrayLike, *args, **kwargs
     ) -> _FirstOrderPolynomial:
-        assert np.shape(xs) == np.shape(ys) == (2,), (np.shape(xs), np.shape(ys))
+        xs, ys = np.asarray(xs), np.asarray(ys)
+        assert xs.shape == ys.shape == (2,), [xs.shape, ys.shape]
         
         # y(x) = c0 + c1 * x
         c1 = (ys[1] - ys[0]) / (xs[1] - xs[0])  # c1 = (y1 - y0) / (x1 - x0)
         c0 = ys[0] - c1 * xs[0]  # c0 = y0 - c1 * x0
         
-        return cls(c0, c1, *args, **kwargs)
+        return cls(c0=c0, c1=c1, *args, **kwargs)
     
     def get_inverse(self) -> _FirstOrderPolynomial:
         c1_inv = 1. / self._c1  # c1_inv = 1 / c1
@@ -351,61 +366,115 @@ class _FirstOrderPolynomial(_Transform1D):
         )
 
 
+class _Logarithm(_Transform1D):
+    def __init__(
+            self,
+            base: IntFloat = 10.,
+            c: IntFloat = 0.,
+            x_limits: ArrayLike = [0., np.inf],
+            *args,
+            **kwargs
+    ):
+        assert base > 0., base
+        super().__init__(*args, **kwargs)
+        self._c: np.float64 = np.float64(c)
+        self._base: np.float64 = np.float64(base)
+        self._log2_base: np.float64 = np.log2(self._base)
+    
+    def __eq__(self, obj):
+        if type(self) != type(obj):
+            return False
+        return self._base == obj._base
+    
+    def __call__(
+            self,
+            xs: IntFloat | NDArray[IntFloat],
+            round_: bool = False,
+            return_filter: bool = False
+    ) -> NDArray[IntFloat]:
+        xs, retain = super().__call__(xs, return_filter=True)
+        
+        if self._base == 2.:
+            ys = np.log2(xs) + self._c
+        elif self._base == np.e:
+            ys = np.log(xs) + self._c
+        elif self._base == 10.:
+            ys = np.log10(xs) + self._c
+        else:
+            ys = np.log2(xs) / self._log2_base + self._c
+        
+        if self._bound:
+            retain_y = self.bound_y(ys)
+            retain[retain] = retain_y
+            ys = ys[retain_y]  # 1D array
+        
+        if round_:
+            ys = ys.round()
+        
+        if return_filter:
+            return ys, retain
+        return ys
+    
+    def bound_x(self, xs: NDArray[IntFloat]) -> NDArray[bool]:
+        assert isinstance(xs, np.ndarray), xs
+        assert xs.ndim > 0, xs
+        return super().bound_x(xs[xs > 0.])
+    
+    @classmethod
+    def from_points(
+            cls, xs: ArrayLike, ys: ArrayLike, base: IntFloat = 10., **kwargs
+    ) -> _Logarithm:
+        assert base > 0., base
+        
+        xs, ys = np.asarray(xs), np.asarray(ys)
+        
+        # y(x) = log(x) / log(base) + c
+        if base == 2.:
+            log_x = np.log2(xs[0])
+        elif base == np.e:
+            log_x = np.log(xs[0])
+        elif base == 10.:
+            log_x = np.log10(xs[0])
+        else:
+            log_x = np.log2(xs[0]) / np.log2(base)
+        c = ys[0] - log_x
+        
+        return cls(base=base, c=c, **kwargs)
+    
+    def get_inverse(self):
+        raise NotImplementedError
+
+
 class _Transform2D:  # 2D transformation
     def __init__(
             self,
-            inp_xs: ArrayLike = [0., 1.],
-            inp_ys: ArrayLike = [0., 1.],
-            out_xs: ArrayLike = [0., 1.],
-            out_ys: ArrayLike = [0., 1.],
-            x_transform: type = _FirstOrderPolynomial,
-            y_transform: type = _FirstOrderPolynomial,
-            x_transform_kw: dict[str, Any] = {},
-            y_transform_kw: dict[str, Any] = {},
-            bound: bool = True
+            x_transform: _Transform1D = _FirstOrderPolynomial(bound=False),
+            y_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
     ):
-        assert issubclass(x_transform, _Transform1D), x_transform
-        assert issubclass(y_transform, _Transform1D), y_transform
-        assert isinstance(bound, bool), bound
+        assert isinstance(x_transform, _Transform1D), x_transform
+        assert isinstance(y_transform, _Transform1D), y_transform
         
-        self._x_tf: _Transform1D = x_transform.from_points(
-            inp_xs, out_xs, bound=False, **x_transform_kw
-        )
-        self._y_tf: _Transform1D = y_transform.from_points(
-            inp_ys, out_ys, bound=False, **y_transform_kw
-        )
-        self._inp_x_min, self._inp_x_max = self._x_tf.get_x_limits()
-        self._inp_y_min, self._inp_y_max = self._y_tf.get_x_limits()
-        self._out_x_min, self._out_x_max = self._x_tf.get_y_limits()
-        self._out_y_min, self._out_y_max = self._y_tf.get_y_limits()
-        self._bound: bool = bound
+        self._x_tf: _Transform1D = x_transform
+        self._y_tf: _Transform1D = y_transform
     
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
             round_: bool = False
-    ) -> NDArray[Float]:
-        assert isinstance(xs, (IntFloat, np.ndarray)), xs
-        assert isinstance(ys, (IntFloat, np.ndarray)), ys
+    ) -> NDArray[IntFloat]:
+        xs, ys = np.asarray(xs), np.asarray(ys)
+        assert xs.shape == ys.shape, [xs.shape, ys.shape]
         
-        if np.ndim(xs) == 0:
-            xs = np.float64(xs)
-        if np.ndim(ys) == 0:
-            ys = np.float64(ys)
+        not_scalar = xs.ndim > 0
         
-        if not self._bound:
-            xs = self._x_tf(xs, round_=round_)
-            ys = self._y_tf(ys, round_=round_)
-            return xs, ys
+        xs, retain_x = self._x_tf(xs, round_=round_, return_filter=True)
+        if not_scalar:
+            ys = ys[retain_x]
         
-        valid_inp = (self._inp_x_min <= xs) & (xs <= self._inp_x_max) \
-                  & (self._inp_y_min <= ys) & (ys <= self._inp_y_max)
-        xs = self._x_tf(xs[valid_inp], round_=round_)
-        ys = self._y_tf(ys[valid_inp], round_=round_)
-        valid_out = (self._out_x_min <= xs) & (xs <= self._out_x_max) \
-                  & (self._out_y_min <= ys) & (ys <= self._out_y_max)
-        xs, ys = xs[valid_out], ys[valid_out]  # two 1D arrays
+        ys, retain_y = self._y_tf(ys, round_=round_, return_filter=True)
+        if not_scalar:
+            xs = xs[retain_y]
         
         return np.asarray([xs, ys])
 
@@ -438,7 +507,7 @@ class _BaseArtist(_BaseElement):
             self,
             *args,
             state: Literal['normal', 'hidden', 'disabled'] = 'normal',
-            transform: _Transform2D = _Transform2D(bound=False),
+            transform: _Transform2D = _Transform2D(),
             x_side: Literal['b', 't'] | None = None,
             y_side: Literal['l', 'r'] | None = None,
             user: bool = False,
@@ -1146,8 +1215,9 @@ class _Ticks(_BaseRegion):
         
         self._req_labels_enabled: bool = False
         self._req_scientific: Int | None = None
-        self._req_xys: tuple[Dimension, Dimension, Dimension, Dimension] | None \
-            = None
+        self._req_xys: tuple[
+            Dimension, Dimension, Dimension, Dimension
+        ] | None = None
         self._req_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
         self._req_limits: list[IntFloat | None] = [None, None]
         self._req_margins: list[Dimension | None] = [None, None]
@@ -1159,6 +1229,10 @@ class _Ticks(_BaseRegion):
         self._vertical_label: bool = False
         self._fitted_labels: tuple[IntFloat, IntFloat, int] = (1., 1e+200, 2)
         self._labels: list[_Text] = []
+        self._dummy_xys: tuple[
+            Dimension, Dimension, Dimension, Dimension
+        ] | None = None
+        self._dummy_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
         self._dummy_label: _Text = _Text(
             canvas=self._canvas, text='', tag=f'{self._tag}.labels.text'
         )
@@ -1200,20 +1274,11 @@ class _Ticks(_BaseRegion):
             label.set_bounds(xys=xys, **bounds)
             label.draw()
     
-    def draw_dummy(self, *args, **kwargs):
+    def _draw_dummy(self):
         if not self._req_labels_enabled:
             return
         
-        # Temporarily set xys and transform to get the limits' texts and positions
-        update_labels = self._update_labels
-        xys, transform = self._req_xys, self._req_transform
-        try:
-            self._set_xys_and_transform(*args, **kwargs)
-            self._update_labels = True
-            texts, positions = self._make_labels(dummy=True)
-        finally:
-            self._update_labels = update_labels
-            self._req_xys, self._req_transform = xys, transform
+        texts, positions = self._make_labels(dummy=True)
         
         # Find possibly largest label
         n_chars = [ max(len(t) for t in tx.split('\n', 1)) for tx in texts ]
@@ -1318,12 +1383,18 @@ class _Ticks(_BaseRegion):
     def _set_xys_and_transform(
             self,
             xys: tuple[Dimension, Dimension, Dimension, Dimension] | None = None,
-            transform: _Transform1D | None = None
+            transform: _Transform1D | None = None,
+            dummy: bool = False
     ):
         assert isinstance(xys, tuple) and len(xys) == 4, xys
         assert sum( p is None for p in xys ) == 1, xys
         assert xys[self._grow] is None, (self._side, xys)
         assert isinstance(transform, _Transform1D), transform
+        
+        if dummy:
+            self._dummy_xys = xys
+            self._dummy_transform = transform
+            return
         
         if xys is not None and xys != self._req_xys:
             self._req_xys = xys
@@ -1335,7 +1406,7 @@ class _Ticks(_BaseRegion):
     def _map_data_to_canvas(
             self, dlimits: ArrayLike, climits: ArrayLike
     ) -> tuple[list[IntFloat], list[IntFloat]]:
-        # Fetch the min and max values set by user
+        # Fetch the min and max values set by the user
         (dmin, dmax), (cmin, cmax) = sorted(dlimits), sorted(climits)
         req_dmin, req_dmax = self._req_limits
         req_marg1, req_marg2 = self._req_margins
@@ -1403,10 +1474,13 @@ class _Ticks(_BaseRegion):
             self,
             dummy: bool = False
     ) -> tuple[list[str], NDArray[Float]]:
-        assert self._update_labels, self._update_labels
-        
-        x1, y1, x2, y2 = self._req_xys
-        transform = self._req_transform
+        if dummy:
+            x1, y1, x2, y2 = self._dummy_xys
+            transform = self._dummy_transform
+        else:
+            assert self._update_labels, self._update_labels
+            x1, y1, x2, y2 = self._req_xys
+            transform = self._req_transform
         sci = self._default_style[f"{self._tag}.labels.scientific"] \
             if self._req_scientific is None \
             else self._req_scientific
@@ -1434,7 +1508,8 @@ class _Ticks(_BaseRegion):
         else:  # left or right
             positions = [ (x1, y, x2, y) for y in transform(data, round_=True) ]
         
-        self._update_labels = False
+        if not dummy:
+            self._update_labels = False
         
         return texts, positions
 
@@ -1644,15 +1719,15 @@ class _Plot(_BaseSubwidget, tk.Canvas):
                 (self._tartists, '_xlims')
             ]
         ]
-        dlimits = np.array([[1, 1e+200]]*4, dtype=float)
-        for i, dlims in enumerate(_dlimits):
-            if dlims.size:
-                dlimits[i] = [dlims[:, 0].min(), dlims[:, 1].max()]
-        dlimits[0] = dlimits[0][::-1]  # flip y
-        dlimits[2] = dlimits[2][::-1]  # flip y
+        dbounds = np.array([[1., 1e+200]]*4, dtype=float)
+        for i, lims in enumerate(_dlimits):
+            if lims.size:
+                dbounds[i] = [lims[:, 0].min(), lims[:, 1].max()]
+        dbounds[0] = dbounds[0][::-1]  # flip y
+        dbounds[2] = dbounds[2][::-1]  # flip y
         del _dlimits
         
-        # Draw items and get empty space for the frame
+        # Draw items and get empty space for frame
         w, h = self._size
         cx1, cy1, cx2, cy2 = (0, 0, w-1, h-1)
         
@@ -1660,7 +1735,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self._title.set_bounds((cx1, cy1, cx2, cy2))
         self._title.draw()
         
-        ## Update upper bound if the title exists
+        ## Update the upper bound of the empty space if the title exists
         if bbox := self._title.bbox():
             cy1 = bbox[3] + 1
             if cy1 > cy2:
@@ -1674,7 +1749,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             axis.set_bounds(tuple(xys))
             axis.draw()
         
-        ## Update empty space
+        ## Update the bounds of the empty space for the ticks and frame
         if bbox := self._raxis.bbox():
             cx2 = bbox[0] - 1
         if bbox := self._baxis.bbox():
@@ -1687,51 +1762,53 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             cy1 = cy2 = round((cy1 + cy2) / 2)
         if cx1 > cx2:
             cx1 = cx2 = round((cx1 + cx2) / 2)
+        cxys_outer = (cx1, cy1, cx2, cy2)  # empty space for the ticks and frame
         
-        ## Draw dummy ticks and get the empty space
-        cxys_backup = (cx1, cy1, cx2, cy2)  # backup space for ticks
-        climits = [[cy1, cy2], [cx1, cx2]] * 2
-        for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
+        ## Draw dummy ticks
+        cbounds = [[cy1, cy2], [cx1, cx2]] * 2  # shape: (4, 2)
+        for i, (side, dat, cnv) in enumerate(zip('rblt', dbounds, cbounds)):
             tf = _FirstOrderPolynomial.from_points(
-                dlims, clims, x_limits=dlims, y_limits=clims, bound=False
+                dat, cnv, x_limits=dat, y_limits=cnv, bound=False
             )
-            xys = list(cxys_backup)
-            xys[i] = None
-            ticks = self._get_ticks(side)
-            ticks.draw_dummy(tuple(xys), tf)
-            
-            ## Update empty space
-            if bbox := self._rticks.bbox(dummy=True):
-                cx2 = bbox[0] - 1
-            if bbox := self._bticks.bbox(dummy=True):
-                cy2 = bbox[1] - 1
-            if bbox := self._lticks.bbox(dummy=True):
-                cx1 = bbox[2] + 1
-            if bbox := self._tticks.bbox(dummy=True):
-                cy1 = bbox[3] + 1
-            if cy1 > cy2:
-                cy1 = cy2 = round((cy1 + cy2) / 2)
-            if cx1 > cx2:
-                cx1 = cx2 = round((cx1 + cx2) / 2)
-        
-        ## Draw ticks and get the empty space
-        dbounds = dlimits.copy()
-        climits = np.asarray([[cy1, cy2], [cx1, cx2]] * 2)
-        cbounds = climits.copy()
-        for i, (side, dlims, clims) in enumerate(zip('rblt', dlimits, climits)):
-            ticks = self._get_ticks(side)
-            dlims[:], clims[:] = ticks._map_data_to_canvas(dlims, clims)
-            tf = _FirstOrderPolynomial.from_points(
-                dlims, clims, x_limits=dlims, y_limits=clims, bound=False
-            )
-            xys = [cx1, cy1, cx2, cy2]
+            xys = list(cxys_outer)
             xys[i] = None  # growing bound
-            xys[i-2] = cxys_backup[i-2]  # use previous base bound
+            ticks = self._get_ticks(side)
+            ticks._set_xys_and_transform(tuple(xys), tf, dummy=True)
+            ticks._draw_dummy()
+        
+        ## Update the bounds of the empty space for the frame
+        if bbox := self._rticks.bbox(dummy=True):
+            cx2 = bbox[0] - 1
+        if bbox := self._bticks.bbox(dummy=True):
+            cy2 = bbox[1] - 1
+        if bbox := self._lticks.bbox(dummy=True):
+            cx1 = bbox[2] + 1
+        if bbox := self._tticks.bbox(dummy=True):
+            cy1 = bbox[3] + 1
+        if cy1 > cy2:
+            cy1 = cy2 = round((cy1 + cy2) / 2)
+        if cx1 > cx2:
+            cx1 = cx2 = round((cx1 + cx2) / 2)
+        cxys_inner = (cx1, cy1, cx2, cy2)  # empty space for the frame
+        
+        ## Draw ticks and update the data limits and canvas limits
+        cbounds = np.asarray([[cy1, cy2], [cx1, cx2]] * 2)  # shape: (4, 2)
+        climits = cbounds.copy()
+        dlimits = dbounds.copy()
+        for i, (side, dat, cnv) in enumerate(zip('rblt', dlimits, climits)):
+            ticks = self._get_ticks(side)
+            dat[:], cnv[:] = ticks._map_data_to_canvas(dat, cnv)
+            tf = _FirstOrderPolynomial.from_points(
+                dat, cnv, x_limits=dat, y_limits=cnv, bound=False
+            )
+            xys = list(cxys_outer)
+            xys[i] = None  # growing bound
+            xys[i-1], xys[i+1-4] = cxys_inner[i-1], cxys_inner[i+1-4]
             ticks._set_xys_and_transform(tuple(xys), tf)
             ticks.draw()
         
         # Draw frame
-        self._frame.set_coords(cx1, cy1, cx2, cy2)
+        self._frame.set_coords(*cxys_inner)
         self._frame.draw()
         
         # Draw user defined artists
@@ -1747,21 +1824,24 @@ class _Plot(_BaseSubwidget, tk.Canvas):
                 tf = transforms[side_pair]
             else:
                 tf = _Transform2D(
-                    inp_xs=dlimits[x_side], inp_ys=dlimits[y_side],
-                    out_xs=climits[x_side], out_ys=climits[y_side],
-                    x_transform_kw={
-                        "x_limits": dbounds[x_side], "y_limits": cbounds[x_side]
-                    },
-                    y_transform_kw={
-                        "x_limits": dbounds[y_side], "y_limits": cbounds[y_side]
-                    }
+                    x_transform=_FirstOrderPolynomial.from_points(
+                        dlimits[x_side], climits[x_side],
+                        x_limits=dbounds[x_side], y_limits=cbounds[x_side]
+                    ),
+                    y_transform=_FirstOrderPolynomial.from_points(
+                        dlimits[y_side], climits[y_side],
+                        x_limits=dbounds[y_side], y_limits=cbounds[y_side]
+                    )
                 )
                 transforms[side_pair] = tf
             artist.set_transform(tf)
             artist.draw()
         
         # Raise artists in order
-        for tag in sorted(set(self._zorder_tags.values())):
+        for tag in sorted(
+                set(self._zorder_tags.values()),
+                key=lambda t: float(t.split('zorder=', 1)[1])
+        ):
             self.tag_raise(tag)
     
     def delete_all(self, draw: bool = False):
