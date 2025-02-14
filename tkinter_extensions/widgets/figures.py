@@ -251,8 +251,8 @@ class _Transform1D:  # 1D transformation
             bound: bool = True
     ):
         assert isinstance(bound, bool), bound
-        x_limits = np.asarray(x_limits)
-        y_limits = np.asarray(y_limits)
+        x_limits = np.asarray(x_limits, dtype=float)
+        y_limits = np.asarray(y_limits, dtype=float)
         assert x_limits.shape == (2,), x_limits.shape
         assert y_limits.shape == (2,), y_limits.shape
         t = x_limits.dtype
@@ -272,26 +272,19 @@ class _Transform1D:  # 1D transformation
     
     def __call__(
             self,
-            xs: IntFloat | NDArray[IntFloat],
-            return_filter: bool = False
+            xs: IntFloat | NDArray[IntFloat]
     ) -> NDArray[IntFloat] | tuple[
         NDArray[IntFloat], np.bool | NDArray[bool]
     ]:
         assert isinstance(xs, (IntFloat, np.ndarray)), xs
         
-        if np.ndim(xs) == 0:  # scalar
-            xs = np.asarray(xs)
+        xs = np.array(xs)
         dt = xs.dtype
         assert any( np.issubdtype(dt, d) for d in IntFloat.__args__ ), xs.dtype
         
         if self._bound:
-            retain = self.bound_x(xs)
-            xs = xs[retain]
-        else:
-            retain = np.ones(xs.shape, dtype=bool)
+            self.bound_x(xs)
         
-        if return_filter:
-            return xs, retain
         return xs
     
     def copy(self, *args, **kwargs):
@@ -304,12 +297,14 @@ class _Transform1D:  # 1D transformation
     def bound_x(self, xs: NDArray[IntFloat]) -> NDArray[bool]:
         assert isinstance(xs, np.ndarray), xs
         assert xs.ndim > 0, xs
-        return (self._x_min <= xs) & (xs <= self._x_max)
+        xs[xs < self._x_min] = self._x_min
+        xs[xs > self._x_max] = self._x_max
     
     def bound_y(self, ys: NDArray[IntFloat]) -> NDArray[bool]:
         assert isinstance(ys, np.ndarray), ys
         assert ys.ndim > 0, ys
-        return (self._y_min <= ys) & (ys <= self._y_max)
+        ys[ys < self._y_min] = self._y_min
+        ys[ys > self._y_max] = self._y_max
     
     def get_x_limits(self) -> tuple[IntFloat, IntFloat]:
         return [self._x_min, self._x_max]
@@ -335,34 +330,19 @@ class _FirstOrderPolynomial(_Transform1D):
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat],
-            round_: bool = False,
-            return_filter: bool = False,
-            min_quantity: int = 0
+            round_: bool = False
     ) -> IntFloat | NDArray[IntFloat] | tuple[
         IntFloat | NDArray[IntFloat], np.bool | NDArray[bool]
     ]:
-        xs, retain = super().__call__(xs, return_filter=True)
+        xs = super().__call__(xs)
         ys = self._c0 + self._c1 * xs  # y(x) = c0 + c1 * x (0D or 1D array)
         
         if self._bound:
-            retain_y = self.bound_y(ys)
-            retain[retain] = retain_y
-            ys = ys[retain_y]  # 1D array
-        
-        if ys.size < min_quantity:
-            raise ValueError(
-                'The quantity of the input numbers which can be transformed into '
-                f'valid output numbers with the '
-                f'`x_limits` = [{self._x_min}, {self._x_max}] and '
-                f'`y_limits` = [{self._y_min}, {self._y_max}] is smaller than the '
-                f'specified value `min_quantity` = {min_quantity}.'
-            )
+            self.bound_y(ys)
         
         if round_:
             ys = ys.round()
         
-        if return_filter:
-            return ys, retain
         return ys
     
     def copy(
@@ -430,11 +410,9 @@ class _Logarithm(_Transform1D):
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat],
-            round_: bool = False,
-            return_filter: bool = False,
-            min_quantity: int = 0
+            round_: bool = False
     ) -> NDArray[IntFloat]:
-        xs, retain = super().__call__(xs, return_filter=True)
+        xs = super().__call__(xs)
         
         if self._base == 2.:
             ys = self._c1 * np.log2(xs) + self._c0
@@ -446,24 +424,11 @@ class _Logarithm(_Transform1D):
             ys = self._c1 * np.log2(xs) / self._log2_base + self._c0
         
         if self._bound:
-            retain_y = self.bound_y(ys)
-            retain[retain] = retain_y
-            ys = ys[retain_y]  # 1D array
-        
-        if ys.size < min_quantity:
-            raise ValueError(
-                'The quantity of the input numbers which can be transformed into '
-                f'valid output numbers with the '
-                f'`x_limits` = [{self._x_min}, {self._x_max}] and '
-                f'`y_limits` = [{self._y_min}, {self._y_max}] is smaller than the '
-                f'specified value `min_quantity` = {min_quantity}.'
-            )
+            self.bound_y(ys)
         
         if round_:
             ys = ys.round()
         
-        if return_filter:
-            return ys, retain
         return ys
     
     def copy(
@@ -490,7 +455,6 @@ class _Logarithm(_Transform1D):
     ) -> _Logarithm:
         assert base > 0., base
         
-        assert (np.asarray(xs) > 0.).all(), xs.min()#???
         # y(x) = c1 * log(x) / log(base) + c0
         if base == 2.:
             log_xs = np.log2(xs)
@@ -527,24 +491,12 @@ class _Transform2D:  # 2D transformation
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
             round_: bool = False,
-            min_quantity: int = 1
     ) -> NDArray[IntFloat]:
         xs, ys = np.asarray(xs), np.asarray(ys)
         assert xs.shape == ys.shape, [xs.shape, ys.shape]
         
-        not_scalar = xs.ndim > 0
-        
-        xs, retain_x = self._x_tf(
-            xs, round_=round_, return_filter=True, min_quantity=min_quantity
-        )
-        if not_scalar:
-            ys = ys[retain_x]
-        
-        ys, retain_y = self._y_tf(
-            ys, round_=round_, return_filter=True, min_quantity=min_quantity
-        )
-        if not_scalar:
-            xs = xs[retain_y]
+        xs = self._x_tf(xs, round_=round_)
+        ys = self._y_tf(ys, round_=round_)
         
         return np.asarray([xs, ys])
 
@@ -1306,7 +1258,7 @@ class _Ticks(_BaseRegion):
             canvas=self._canvas, text='', tag=f'{self._tag}.labels.text'
         )
         self._stale_labels: bool = True
-        self._fitted_labels: tuple[IntFloat, IntFloat, Int] = (_PMIN, _MAX, 2)
+        self._fitted_labels: dict[str, Any] = {}
         self._labels: list[_Text] = []
         self._limits: list[IntFloat] = [_PMIN, _MAX]
         self._margins: list[IntFloat] = [0., 0.]
@@ -1544,39 +1496,76 @@ class _Ticks(_BaseRegion):
             max_n_labels = max(int((cmax - cmin) // size), 0)
             
             # Find appropriate min and max values and the actual number of labels
-            if max_n_labels <= 1:
-                n = max_n_labels
-            elif self._req_scale == 'linear':
-                ## Use `Decimal` to represent numbers exactly
-                dmin, dmax = Decimal(str(dmin)), Decimal(str(dmax))
-                
-                s = (dmax - dmin) / (max_n_labels - 1)  # step excluding limits
-                log_exp, log_sig = divmod(float(s.log10()), 1)
-                log_exp, log_sig = Decimal(str(log_exp)), Decimal(str(log_sig))
-                if (sig := round(10**log_sig, 0)) > 5:
-                    sig = 10
-                s = 10**log_exp * sig
-                 # find the nearest a*10^b, where a is an integer
-                
-                dmin = (dmin / s).quantize(
-                    Decimal('1.'), rounding=ROUND_FLOOR
-                ) * s
-                dmax = (dmax / s).quantize(
-                    Decimal('1.'), rounding=ROUND_CEILING
-                ) * s
-                n = (dmax - dmin) / s + 1
-                dmin, dmax, n = float(dmin), float(dmax), int(n)
+            if self._req_scale == 'linear':
+                if max_n_labels <= 1:
+                    self._fitted_labels = {
+                        "start": dmin, "stop": dmax, "num": max_n_labels
+                    }
+                else:
+                    ## Use `Decimal` to represent numbers exactly
+                    dmin, dmax = Decimal(str(dmin)), Decimal(str(dmax))
+                    
+                    ## Find the nearest a*10^b, where a is an integer
+                    s = (dmax - dmin) / (max_n_labels - 1)  # step excluding limits
+                    log_exp, log_sig = divmod(float(s.log10()), 1)
+                    log_exp, log_sig = Decimal(str(log_exp)), Decimal(str(log_sig))
+                    if (sig := round(10**log_sig, 0)) > 5:
+                        sig = 10
+                    s = 10**log_exp * sig
+                    
+                    dmin = (dmin / s).quantize(
+                        Decimal('1.'), rounding=ROUND_FLOOR
+                    ) * s
+                    dmax = (dmax / s).quantize(
+                        Decimal('1.'), rounding=ROUND_CEILING
+                    ) * s
+                    n = (dmax - dmin) / s + 1
+                    dmin, dmax, n = float(dmin), float(dmax), int(n)
+                    self._fitted_labels = {
+                        "start": dmin, "stop": dmax, "num": n
+                    }
             else:  # log scale
-                pass#TODO
-            assert n >= 0 and n % 1 == 0, n
-            self._fitted_labels = (dmin, dmax, n)
+                if max_n_labels <= 1:
+                    self._fitted_labels = {
+                        "case": 0,
+                        "dmin": dmin, "dmax": dmax, "n": max_n_labels
+                    }
+                else:
+                    ## Find the nearest a*10^b, where a is an integer
+                    e1, log_s1 = divmod(np.log10(dmin), 1)
+                    e1, log_s1 = Decimal(str(e1)), Decimal(str(log_s1))
+                    s1 = (10**log_s1).quantize(Decimal('1.'), rounding=ROUND_FLOOR)
+                    dmin = 10**e1 * s1
+                    
+                    ## Find the nearest a*10^b, where a is an integer
+                    e2, log_s2 = divmod(np.log10(dmax), 1)
+                    e2, log_s2 = Decimal(str(e2)), Decimal(str(log_s2))
+                    s2 = (10**log_s2).quantize(Decimal('1.'), rounding=ROUND_FLOOR)
+                    dmax = 10**e2 * s2
+                    
+                    # Find `n`, the largest integer smaller than `max_n_labels`
+                    ## a*10^b
+                    case = 1
+                    n = int((e2 - e1) * 9 + 1 - (s1 - 1) + (s2 - 1))
+                    if n > max_n_labels:
+                        case = 2
+                        ## Only 1*10^b
+                        n = int(e2 - e1 + 1)
+                        if s1 > 1:
+                            dmin = 10**e1
+                        if s2 > 1:
+                            dmax = 10**(e2 + 1)
+                            n += 1
+                        if n > max_n_labels:
+                            case = 3
+                            n = 2
+                    dmin, dmax = float(dmin), float(dmax)
+                    self._fitted_labels = {
+                        "case": case,
+                        "s1": float(s1), "s2": float(s2),
+                        "e1": float(e1), "e2": float(e2)
+                    }
         
-        try:#???
-            n
-        except NameError:
-            print(False)
-        else:
-            print(True)
         dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
         tf = tf_cls.from_points(
             dlimits, climits, x_limits=dlimits, y_limits=climits, bound=False
@@ -1612,8 +1601,25 @@ class _Ticks(_BaseRegion):
         if dummy:
             dmin, dmax = sorted(transform.get_x_limits())
             data = np.asarray([dmin, dmax])
-        else:
-            data = np.linspace(*self._fitted_labels, endpoint=True)
+        elif self._req_scale == 'linear':
+            data = np.linspace(**self._fitted_labels, endpoint=True)
+        else:  # log scale
+            params = self._fitted_labels
+            case = params["case"]
+            if case == 0:
+                data = np.linspace(params["dmin"], params["dmax"], params["n"])
+            elif case == 1:
+                data = (
+                    (
+                        10**np.arange(params["e1"], params["e2"]+2)
+                    )[:, None] * 
+                    np.arange(1., 10)[None, :]
+                ).ravel()
+                start = int(params["s1"]) - 1
+                stop = data.size - (9 - int(params["s2"]))
+                data = data[start:stop]
+            else:
+                data = 10**np.arange(params["e1"], params["e2"]+1)
         assert np.isfinite(data).all(), data
         
         # Formatting
@@ -1626,7 +1632,7 @@ class _Ticks(_BaseRegion):
             texts = [ '\n'.join(t.split('\n', 1)[::-1]) for t in texts ]
         
         # Transform the data coordinates into the canvas coordinates
-        transformed_data = transform(data, round_=True, min_quantity=data.size)
+        transformed_data = transform(data, round_=True)
         if self._side in ('t', 'b'):
             positions = [ (x, y1, x, y2) for x in transformed_data ]
         else:  # left or right
@@ -1910,7 +1916,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             ticks = self._get_ticks(side)
             ticks._set_xys_and_transform(tuple(xys), dat, cnv)
             ticks.draw()
-            tfs[side] = ticks._get_transform().copy()
+            tfs[side] = ticks._get_transform().copy(bound=True)
         
         # Draw frame
         self._frame.set_coords(*cxys_inner)
@@ -2540,6 +2546,8 @@ if __name__ == '__main__':
     y = np.sin(2*np.pi*1*x)
     #x = np.array([3, 6, 6, 3, 3], dtype=float)
     #y = np.array([-0.5, -0.5, 0.5, 0.5, -0.5], dtype=float)
+    x = x[:x.size//8]
+    y = 10**x
     
     fig = Figure(root, toolbar=True)
     fig.pack(fill='both', expand=True)
@@ -2556,7 +2564,7 @@ if __name__ == '__main__':
     plt.set_ltickslabels(True)
     #plt.set_ttickslabels(True)
     #plt.set_rtickslabels(True)
-    plt.set_bscale('log')#???
+    plt.set_lscale('log')#???
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
     
