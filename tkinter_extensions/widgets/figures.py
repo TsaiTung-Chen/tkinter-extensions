@@ -24,7 +24,10 @@ from ..utils import defer
 from ._others import UndockedFrame
 from ._figure_config import STYLES
 
-_anchors = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
+_ANCHORS = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
+_NP_FLOAT = np.float64
+_NP_FINFO = np.finfo(_NP_FLOAT)
+_PMIN, _MAX = (_NP_FINFO.smallest_normal, _NP_FINFO.max)
 # =============================================================================
 # ---- Helpers
 # =============================================================================
@@ -199,11 +202,10 @@ def _cutoff_z_patterns(xy: NDArray[IntFloat]) -> NDArray[IntFloat]:
         du1_idc = []
         for du1 in [dup1, dun1]:
             _du1_idc = du1.nonzero()[0]
-            if _du1_idc.size:
-                if _du1_idc[0] == 0:
-                    _du1_idc = _du1_idc[1:]
-                if _du1_idc[-1] == dup1.size - 1:
-                    _du1_idc = _du1_idc[:-1]
+            if _du1_idc.size and _du1_idc[0] == 0:
+                _du1_idc = _du1_idc[1:]
+            if _du1_idc.size and _du1_idc[-1] == dup1.size - 1:
+                _du1_idc = _du1_idc[:-1]
             du1_idc.append(_du1_idc)
         du1_idc = np.concat(du1_idc)
         
@@ -262,8 +264,11 @@ class _Transform1D:  # 1D transformation
         self._x_min, self._x_max = sorted(x_limits)
         self._y_min, self._y_max = sorted(y_limits)
     
-    def __eq__(self, obj):
-        raise NotImplementedError
+    def __eq__(self, obj) -> bool:
+        if type(self) != type(obj):
+            return False
+        return self._x_min == obj._x_min and self._x_max == obj._x_max and \
+            self._y_min == obj._y_min and self._y_max == obj._y_max
     
     def __call__(
             self,
@@ -289,6 +294,13 @@ class _Transform1D:  # 1D transformation
             return xs, retain
         return xs
     
+    def copy(self, *args, **kwargs):
+        raise NotImplementedError
+    
+    @classmethod
+    def from_points(cls, *args, **kwargs):
+        raise NotImplementedError
+    
     def bound_x(self, xs: NDArray[IntFloat]) -> NDArray[bool]:
         assert isinstance(xs, np.ndarray), xs
         assert xs.ndim > 0, xs
@@ -300,10 +312,10 @@ class _Transform1D:  # 1D transformation
         return (self._y_min <= ys) & (ys <= self._y_max)
     
     def get_x_limits(self) -> tuple[IntFloat, IntFloat]:
-        return self._x_min, self._x_max
+        return [self._x_min, self._x_max]
     
     def get_y_limits(self) -> tuple[IntFloat, IntFloat]:
-        return self._y_min, self._y_max
+        return [self._y_min, self._y_max]
     
     def get_inverse(self):
         raise NotImplementedError
@@ -317,16 +329,15 @@ class _FirstOrderPolynomial(_Transform1D):
         self._c0: np.float64 = np.float64(c0)
         self._c1: np.float64 = np.float64(c1)
     
-    def __eq__(self, obj):
-        if type(self) != type(obj):
-            return False
-        return self._c0 == obj._c0 and self._c1 == obj._c1
+    def __eq__(self, obj) -> bool:
+        return super().__eq__(obj) and self._c0 == obj._c0 and self._c1 == obj._c1
     
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat],
             round_: bool = False,
-            return_filter: bool = False
+            return_filter: bool = False,
+            min_quantity: int = 0
     ) -> IntFloat | NDArray[IntFloat] | tuple[
         IntFloat | NDArray[IntFloat], np.bool | NDArray[bool]
     ]:
@@ -338,12 +349,38 @@ class _FirstOrderPolynomial(_Transform1D):
             retain[retain] = retain_y
             ys = ys[retain_y]  # 1D array
         
+        if ys.size < min_quantity:
+            raise ValueError(
+                'The quantity of the input numbers which can be transformed into '
+                f'valid output numbers with the '
+                f'`x_limits` = [{self._x_min}, {self._x_max}] and '
+                f'`y_limits` = [{self._y_min}, {self._y_max}] is smaller than the '
+                f'specified value `min_quantity` = {min_quantity}.'
+            )
+        
         if round_:
             ys = ys.round()
         
         if return_filter:
             return ys, retain
         return ys
+    
+    def copy(
+            self,
+            x_limits: ArrayLike | None = None,
+            y_limits: ArrayLike | None = None,
+            bound: bool | None = None
+    ) -> _FirstOrderPolynomial:
+        x_limits = self.get_x_limits() if x_limits is None else x_limits
+        y_limits = self.get_y_limits() if y_limits is None else y_limits
+        bound = self._bound if bound is None else bound
+        return type(self)(
+            c0=self._c0,
+            c1=self._c1,
+            x_limits=x_limits,
+            y_limits=y_limits,
+            bound=bound
+        )
     
     @classmethod
     def from_points(
@@ -370,43 +407,57 @@ class _Logarithm(_Transform1D):
     def __init__(
             self,
             base: IntFloat = 10.,
-            c: IntFloat = 0.,
-            x_limits: ArrayLike = [0., np.inf],
+            c0: IntFloat = 0.,
+            c1: IntFloat = 1.,
+            x_limits: ArrayLike = [_PMIN, np.inf],
             *args,
             **kwargs
     ):
         assert base > 0., base
-        super().__init__(*args, **kwargs)
-        self._c: np.float64 = np.float64(c)
+        
+        x_limits = np.array(x_limits)
+        x_limits[x_limits < _PMIN] = _PMIN
+        super().__init__(*args, x_limits=x_limits, **kwargs)
+        self._c0: np.float64 = np.float64(c0)
+        self._c1: np.float64 = np.float64(c1)
         self._base: np.float64 = np.float64(base)
         self._log2_base: np.float64 = np.log2(self._base)
     
-    def __eq__(self, obj):
-        if type(self) != type(obj):
-            return False
-        return self._base == obj._base
+    def __eq__(self, obj) -> bool:
+        return super().__eq__(obj) and self._base == obj._base and \
+            self._c0 == obj._c0 and self._c1 == obj._c1
     
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat],
             round_: bool = False,
-            return_filter: bool = False
+            return_filter: bool = False,
+            min_quantity: int = 0
     ) -> NDArray[IntFloat]:
         xs, retain = super().__call__(xs, return_filter=True)
         
         if self._base == 2.:
-            ys = np.log2(xs) + self._c
+            ys = self._c1 * np.log2(xs) + self._c0
         elif self._base == np.e:
-            ys = np.log(xs) + self._c
+            ys = self._c1 * np.log(xs) + self._c0
         elif self._base == 10.:
-            ys = np.log10(xs) + self._c
+            ys = self._c1 * np.log10(xs) + self._c0
         else:
-            ys = np.log2(xs) / self._log2_base + self._c
+            ys = self._c1 * np.log2(xs) / self._log2_base + self._c0
         
         if self._bound:
             retain_y = self.bound_y(ys)
             retain[retain] = retain_y
             ys = ys[retain_y]  # 1D array
+        
+        if ys.size < min_quantity:
+            raise ValueError(
+                'The quantity of the input numbers which can be transformed into '
+                f'valid output numbers with the '
+                f'`x_limits` = [{self._x_min}, {self._x_max}] and '
+                f'`y_limits` = [{self._y_min}, {self._y_max}] is smaller than the '
+                f'specified value `min_quantity` = {min_quantity}.'
+            )
         
         if round_:
             ys = ys.round()
@@ -415,10 +466,23 @@ class _Logarithm(_Transform1D):
             return ys, retain
         return ys
     
-    def bound_x(self, xs: NDArray[IntFloat]) -> NDArray[bool]:
-        assert isinstance(xs, np.ndarray), xs
-        assert xs.ndim > 0, xs
-        return super().bound_x(xs[xs > 0.])
+    def copy(
+            self,
+            x_limits: ArrayLike | None = None,
+            y_limits: ArrayLike | None = None,
+            bound: bool | None = None
+    ) -> _Logarithm:
+        x_limits = self.get_x_limits() if x_limits is None else x_limits
+        y_limits = self.get_y_limits() if y_limits is None else y_limits
+        bound = self._bound if bound is None else bound
+        return type(self)(
+            base=self._base,
+            c0=self._c0,
+            c1=self._c1,
+            x_limits=x_limits,
+            y_limits=y_limits,
+            bound=bound
+        )
     
     @classmethod
     def from_points(
@@ -426,20 +490,21 @@ class _Logarithm(_Transform1D):
     ) -> _Logarithm:
         assert base > 0., base
         
-        xs, ys = np.asarray(xs), np.asarray(ys)
-        
-        # y(x) = log(x) / log(base) + c
+        assert (np.asarray(xs) > 0.).all(), xs.min()#???
+        # y(x) = c1 * log(x) / log(base) + c0
         if base == 2.:
-            log_x = np.log2(xs[0])
+            log_xs = np.log2(xs)
         elif base == np.e:
-            log_x = np.log(xs[0])
+            log_xs = np.log(xs)
         elif base == 10.:
-            log_x = np.log10(xs[0])
+            log_xs = np.log10(xs)
         else:
-            log_x = np.log2(xs[0]) / np.log2(base)
-        c = ys[0] - log_x
+            log_xs = np.log2(xs) / np.log2(base)
         
-        return cls(base=base, c=c, **kwargs)
+        c1 = (ys[1] - ys[0]) / (log_xs[1] - log_xs[0])  # c1 = (y1 - y0) / (x1 - x0)
+        c0 = ys[0] - c1 * log_xs[0]  # c0 = y0 - c1 * x0
+        
+        return cls(base=base, c0=c0, c1=c1, **kwargs)
     
     def get_inverse(self):
         raise NotImplementedError
@@ -461,18 +526,23 @@ class _Transform2D:  # 2D transformation
             self,
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
-            round_: bool = False
+            round_: bool = False,
+            min_quantity: int = 1
     ) -> NDArray[IntFloat]:
         xs, ys = np.asarray(xs), np.asarray(ys)
         assert xs.shape == ys.shape, [xs.shape, ys.shape]
         
         not_scalar = xs.ndim > 0
         
-        xs, retain_x = self._x_tf(xs, round_=round_, return_filter=True)
+        xs, retain_x = self._x_tf(
+            xs, round_=round_, return_filter=True, min_quantity=min_quantity
+        )
         if not_scalar:
             ys = ys[retain_x]
         
-        ys, retain_y = self._y_tf(ys, round_=round_, return_filter=True)
+        ys, retain_y = self._y_tf(
+            ys, round_=round_, return_filter=True, min_quantity=min_quantity
+        )
         if not_scalar:
             xs = xs[retain_y]
         
@@ -767,19 +837,23 @@ class _Text(_BaseArtist):
             elif y2 is None:
                 y2 = y1 + th + sum(pady)
             
-            # `anchor` must be 'n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw', or
-            # 'center'
             x, y, anchor = _get_sticky_xy(
                 (x1, y1, x2, y2), sticky=sticky, padx=padx, pady=pady
             )
+            
+            # `anchor` must be 'n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw', or
+            # 'center'
             if anchor != 'center':
                 # Roll the anchor. e.g. 0 deg => 1 step, 45 deg => 2 step, ...
                 angle = float(self.cget('angle'))
                 assert 0.0 <= angle < 360.0, angle
                 shift = int((angle + 22.5) // 45)  # step with 45 deg
-                mapping = dict(zip(_anchors, _anchors[shift:] + _anchors[:shift]))
-                anchor = ''.join( mapping[x] for x in anchor )  # rolling
+                mapping = dict(zip(_ANCHORS, _ANCHORS[shift:] + _ANCHORS[:shift]))
+                anchor = ''.join( mapping[a] for a in anchor )  # rolling
+            
             x, y = self._req_transform(x, y, round_=True)
+            if x.size == 0:
+                x = y = -100
         
         self.coords(x, y)  # update position
         self.configure(anchor=anchor)  # update anchor
@@ -943,8 +1017,8 @@ class _Line(_BaseArtist):
             if self._antialias_enabled:
                 xy = _cutoff_z_patterns(xy)
             xys = xy.ravel(order='F')  # x0, y0, x1, y1, x2, y2, ...
-        if len(xys) < 4:
-            xys = (-100, -100, -100, -100)
+            if len(xys) < 4:
+                xys = (-100, -100, -100, -100)
         self.coords(*xys)
         
         # Update style
@@ -1096,8 +1170,6 @@ class _Rectangle(_BaseArtist):
         
         # Update coordinates
         xys = self._req_coords
-        if len(xys) < 4:
-            xys = (-100, -100, -100, -100)
         self.coords(*xys)
         
         # Update style
@@ -1211,7 +1283,7 @@ class _Ticks(_BaseRegion):
     ):
         super().__init__(canvas=canvas, *args, **kwargs)
         self._side: Literal['t', 'b', 'l', 'r'] = side
-        self._grow: int = {"r": 0, "b": 1, "l": 2, "t": 3}[side]
+        self._growing: int = {"r": 0, "b": 1, "l": 2, "t": 3}[side]
         
         self._req_labels_enabled: bool = False
         self._req_scientific: Int | None = None
@@ -1221,21 +1293,23 @@ class _Ticks(_BaseRegion):
         self._req_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
         self._req_limits: list[IntFloat | None] = [None, None]
         self._req_margins: list[Dimension | None] = [None, None]
+        self._req_scale: Literal['linear', 'log'] = 'linear'
         
-        self._limits: list[IntFloat] = [1., 1e+200]
-        self._padding: list[float] = [0., 0.]
-        self._update_labels: bool = True
-        self._label_size: IntFloat = 0
-        self._vertical_label: bool = False
-        self._fitted_labels: tuple[IntFloat, IntFloat, int] = (1., 1e+200, 2)
-        self._labels: list[_Text] = []
         self._dummy_xys: tuple[
             Dimension, Dimension, Dimension, Dimension
         ] | None = None
         self._dummy_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
+        self._dummy_vertical: bool = False
+        self._dummy_n_chars: Int = max( len(str(l)) for l in [_PMIN, _MAX] )
+        self._dummy_size: IntFloat = 0
         self._dummy_label: _Text = _Text(
             canvas=self._canvas, text='', tag=f'{self._tag}.labels.text'
         )
+        self._stale_labels: bool = True
+        self._fitted_labels: tuple[IntFloat, IntFloat, Int] = (_PMIN, _MAX, 2)
+        self._labels: list[_Text] = []
+        self._limits: list[IntFloat] = [_PMIN, _MAX]
+        self._margins: list[IntFloat] = [0., 0.]
     
     def draw(
             self
@@ -1247,7 +1321,7 @@ class _Ticks(_BaseRegion):
             self._labels.clear()
             return
         
-        if not self._update_labels:
+        if not self._stale_labels:
             return
         
         texts, positions = self._make_labels()
@@ -1297,9 +1371,9 @@ class _Ticks(_BaseRegion):
         w, h = (tx2 - tx1), (ty2 - ty1)
         angle = float(label.cget('angle'))
         vertical = (angle - 90) % 180 == 0  # text direction
-        self._n_chars = n_chars[i]
-        self._label_size = w if self._side in 'tb' else h
-        self._vertical_label = vertical
+        self._dummy_n_chars = n_chars[i]
+        self._dummy_size = w if self._side in 'tb' else h
+        self._dummy_vertical = vertical
     
     def _delete(self):
         for label in self._labels:
@@ -1363,7 +1437,7 @@ class _Ticks(_BaseRegion):
     ):
         assert isinstance(min_, (IntFloat, type(None))), min_
         assert isinstance(max_, (IntFloat, type(None))), max_
-        assert min_ is None or max_ is None or min_ <= max_, (min_, max_)
+        assert min_ is None or max_ is None, (min_, max_)
         if isinstance(margins, str):
             margins = [margins, margins]
         margins = list(margins)
@@ -1371,104 +1445,153 @@ class _Ticks(_BaseRegion):
         assert isinstance(margins[0], (Dimension, type(None))), margins
         assert isinstance(margins[1], (Dimension, type(None))), margins
         
-        self._req_limits[:] = (min_, max_)
+        old_limits = self._req_limits.copy()
+        if min_ is not None:
+            self._req_limits[0] = min_
+        if max_ is not None:
+            self._req_limits[1] = max_
+        if self._req_limits[0] > self._req_limits[1]:
+            self._req_limits[:] = old_limits
+            raise ValueError(
+                'the value of `min_` must be smaller than or equal to the value '
+                f'of `max_` but got {self._req_limits[0]} and '
+                f'{self._req_limits[1]}.'
+            )
         
-        for i, pad in enumerate(margins):
-            if pad is not None:
-                self._req_margins[i] = pad
+        for i, margin in enumerate(margins):
+            if margin is not None:
+                self._req_margins[i] = margin
     
     def get_limits(self) -> tuple[list[IntFloat], list[Dimension]]:
         return self._limits, self._margins
     
+    def set_scale(self, scale: Literal['linear', 'log'] = None):
+        assert scale in ('linear', 'log'), scale
+        
+        if scale is not None and scale != self._req_scale:
+            self._req_scale = scale
+            self._stale_labels = True
+    
+    def get_scale(self) -> Literal['linear', 'log']:
+        return self._scale
+    
     def _set_xys_and_transform(
             self,
-            xys: tuple[Dimension, Dimension, Dimension, Dimension] | None = None,
-            transform: _Transform1D | None = None,
+            xys: tuple[Dimension, Dimension, Dimension, Dimension],
+            dlimits: ArrayLike,
+            climits: ArrayLike,
             dummy: bool = False
     ):
         assert isinstance(xys, tuple) and len(xys) == 4, xys
         assert sum( p is None for p in xys ) == 1, xys
-        assert xys[self._grow] is None, (self._side, xys)
-        assert isinstance(transform, _Transform1D), transform
+        assert xys[self._growing] is None, (self._side, xys)
         
-        if dummy:
-            self._dummy_xys = xys
-            self._dummy_transform = transform
-            return
+        (dmin, dmax), (cmin, cmax) = sorted(dlimits), climits
+        assert cmin <= cmax, climits
         
-        if xys is not None and xys != self._req_xys:
-            self._req_xys = xys
-            self._update_labels = True
-        if transform is not None and transform != self._req_transform:
-            self._req_transform = transform
-            self._update_labels = True
-    
-    def _map_data_to_canvas(
-            self, dlimits: ArrayLike, climits: ArrayLike
-    ) -> tuple[list[IntFloat], list[IntFloat]]:
-        # Fetch the min and max values set by the user
-        (dmin, dmax), (cmin, cmax) = sorted(dlimits), sorted(climits)
-        req_dmin, req_dmax = self._req_limits
+        # Add margins
+        default_marg1, default_marg2 = self._default_style[f"{self._tag}.margins"]
         req_marg1, req_marg2 = self._req_margins
+        marg1 = self._to_px(default_marg1 if req_marg1 is None else req_marg1)
+        marg2 = self._to_px(default_marg2 if req_marg2 is None else req_marg2)
+        assert marg1 >= 0. and marg2 >= 0., (marg1, marg2)
+        cmin, cmax = (cmin + marg1), (cmax - marg2)
+        if cmin > cmax:
+            cmin = cmax = round((cmin + cmax) / 2.)
+        climits = [cmin, cmax]
+        
+        # Fetch the min and max values set by the user
+        req_dmin, req_dmax = self._req_limits
         if req_dmin is not None:
             dmin = req_dmin
         if req_dmax is not None:
             dmax = req_dmax
         assert dmin <= dmax, (dmin, dmax)
         
-        # Add margins
-        default_marg1, default_marg2 = self._default_style[f"{self._tag}.margins"]
-        marg1 = self._to_px(default_marg1 if req_marg1 is None else req_marg1)
-        marg2 = self._to_px(default_marg2 if req_marg2 is None else req_marg2)
-        cmin, cmax = (cmin + marg1), (cmax - marg2)
+        if self._req_scale == 'linear':
+            tf_cls = _FirstOrderPolynomial
+        else:  # log scale
+            tf_cls = _Logarithm
+            if dmin <= 0.:
+                dmin = _PMIN
+            if dmin > dmax:
+                dmax = dmin
         
+        if dummy:
+            dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
+            self._dummy_xys = xys
+            self._dummy_transform = tf_cls.from_points(
+                dlimits, climits, x_limits=dlimits, y_limits=climits, bound=False
+            )
+            return
+        
+        
+        if self._req_labels_enabled:
+            sci = self._default_style[f"{self._tag}.labels.scientific"] \
+                if self._req_scientific is None \
+                else self._req_scientific
+            
+            # Calculate the max number of labels fitting in the space
+            if self._side in 'tb':  # top or bottom
+                fixed_size = self._dummy_vertical
+            else:  # left or right
+                fixed_size = not self._dummy_vertical
+            size = self._dummy_size
+            if fixed_size:
+                size *= 1.2
+            else:
+                size *= (max(self._dummy_n_chars, sci) + 2) / self._dummy_n_chars
+            max_n_labels = max(int((cmax - cmin) // size), 0)
+            
+            # Find appropriate min and max values and the actual number of labels
+            if max_n_labels <= 1:
+                n = max_n_labels
+            elif self._req_scale == 'linear':
+                ## Use `Decimal` to represent numbers exactly
+                dmin, dmax = Decimal(str(dmin)), Decimal(str(dmax))
+                
+                s = (dmax - dmin) / (max_n_labels - 1)  # step excluding limits
+                log_exp, log_sig = divmod(float(s.log10()), 1)
+                log_exp, log_sig = Decimal(str(log_exp)), Decimal(str(log_sig))
+                if (sig := round(10**log_sig, 0)) > 5:
+                    sig = 10
+                s = 10**log_exp * sig
+                 # find the nearest a*10^b, where a is an integer
+                
+                dmin = (dmin / s).quantize(
+                    Decimal('1.'), rounding=ROUND_FLOOR
+                ) * s
+                dmax = (dmax / s).quantize(
+                    Decimal('1.'), rounding=ROUND_CEILING
+                ) * s
+                n = (dmax - dmin) / s + 1
+                dmin, dmax, n = float(dmin), float(dmax), int(n)
+            else:  # log scale
+                pass#TODO
+            assert n >= 0 and n % 1 == 0, n
+            self._fitted_labels = (dmin, dmax, n)
+        
+        try:#???
+            n
+        except NameError:
+            print(False)
+        else:
+            print(True)
+        dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
+        tf = tf_cls.from_points(
+            dlimits, climits, x_limits=dlimits, y_limits=climits, bound=False
+        )
+        if xys != self._req_xys:
+            self._req_xys = xys
+            self._stale_labels = True
+        if tf != self._req_transform:
+            self._req_transform = tf
+            self._stale_labels = True
         self._limits = [dmin, dmax]
         self._margins = [marg1, marg2]
-        
-        if not self._req_labels_enabled:
-            if dlimits[0] < dlimits[1]:
-                return [dmin, dmax], [cmin, cmax]
-            return [dmax, dmin], [cmin, cmax]
-        
-        sci = self._default_style[f"{self._tag}.labels.scientific"] \
-            if self._req_scientific is None \
-            else self._req_scientific
-        
-        # Calculate the max number of labels fitting in the space
-        if self._side in 'tb':  # top or bottom
-            fixed_size = self._vertical_label
-        else:  # left or right
-            fixed_size = not self._vertical_label
-        size = self._label_size
-        if not fixed_size:
-            size *= (max(self._n_chars, sci) + 2) / self._n_chars
-        size *= 1.2
-        max_n_labels = max(int((cmax - cmin) // size), 0)
-        
-        # Find appropriate min and max values and the actual number of labels
-        if max_n_labels <= 1:
-            n = max_n_labels
-        else:
-            ## Use `Decimal` to represent numbers exactly
-            dmin, dmax = Decimal(str(dmin)), Decimal(str(dmax))
-            
-            s = (dmax - dmin) / (max_n_labels - 1)  # step size excluding limits
-            log_exp, log_sig = divmod(float(s.log10()), 1)
-            log_exp, log_sig = Decimal(str(log_exp)), Decimal(str(log_sig))
-            if (sig := round(10**log_sig, 0)) > 5:
-                sig = 10
-            s = 10**log_exp * sig
-             # find the nearest a*10^b, where a is an integer
-            
-            dmin = (dmin / s).quantize(Decimal('1.'), rounding=ROUND_FLOOR) * s
-            dmax = (dmax / s).quantize(Decimal('1.'), rounding=ROUND_CEILING) * s
-            n = (dmax - dmin) / s + 1
-        assert n >= 0 and n % 1 == 0, n
-        self._fitted_labels = (float(dmin), float(dmax), int(n))
-        
-        if dlimits[0] < dlimits[1]:
-            return [dmin, dmax], [cmin, cmax]
-        return [dmax, dmin], [cmin, cmax]
+    
+    def _get_transform(self) -> _Transform1D:
+        return self._req_transform
     
     def _make_labels(
             self,
@@ -1478,16 +1601,16 @@ class _Ticks(_BaseRegion):
             x1, y1, x2, y2 = self._dummy_xys
             transform = self._dummy_transform
         else:
-            assert self._update_labels, self._update_labels
+            assert self._stale_labels, self._stale_labels
             x1, y1, x2, y2 = self._req_xys
             transform = self._req_transform
         sci = self._default_style[f"{self._tag}.labels.scientific"] \
             if self._req_scientific is None \
             else self._req_scientific
-        dmin, dmax = sorted(transform.get_x_limits())
         
         # Make the labels' values
         if dummy:
+            dmin, dmax = sorted(transform.get_x_limits())
             data = np.asarray([dmin, dmax])
         else:
             data = np.linspace(*self._fitted_labels, endpoint=True)
@@ -1503,13 +1626,14 @@ class _Ticks(_BaseRegion):
             texts = [ '\n'.join(t.split('\n', 1)[::-1]) for t in texts ]
         
         # Transform the data coordinates into the canvas coordinates
+        transformed_data = transform(data, round_=True, min_quantity=data.size)
         if self._side in ('t', 'b'):
-            positions = [ (x, y1, x, y2) for x in transform(data, round_=True) ]
+            positions = [ (x, y1, x, y2) for x in transformed_data ]
         else:  # left or right
-            positions = [ (x1, y, x2, y) for y in transform(data, round_=True) ]
+            positions = [ (x1, y, x2, y) for y in transformed_data ]
         
         if not dummy:
-            self._update_labels = False
+            self._stale_labels = False
         
         return texts, positions
 
@@ -1719,7 +1843,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
                 (self._tartists, '_xlims')
             ]
         ]
-        dbounds = np.array([[1., 1e+200]]*4, dtype=float)
+        dbounds = np.array([(_PMIN, _MAX)]*4, dtype=float)
         for i, lims in enumerate(_dlimits):
             if lims.size:
                 dbounds[i] = [lims[:, 0].min(), lims[:, 1].max()]
@@ -1750,91 +1874,55 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             axis.draw()
         
         ## Update the bounds of the empty space for the ticks and frame
-        if bbox := self._raxis.bbox():
-            cx2 = bbox[0] - 1
-        if bbox := self._baxis.bbox():
-            cy2 = bbox[1] - 1
-        if bbox := self._laxis.bbox():
-            cx1 = bbox[2] + 1
-        if bbox := self._taxis.bbox():
-            cy1 = bbox[3] + 1
-        if cy1 > cy2:
-            cy1 = cy2 = round((cy1 + cy2) / 2)
-        if cx1 > cx2:
-            cx1 = cx2 = round((cx1 + cx2) / 2)
+        if bbox := self._raxis.bbox(): cx2 = bbox[0] - 1
+        if bbox := self._baxis.bbox(): cy2 = bbox[1] - 1
+        if bbox := self._laxis.bbox(): cx1 = bbox[2] + 1
+        if bbox := self._taxis.bbox(): cy1 = bbox[3] + 1
+        if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2)
+        if cy1 > cy2: cy1 = cy2 = round((cy1 + cy2) / 2)
         cxys_outer = (cx1, cy1, cx2, cy2)  # empty space for the ticks and frame
         
         ## Draw dummy ticks
         cbounds = [[cy1, cy2], [cx1, cx2]] * 2  # shape: (4, 2)
         for i, (side, dat, cnv) in enumerate(zip('rblt', dbounds, cbounds)):
-            tf = _FirstOrderPolynomial.from_points(
-                dat, cnv, x_limits=dat, y_limits=cnv, bound=False
-            )
             xys = list(cxys_outer)
             xys[i] = None  # growing bound
             ticks = self._get_ticks(side)
-            ticks._set_xys_and_transform(tuple(xys), tf, dummy=True)
+            ticks._set_xys_and_transform(tuple(xys), dat, cnv, dummy=True)
             ticks._draw_dummy()
         
         ## Update the bounds of the empty space for the frame
-        if bbox := self._rticks.bbox(dummy=True):
-            cx2 = bbox[0] - 1
-        if bbox := self._bticks.bbox(dummy=True):
-            cy2 = bbox[1] - 1
-        if bbox := self._lticks.bbox(dummy=True):
-            cx1 = bbox[2] + 1
-        if bbox := self._tticks.bbox(dummy=True):
-            cy1 = bbox[3] + 1
-        if cy1 > cy2:
-            cy1 = cy2 = round((cy1 + cy2) / 2)
-        if cx1 > cx2:
-            cx1 = cx2 = round((cx1 + cx2) / 2)
+        if bbox := self._rticks.bbox(dummy=True): cx2 = bbox[0] - 1
+        if bbox := self._bticks.bbox(dummy=True): cy2 = bbox[1] - 1
+        if bbox := self._lticks.bbox(dummy=True): cx1 = bbox[2] + 1
+        if bbox := self._tticks.bbox(dummy=True): cy1 = bbox[3] + 1
+        if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2)
+        if cy1 > cy2: cy1 = cy2 = round((cy1 + cy2) / 2)
         cxys_inner = (cx1, cy1, cx2, cy2)  # empty space for the frame
         
         ## Draw ticks and update the data limits and canvas limits
         cbounds = np.asarray([[cy1, cy2], [cx1, cx2]] * 2)  # shape: (4, 2)
-        climits = cbounds.copy()
-        dlimits = dbounds.copy()
-        for i, (side, dat, cnv) in enumerate(zip('rblt', dlimits, climits)):
-            ticks = self._get_ticks(side)
-            dat[:], cnv[:] = ticks._map_data_to_canvas(dat, cnv)
-            tf = _FirstOrderPolynomial.from_points(
-                dat, cnv, x_limits=dat, y_limits=cnv, bound=False
-            )
-            xys = list(cxys_outer)
+        tfs = {}
+        for i, (side, dat, cnv) in enumerate(zip('rblt', dbounds, cbounds)):
+            xys = list(cxys_inner)
             xys[i] = None  # growing bound
-            xys[i-1], xys[i+1-4] = cxys_inner[i-1], cxys_inner[i+1-4]
-            ticks._set_xys_and_transform(tuple(xys), tf)
+            xys[i-2] = cxys_outer[i-2]  # outer bound
+            ticks = self._get_ticks(side)
+            ticks._set_xys_and_transform(tuple(xys), dat, cnv)
             ticks.draw()
+            tfs[side] = ticks._get_transform().copy()
         
         # Draw frame
         self._frame.set_coords(*cxys_inner)
         self._frame.draw()
         
         # Draw user defined artists
-        dlimits = dict(zip('rblt', dlimits))
-        climits = dict(zip('rblt', climits))
-        dbounds = dict(zip('rblt', dbounds))
-        cbounds = dict(zip('rblt', cbounds))
         transforms = {}
         for artist in self.artists:
             x_side, y_side = artist._x_side, artist._y_side
-            side_pair = x_side + y_side
-            if side_pair in transforms:
-                tf = transforms[side_pair]
-            else:
-                tf = _Transform2D(
-                    x_transform=_FirstOrderPolynomial.from_points(
-                        dlimits[x_side], climits[x_side],
-                        x_limits=dbounds[x_side], y_limits=cbounds[x_side]
-                    ),
-                    y_transform=_FirstOrderPolynomial.from_points(
-                        dlimits[y_side], climits[y_side],
-                        x_limits=dbounds[y_side], y_limits=cbounds[y_side]
-                    )
-                )
-                transforms[side_pair] = tf
-            artist.set_transform(tf)
+            if (sides := x_side + y_side) not in transforms:
+                transforms[sides] = _Transform2D(tfs[x_side], tfs[y_side])
+            artist.set_transform(transforms[sides])
             artist.draw()
         
         # Raise artists in order
@@ -2022,6 +2110,30 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     
     def get_rlimits(self) -> tuple[list[IntFloat], list[Dimension]]:
         return self._rticks.get_limits()
+    
+    def set_tscale(self, *args, **kwargs):
+        self._tticks.set_scale(*args, **kwargs)
+    
+    def set_bscale(self, *args, **kwargs):
+        self._bticks.set_scale(*args, **kwargs)
+    
+    def set_lscale(self, *args, **kwargs):
+        self._lticks.set_scale(*args, **kwargs)
+    
+    def set_rscale(self, *args, **kwargs):
+        self._rticks.set_scale(*args, **kwargs)
+    
+    def get_tscale(self) -> Literal['linear', 'log']:
+        return self._tticks.get_scale()
+    
+    def get_bscale(self) -> Literal['linear', 'log']:
+        return self._bticks.get_scale()
+    
+    def get_lscale(self) -> Literal['linear', 'log']:
+        return self._lticks.get_scale()
+    
+    def get_rscale(self) -> Literal['linear', 'log']:
+        return self._rticks.get_scale()
     
     def plot(
             self,
@@ -2444,6 +2556,7 @@ if __name__ == '__main__':
     plt.set_ltickslabels(True)
     #plt.set_ttickslabels(True)
     #plt.set_rtickslabels(True)
+    plt.set_bscale('log')#???
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
     
