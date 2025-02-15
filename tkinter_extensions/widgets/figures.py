@@ -1307,7 +1307,7 @@ class _Ticks(_BaseRegion):
         texts, positions = self._make_labels(dummy=True)
         
         # Find possibly largest label
-        n_chars = [ max(len(t) for t in tx.split('\n', 1)) for tx in texts ]
+        n_chars = [ max( len(t) for t in tx.split('\n', 1) ) for tx in texts ]
         i = np.argmax(n_chars)
         text, xys = texts[i], positions[i]
         
@@ -1324,7 +1324,7 @@ class _Ticks(_BaseRegion):
         angle = float(label.cget('angle'))
         vertical = (angle - 90) % 180 == 0  # text direction
         self._dummy_n_chars = n_chars[i]
-        self._dummy_size = w if self._side in 'tb' else h
+        self._dummy_size = max(w if self._side in 'tb' else h, 1)
         self._dummy_vertical = vertical
     
     def _delete(self):
@@ -1460,7 +1460,7 @@ class _Ticks(_BaseRegion):
             dmax = req_dmax
         assert dmin <= dmax, (dmin, dmax)
         
-        if self._req_scale == 'linear':
+        if linear_scale := (self._req_scale == 'linear'):
             tf_cls = _FirstOrderPolynomial
         else:  # log scale
             tf_cls = _Logarithm
@@ -1468,35 +1468,30 @@ class _Ticks(_BaseRegion):
                 dmin = _PMIN
             if dmin > dmax:
                 dmax = dmin
-        
-        if dummy:
-            dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
-            self._dummy_xys = xys
-            self._dummy_transform = tf_cls.from_points(
-                dlimits, climits, x_limits=dlimits, y_limits=climits, bound=False
-            )
-            return
-        
+        sci = 1 if not linear_scale \
+            else self._default_style[f"{self._tag}.labels.scientific"] \
+            if self._req_scientific is None \
+            else self._req_scientific
         
         if self._req_labels_enabled:
-            sci = self._default_style[f"{self._tag}.labels.scientific"] \
-                if self._req_scientific is None \
-                else self._req_scientific
-            
-            # Calculate the max number of labels fitting in the space
-            if self._side in 'tb':  # top or bottom
-                fixed_size = self._dummy_vertical
-            else:  # left or right
-                fixed_size = not self._dummy_vertical
-            size = self._dummy_size
-            if fixed_size:
-                size *= 1.2
+            if dummy:
+                max_n_labels = 2
             else:
-                size *= (max(self._dummy_n_chars, sci) + 2) / self._dummy_n_chars
-            max_n_labels = max(int((cmax - cmin) // size), 0)
+                # Calculate the max number of labels fitting in the space
+                if self._side in 'tb':  # top or bottom
+                    fixed_size = self._dummy_vertical
+                else:  # left or right
+                    fixed_size = not self._dummy_vertical
+                n_chars = self._dummy_n_chars
+                size = self._dummy_size
+                if fixed_size:
+                    size *= 1.2
+                else:
+                    size *= (max(n_chars, sci) + 1) / n_chars
+                max_n_labels = max(int((cmax - cmin) // size), 0)
             
             # Find appropriate min and max values and the actual number of labels
-            if self._req_scale == 'linear':
+            if linear_scale:
                 if max_n_labels <= 1:
                     self._fitted_labels = {
                         "start": dmin, "stop": dmax, "num": max_n_labels
@@ -1506,20 +1501,25 @@ class _Ticks(_BaseRegion):
                     dmin, dmax = Decimal(str(dmin)), Decimal(str(dmax))
                     
                     ## Find the nearest a*10^b, where a is an integer
-                    s = (dmax - dmin) / (max_n_labels - 1)  # step excluding limits
-                    log_exp, log_sig = divmod(float(s.log10()), 1)
-                    log_exp, log_sig = Decimal(str(log_exp)), Decimal(str(log_sig))
-                    if (sig := round(10**log_sig, 0)) > 5:
-                        sig = 10
-                    s = 10**log_exp * sig
+                    step = (dmax - dmin) / (max_n_labels - 1)  # excluding limits
+                    log_e, log_s = divmod(float(step.log10()), 1)
+                    log_e, log_s = Decimal(str(log_e)), Decimal(str(log_s))
+                    if (s := round(10**log_s, 0)) > 5:
+                        s = 1
+                        log_e += 1
+                    elif s > 2:
+                        s = 5
+                    assert int(s) in (1, 2, 5), s
+                    step = 10**log_e * s
                     
-                    dmin = (dmin / s).quantize(
+                    dmin = (dmin / step).quantize(
                         Decimal('1.'), rounding=ROUND_FLOOR
-                    ) * s
-                    dmax = (dmax / s).quantize(
+                    ) * step
+                    dmax = (dmax / step).quantize(
                         Decimal('1.'), rounding=ROUND_CEILING
-                    ) * s
-                    n = (dmax - dmin) / s + 1
+                    ) * step
+                    n = (dmax - dmin) / step + 1
+                    
                     dmin, dmax, n = float(dmin), float(dmax), int(n)
                     self._fitted_labels = {
                         "start": dmin, "stop": dmax, "num": n
@@ -1550,26 +1550,32 @@ class _Ticks(_BaseRegion):
                     if n > max_n_labels:
                         case = 2
                         ## Only 1*10^b
-                        n = int(e2 - e1 + 1)
-                        if s1 > 1:
-                            dmin = 10**e1
                         if s2 > 1:
-                            dmax = 10**(e2 + 1)
-                            n += 1
+                            e2 += 1
+                        s1 = s2 = 1
+                        n = int(e2 - e1 + 1)
                         if n > max_n_labels:
                             case = 3
                             n = 2
-                    dmin, dmax = float(dmin), float(dmax)
+                    
                     self._fitted_labels = {
                         "case": case,
-                        "s1": float(s1), "s2": float(s2),
+                        "s1": int(s1), "s2": int(s2),
                         "e1": float(e1), "e2": float(e2)
                     }
+                    dmin, dmax = float(dmin), float(dmax)
         
         dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
         tf = tf_cls.from_points(
             dlimits, climits, x_limits=dlimits, y_limits=climits, bound=False
         )
+        
+        if dummy:
+            dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
+            self._dummy_xys = xys
+            self._dummy_transform = tf
+            return
+        
         if xys != self._req_xys:
             self._req_xys = xys
             self._stale_labels = True
@@ -1593,33 +1599,39 @@ class _Ticks(_BaseRegion):
             assert self._stale_labels, self._stale_labels
             x1, y1, x2, y2 = self._req_xys
             transform = self._req_transform
-        sci = self._default_style[f"{self._tag}.labels.scientific"] \
+        linear_scale = self._req_scale == 'linear'
+        sci = 1 if not linear_scale \
+            else self._default_style[f"{self._tag}.labels.scientific"] \
             if self._req_scientific is None \
             else self._req_scientific
         
         # Make the labels' values
         if dummy:
             dmin, dmax = sorted(transform.get_x_limits())
-            data = np.asarray([dmin, dmax])
-        elif self._req_scale == 'linear':
-            data = np.linspace(**self._fitted_labels, endpoint=True)
+            data = np.asarray([dmin, dmax], dtype=float)
+        elif linear_scale:
+            data = np.linspace(**self._fitted_labels, endpoint=True, dtype=float)
         else:  # log scale
-            params = self._fitted_labels
-            case = params["case"]
+            fitted = self._fitted_labels
+            case = fitted["case"]
             if case == 0:
-                data = np.linspace(params["dmin"], params["dmax"], params["n"])
+                data = np.linspace(
+                    fitted["dmin"], fitted["dmax"], fitted["n"], dtype=float
+                )
             elif case == 1:
                 data = (
                     (
-                        10**np.arange(params["e1"], params["e2"]+2)
+                        10**np.arange(fitted["e1"], fitted["e2"]+2, dtype=float)
                     )[:, None] * 
-                    np.arange(1., 10)[None, :]
+                    np.arange(1., 10, dtype=float)[None, :]
                 ).ravel()
-                start = int(params["s1"]) - 1
-                stop = data.size - (9 - int(params["s2"]))
+                start = int(fitted["s1"] - 1)
+                stop = int(data.size - (9 - fitted["s2"]))
                 data = data[start:stop]
+            elif case == 2:
+                data = 10**np.arange(fitted["e1"], fitted["e2"]+1, dtype=float)
             else:
-                data = 10**np.arange(params["e1"], params["e2"]+1)
+                data = 10**np.asarray([fitted["e1"], fitted["e2"]], dtype=float)
         assert np.isfinite(data).all(), data
         
         # Formatting
@@ -2546,7 +2558,7 @@ if __name__ == '__main__':
     y = np.sin(2*np.pi*1*x)
     #x = np.array([3, 6, 6, 3, 3], dtype=float)
     #y = np.array([-0.5, -0.5, 0.5, 0.5, -0.5], dtype=float)
-    x = x[:x.size//8]
+    x = x[:x.size//2]
     y = 10**x
     
     fig = Figure(root, toolbar=True)
