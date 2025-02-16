@@ -1582,11 +1582,14 @@ class _Ticks(_BaseRegion):
                         "e1": float(e1), "e2": float(e2)
                     }
         
+        if req_dmin is not None:
+            dmin = req_dmin
+        if req_dmax is not None:
+            dmax = req_dmax
         dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
         tf = tf_cls.from_points(dlimits, climits)
         
         if dummy:
-            dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
             self._dummy_xys = xys
             self._dummy_transform = tf
             self._dummy_limits = raw_dlimits
@@ -1648,6 +1651,14 @@ class _Ticks(_BaseRegion):
             else:
                 data = 10**np.asarray([fitted["e1"], fitted["e2"]], dtype=float)
         assert np.isfinite(data).all(), data
+        
+        ## Filter out the out-of-range values
+        if not dummy:
+            req_dmin, req_dmax = self._req_limits
+            if req_dmin is not None:
+                data = data[data >= req_dmin]
+            if req_dmax is not None:
+                data = data[data <= req_dmax]
         
         # Formatting
         texts = [
@@ -2615,7 +2626,7 @@ if __name__ == '__main__':
     #plt.set_ttickslabels(True)
     #plt.set_rtickslabels(True)
     plt.set_lscale('log')
-    plt.set_llimits(10, 15000)
+    plt.set_llimits(10, 150)
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
     
