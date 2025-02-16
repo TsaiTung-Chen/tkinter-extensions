@@ -120,16 +120,16 @@ def _get_sticky_xy(  # returns (x, y, anchor)
 def _drop_consecutive_duplicates(
         xs: NDArray[IntFloat], ys: NDArray[IntFloat]
 ) -> NDArray[IntFloat]:
-    xys = np.asarray([xs, ys])
-    assert xys.ndim == 2, xys.shape
+    xy = np.asarray([xs, ys])
+    assert xy.ndim == 2, xy.shape
     
-    if xys.shape[1] < 3:
-        return xys
+    if xy.shape[1] < 3:
+        return xy
     
-    retain = np.diff(xys[:, :-1], axis=1).any(axis=0)
+    retain = np.diff(xy[:, :-1], axis=1).any(axis=0)
     
     return np.concat(
-        (xys[:, :1], xys[:, 1:-1][:, retain], xys[:, -1:]),
+        (xy[:, :1], xy[:, 1:-1][:, retain], xy[:, -1:]),
         axis=1
     )
 
@@ -244,31 +244,10 @@ class ZorderNotFoundError(RuntimeError):
 
 
 class _Transform1D:  # 1D transformation
-    def __init__(
-            self,
-            x_limits: ArrayLike = [-np.inf, np.inf],
-            y_limits: ArrayLike = [-np.inf, np.inf],
-            bound: bool = True
-    ):
-        assert isinstance(bound, bool), bound
-        x_limits = np.asarray(x_limits, dtype=float)
-        y_limits = np.asarray(y_limits, dtype=float)
-        assert x_limits.shape == (2,), x_limits.shape
-        assert y_limits.shape == (2,), y_limits.shape
-        t = x_limits.dtype
-        assert any( np.issubdtype(t, d) for d in IntFloat.__args__ ), x_limits.dtype
-        t = y_limits.dtype
-        assert any( np.issubdtype(t, d) for d in IntFloat.__args__ ), y_limits.dtype
-        
-        self._bound: bool = bound
-        self._x_min, self._x_max = sorted(x_limits)
-        self._y_min, self._y_max = sorted(y_limits)
-    
     def __eq__(self, obj) -> bool:
         if type(self) != type(obj):
             return False
-        return self._x_min == obj._x_min and self._x_max == obj._x_max and \
-            self._y_min == obj._y_min and self._y_max == obj._y_max
+        return True
     
     def __call__(
             self,
@@ -278,12 +257,9 @@ class _Transform1D:  # 1D transformation
     ]:
         assert isinstance(xs, (IntFloat, np.ndarray)), xs
         
-        xs = np.array(xs)
+        xs = np.asarray(xs)
         dt = xs.dtype
         assert any( np.issubdtype(dt, d) for d in IntFloat.__args__ ), xs.dtype
-        
-        if self._bound:
-            self.bound_x(xs)
         
         return xs
     
@@ -294,33 +270,14 @@ class _Transform1D:  # 1D transformation
     def from_points(cls, *args, **kwargs):
         raise NotImplementedError
     
-    def bound_x(self, xs: NDArray[IntFloat]) -> NDArray[bool]:
-        assert isinstance(xs, np.ndarray), xs
-        assert xs.ndim > 0, xs
-        xs[xs < self._x_min] = self._x_min
-        xs[xs > self._x_max] = self._x_max
-    
-    def bound_y(self, ys: NDArray[IntFloat]) -> NDArray[bool]:
-        assert isinstance(ys, np.ndarray), ys
-        assert ys.ndim > 0, ys
-        ys[ys < self._y_min] = self._y_min
-        ys[ys > self._y_max] = self._y_max
-    
-    def get_x_limits(self) -> tuple[IntFloat, IntFloat]:
-        return [self._x_min, self._x_max]
-    
-    def get_y_limits(self) -> tuple[IntFloat, IntFloat]:
-        return [self._y_min, self._y_max]
-    
     def get_inverse(self):
         raise NotImplementedError
 
 
 class _FirstOrderPolynomial(_Transform1D):
-    def __init__(self, c0: IntFloat = 0., c1: IntFloat = 1., *args, **kwargs):
+    def __init__(self, c0: IntFloat = 0., c1: IntFloat = 1.):
         assert isinstance(c0, IntFloat), c0
         assert isinstance(c1, IntFloat), c1
-        super().__init__(*args, **kwargs)
         self._c0: np.float64 = np.float64(c0)
         self._c1: np.float64 = np.float64(c1)
     
@@ -337,35 +294,17 @@ class _FirstOrderPolynomial(_Transform1D):
         xs = super().__call__(xs)
         ys = self._c0 + self._c1 * xs  # y(x) = c0 + c1 * x (0D or 1D array)
         
-        if self._bound:
-            self.bound_y(ys)
-        
         if round_:
-            ys = ys.round()
+            out = ys if isinstance(ys, np.ndarray) else None
+            ys = ys.round(out=out)
         
         return ys
     
-    def copy(
-            self,
-            x_limits: ArrayLike | None = None,
-            y_limits: ArrayLike | None = None,
-            bound: bool | None = None
-    ) -> _FirstOrderPolynomial:
-        x_limits = self.get_x_limits() if x_limits is None else x_limits
-        y_limits = self.get_y_limits() if y_limits is None else y_limits
-        bound = self._bound if bound is None else bound
-        return type(self)(
-            c0=self._c0,
-            c1=self._c1,
-            x_limits=x_limits,
-            y_limits=y_limits,
-            bound=bound
-        )
+    def copy(self) -> _FirstOrderPolynomial:
+        return type(self)(c0=self._c0, c1=self._c1)
     
     @classmethod
-    def from_points(
-            cls, xs: ArrayLike, ys: ArrayLike, *args, **kwargs
-    ) -> _FirstOrderPolynomial:
+    def from_points(cls, xs: ArrayLike, ys: ArrayLike) -> _FirstOrderPolynomial:
         xs, ys = np.asarray(xs), np.asarray(ys)
         assert xs.shape == ys.shape == (2,), [xs.shape, ys.shape]
         
@@ -373,14 +312,12 @@ class _FirstOrderPolynomial(_Transform1D):
         c1 = (ys[1] - ys[0]) / (xs[1] - xs[0])  # c1 = (y1 - y0) / (x1 - x0)
         c0 = ys[0] - c1 * xs[0]  # c0 = y0 - c1 * x0
         
-        return cls(c0=c0, c1=c1, *args, **kwargs)
+        return cls(c0=c0, c1=c1)
     
     def get_inverse(self) -> _FirstOrderPolynomial:
         c1_inv = 1. / self._c1  # c1_inv = 1 / c1
         c0_inv = -self._c0 / self._c1  # c0_inv = -c0 / c1
-        return _FirstOrderPolynomial(
-            c0=c0_inv, c1=c1_inv, x_limits=self.y_limits, y_limits=self.x_limits
-        )
+        return _FirstOrderPolynomial(c0=c0_inv, c1=c1_inv)
 
 
 class _Logarithm(_Transform1D):
@@ -388,16 +325,10 @@ class _Logarithm(_Transform1D):
             self,
             base: IntFloat = 10.,
             c0: IntFloat = 0.,
-            c1: IntFloat = 1.,
-            x_limits: ArrayLike = [_PMIN, np.inf],
-            *args,
-            **kwargs
+            c1: IntFloat = 1.
     ):
         assert base > 0., base
         
-        x_limits = np.array(x_limits)
-        x_limits[x_limits < _PMIN] = _PMIN
-        super().__init__(*args, x_limits=x_limits, **kwargs)
         self._c0: np.float64 = np.float64(c0)
         self._c1: np.float64 = np.float64(c1)
         self._base: np.float64 = np.float64(base)
@@ -423,35 +354,18 @@ class _Logarithm(_Transform1D):
         else:
             ys = self._c1 * np.log2(xs) / self._log2_base + self._c0
         
-        if self._bound:
-            self.bound_y(ys)
-        
         if round_:
-            ys = ys.round()
+            out = ys if isinstance(ys, np.ndarray) else None
+            ys = ys.round(out=out)
         
         return ys
     
-    def copy(
-            self,
-            x_limits: ArrayLike | None = None,
-            y_limits: ArrayLike | None = None,
-            bound: bool | None = None
-    ) -> _Logarithm:
-        x_limits = self.get_x_limits() if x_limits is None else x_limits
-        y_limits = self.get_y_limits() if y_limits is None else y_limits
-        bound = self._bound if bound is None else bound
-        return type(self)(
-            base=self._base,
-            c0=self._c0,
-            c1=self._c1,
-            x_limits=x_limits,
-            y_limits=y_limits,
-            bound=bound
-        )
+    def copy(self) -> _Logarithm:
+        return type(self)(base=self._base, c0=self._c0, c1=self._c1)
     
     @classmethod
     def from_points(
-            cls, xs: ArrayLike, ys: ArrayLike, base: IntFloat = 10., **kwargs
+            cls, xs: ArrayLike, ys: ArrayLike, base: IntFloat = 10.
     ) -> _Logarithm:
         assert base > 0., base
         
@@ -468,7 +382,7 @@ class _Logarithm(_Transform1D):
         c1 = (ys[1] - ys[0]) / (log_xs[1] - log_xs[0])  # c1 = (y1 - y0) / (x1 - x0)
         c0 = ys[0] - c1 * log_xs[0]  # c0 = y0 - c1 * x0
         
-        return cls(base=base, c0=c0, c1=c1, **kwargs)
+        return cls(base=base, c0=c0, c1=c1)
     
     def get_inverse(self):
         raise NotImplementedError
@@ -477,28 +391,128 @@ class _Logarithm(_Transform1D):
 class _Transform2D:  # 2D transformation
     def __init__(
             self,
-            x_transform: _Transform1D = _FirstOrderPolynomial(bound=False),
-            y_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
+            x_transform: _Transform1D = _FirstOrderPolynomial(),
+            y_transform: _Transform1D = _FirstOrderPolynomial(),
+            inp_xbounds: ArrayLike | None = None,   # input xlimits
+            inp_ybounds: ArrayLike | None = None,   # input ylimits
+            out_xbounds: ArrayLike = [-np.inf, np.inf],   # output xlimits
+            out_ybounds: ArrayLike = [-np.inf, np.inf]    # output ylimits
     ):
         assert isinstance(x_transform, _Transform1D), x_transform
         assert isinstance(y_transform, _Transform1D), y_transform
         
+        if inp_xbounds is None:
+            if isinstance(x_transform, _Logarithm):
+                inp_xbounds = [_PMIN, np.inf]
+            else:
+                inp_xbounds = [-np.inf, np.inf]
+        if inp_ybounds is None:
+            if isinstance(x_transform, _Logarithm):
+                inp_ybounds = [_PMIN, np.inf]
+            else:
+                inp_ybounds = [-np.inf, np.inf]
+        
+        inp_xbounds = np.array(inp_xbounds, dtype=float)
+        if isinstance(x_transform, _Logarithm):
+            inp_xbounds[inp_xbounds < _PMIN] = _PMIN
+        inp_ybounds = np.array(inp_ybounds, dtype=float)
+        if isinstance(y_transform, _Logarithm):
+            inp_ybounds[inp_ybounds < _PMIN] = _PMIN
+        
         self._x_tf: _Transform1D = x_transform
         self._y_tf: _Transform1D = y_transform
+        self._inp_xlimits = _, _ = sorted(inp_xbounds)
+        self._inp_ylimits = _, _ = sorted(inp_ybounds)
+        self._out_xlimits = _, _ = sorted(out_xbounds)
+        self._out_ylimits = _, _ = sorted(out_ybounds)
     
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
-            round_: bool = False,
+            round_: bool = False
     ) -> NDArray[IntFloat]:
-        xs, ys = np.asarray(xs), np.asarray(ys)
+        xs, ys = np.array(xs), np.array(ys)  # copy
+        assert isinstance(xs, np.ndarray), xs
+        assert isinstance(xs, np.ndarray), xs
         assert xs.shape == ys.shape, [xs.shape, ys.shape]
+        assert xs.ndim <= 1, xs.shape
         
+        scalar = xs.ndim == 0
+        
+        xs, ys = self._clip(xs, ys, output=False)
         xs = self._x_tf(xs, round_=round_)
         ys = self._y_tf(ys, round_=round_)
+        xs, ys = self._clip(xs, ys, output=True)
         
-        return np.asarray([xs, ys])
+        xy = np.asarray([xs, ys])
+        if scalar:
+            return xy.ravel()
+        return xy
+    
+    def _clip(
+            self,
+            xs: IntFloat | NDArray[IntFloat],
+            ys: IntFloat | NDArray[IntFloat],
+            output: bool = False
+    ) -> tuple[NDArray[IntFloat], NDArray[IntFloat]]:
+        def _interpolate(index1: Int, index2: Int) -> tuple[IntFloat, IntFloat]:
+            if xmin_retain[index1] ^ xmin_retain[index2]:
+                direction = 'x'
+                x = xmin
+            elif xmax_retain[index1] ^ xmax_retain[index2]:
+                direction = 'x'
+                x = xmax
+            elif ymin_retain[index1] ^ ymin_retain[index2]:
+                direction = 'y'
+                y = ymin
+            else:  # ymax_retain[index1] ^ ymax_retain[index2]
+                direction = 'y'
+                y = ymax
+            
+            if direction == 'x':
+                ## The input argument `xp` must be increasing
+                x1, x2 = xs[[index1, index2]]
+                if x1 < x2:
+                    y = np.interp(x, xp=[x1, x2], fp=ys[[index1, index2]])
+                else:
+                    y = np.interp(x, xp=[x2, x1], fp=ys[[index2, index1]])
+            else:
+                ## The input argument `xp` must be increasing
+                y1, y2 = ys[[index1, index2]]
+                if y1 < y2:
+                    x = np.interp(y, xp=[y1, y2], fp=xs[[index1, index2]])
+                else:
+                    x = np.interp(y, xp=[y2, y1], fp=xs[[index2, index1]])
+            
+            return x, y
+        #> end of _interpolate()
+        
+        if output:
+            xmin, xmax = self._out_xlimits
+            ymin, ymax = self._out_ylimits
+        else:
+            xmin, xmax = self._inp_xlimits
+            ymin, ymax = self._inp_ylimits
+        
+        xmin_retain = xs >= xmin
+        xmax_retain = xs <= xmax
+        ymin_retain = ys >= ymin
+        ymax_retain = ys <= ymax
+        retain = xmin_retain & xmax_retain & ymin_retain & ymax_retain
+        
+        nonzeros, = np.atleast_1d(retain).nonzero()
+        if nonzeros.size:
+            i2, j1 = nonzeros[0], nonzeros[-1]
+            i1, j2 = (i2 - 1), (j1 + 1)
+            if i1 >= 0:
+                xs[i1], ys[i1] = _interpolate(i1, i2)
+                retain[i1] = True
+            if j2 <= retain.size - 1:
+                xs[j2], ys[j2] = _interpolate(j1, j2)
+                retain[j2] = True
+        
+        return xs[retain], ys[retain]
 
 
 class _BaseElement:
@@ -802,7 +816,6 @@ class _Text(_BaseArtist):
                 shift = int((angle + 22.5) // 45)  # step with 45 deg
                 mapping = dict(zip(_ANCHORS, _ANCHORS[shift:] + _ANCHORS[:shift]))
                 anchor = ''.join( mapping[a] for a in anchor )  # rolling
-            
             x, y = self._req_transform(x, y, round_=True)
             if x.size == 0:
                 x = y = -100
@@ -1242,7 +1255,7 @@ class _Ticks(_BaseRegion):
         self._req_xys: tuple[
             Dimension, Dimension, Dimension, Dimension
         ] | None = None
-        self._req_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
+        self._req_transform: _Transform1D = _FirstOrderPolynomial()
         self._req_limits: list[IntFloat | None] = [None, None]
         self._req_margins: list[Dimension | None] = [None, None]
         self._req_scale: Literal['linear', 'log'] = 'linear'
@@ -1250,7 +1263,8 @@ class _Ticks(_BaseRegion):
         self._dummy_xys: tuple[
             Dimension, Dimension, Dimension, Dimension
         ] | None = None
-        self._dummy_transform: _Transform1D = _FirstOrderPolynomial(bound=False)
+        self._dummy_transform: _Transform1D = _FirstOrderPolynomial()
+        self._dummy_limits: list[IntFloat] = [_PMIN, _MAX]
         self._dummy_vertical: bool = False
         self._dummy_n_chars: Int = max( len(str(l)) for l in [_PMIN, _MAX] )
         self._dummy_size: IntFloat = 0
@@ -1389,8 +1403,7 @@ class _Ticks(_BaseRegion):
     ):
         assert isinstance(min_, (IntFloat, type(None))), min_
         assert isinstance(max_, (IntFloat, type(None))), max_
-        assert min_ is None or max_ is None, (min_, max_)
-        if isinstance(margins, str):
+        if isinstance(margins, Dimension):
             margins = [margins, margins]
         margins = list(margins)
         assert len(margins) == 2, margins
@@ -1402,7 +1415,8 @@ class _Ticks(_BaseRegion):
             self._req_limits[0] = min_
         if max_ is not None:
             self._req_limits[1] = max_
-        if self._req_limits[0] > self._req_limits[1]:
+        if all( l is not None for l in self._req_limits ) \
+            and self._req_limits[0] > self._req_limits[1]:
             self._req_limits[:] = old_limits
             raise ValueError(
                 'the value of `min_` must be smaller than or equal to the value '
@@ -1427,7 +1441,7 @@ class _Ticks(_BaseRegion):
     def get_scale(self) -> Literal['linear', 'log']:
         return self._scale
     
-    def _set_xys_and_transform(
+    def _set_bounds_and_transform(
             self,
             xys: tuple[Dimension, Dimension, Dimension, Dimension],
             dlimits: ArrayLike,
@@ -1438,6 +1452,7 @@ class _Ticks(_BaseRegion):
         assert sum( p is None for p in xys ) == 1, xys
         assert xys[self._growing] is None, (self._side, xys)
         
+        raw_dlimits = list(dlimits)
         (dmin, dmax), (cmin, cmax) = sorted(dlimits), climits
         assert cmin <= cmax, climits
         
@@ -1510,7 +1525,7 @@ class _Ticks(_BaseRegion):
                     elif s > 2:
                         s = 5
                     assert int(s) in (1, 2, 5), s
-                    step = 10**log_e * s
+                    step = s * 10**log_e
                     
                     dmin = (dmin / step).quantize(
                         Decimal('1.'), rounding=ROUND_FLOOR
@@ -1534,14 +1549,16 @@ class _Ticks(_BaseRegion):
                     ## Find the nearest a*10^b, where a is an integer
                     e1, log_s1 = divmod(np.log10(dmin), 1)
                     e1, log_s1 = Decimal(str(e1)), Decimal(str(log_s1))
-                    s1 = (10**log_s1).quantize(Decimal('1.'), rounding=ROUND_FLOOR)
-                    dmin = 10**e1 * s1
+                    s1 = (10**log_s1).quantize(
+                        Decimal('1.'), rounding=ROUND_FLOOR
+                    )
                     
                     ## Find the nearest a*10^b, where a is an integer
                     e2, log_s2 = divmod(np.log10(dmax), 1)
                     e2, log_s2 = Decimal(str(e2)), Decimal(str(log_s2))
-                    s2 = (10**log_s2).quantize(Decimal('1.'), rounding=ROUND_FLOOR)
-                    dmax = 10**e2 * s2
+                    s2 = (10**log_s2).quantize(
+                        Decimal('1.'), rounding=ROUND_CEILING
+                    )
                     
                     # Find `n`, the largest integer smaller than `max_n_labels`
                     ## a*10^b
@@ -1558,22 +1575,21 @@ class _Ticks(_BaseRegion):
                             case = 3
                             n = 2
                     
+                    dmin, dmax = float(s1 * 10**e1), float(s2 * 10**e2)
                     self._fitted_labels = {
                         "case": case,
                         "s1": int(s1), "s2": int(s2),
                         "e1": float(e1), "e2": float(e2)
                     }
-                    dmin, dmax = float(dmin), float(dmax)
         
         dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
-        tf = tf_cls.from_points(
-            dlimits, climits, x_limits=dlimits, y_limits=climits, bound=False
-        )
+        tf = tf_cls.from_points(dlimits, climits)
         
         if dummy:
             dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
             self._dummy_xys = xys
             self._dummy_transform = tf
+            self._dummy_limits = raw_dlimits
             return
         
         if xys != self._req_xys:
@@ -1607,8 +1623,7 @@ class _Ticks(_BaseRegion):
         
         # Make the labels' values
         if dummy:
-            dmin, dmax = sorted(transform.get_x_limits())
-            data = np.asarray([dmin, dmax], dtype=float)
+            data = np.asarray(self._dummy_limits, dtype=float)
         elif linear_scale:
             data = np.linspace(**self._fitted_labels, endpoint=True, dtype=float)
         else:  # log scale
@@ -1621,9 +1636,9 @@ class _Ticks(_BaseRegion):
             elif case == 1:
                 data = (
                     (
-                        10**np.arange(fitted["e1"], fitted["e2"]+2, dtype=float)
+                        10**np.arange(fitted["e1"], fitted["e2"]+1, dtype=float)
                     )[:, None] * 
-                    np.arange(1., 10, dtype=float)[None, :]
+                    np.arange(1., 9+1, dtype=float)[None, :]
                 ).ravel()
                 start = int(fitted["s1"] - 1)
                 stop = int(data.size - (9 - fitted["s2"]))
@@ -1640,11 +1655,21 @@ class _Ticks(_BaseRegion):
                 else t + '\n'
             for d in data
         ]
-        if self._side != 'b':  # b\ne^a => e^a\nb (put the exponent above the base)
+        if not dummy and not linear_scale:
+            ## Omit the exponential part if base != 1
+            texts = [
+                b + '\n' if (b := t.split('\n', 1)[0]) != '1' else t
+                for t in texts
+            ]
+        if self._side != 'b':
+            ## b\ne^a => e^a\nb (put the exponent above the base)
             texts = [ '\n'.join(t.split('\n', 1)[::-1]) for t in texts ]
         
         # Transform the data coordinates into the canvas coordinates
-        transformed_data = transform(data, round_=True)
+        if dummy:
+            transformed_data = np.zeros_like(data)
+        else:
+            transformed_data = transform(data, round_=True)
         if self._side in ('t', 'b'):
             positions = [ (x, y1, x, y2) for x in transformed_data ]
         else:  # left or right
@@ -1729,11 +1754,6 @@ class _BaseSubwidget:
         
         for artist in self._zorder_tags:
             artist._stale = True
-        
-        if isinstance(self, tk.Canvas):
-            event = tk.Event()
-            event.width, event.height = self._size
-            self._on_configure(event)
     
     def draw(self):
         raise NotImplementedError
@@ -1848,6 +1868,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self.draw()
     
     def draw(self):
+        self._figure.event_generate('<<DrawStarted>>')
+        
         # Get data limits
         _dlimits = [
             np.asarray([
@@ -1882,10 +1904,13 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             cy1 = bbox[3] + 1
             if cy1 > cy2:
                 cy1 = cy2 = round((cy1 + cy2) / 2)
+        cxys_excluding_title = (cx1, cy1, cx2, cy2)
         
         ## Draw axes
+        ## These axes will be drawn again later after the actual frame dimensions
+        ## are determined
         for i, side in enumerate('rblt'):
-            xys = [cx1, cy1, cx2, cy2]
+            xys = list(cxys_excluding_title)
             xys[i] = None
             axis = self._get_axis(side)
             axis.set_bounds(tuple(xys))
@@ -1906,7 +1931,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             xys = list(cxys_outer)
             xys[i] = None  # growing bound
             ticks = self._get_ticks(side)
-            ticks._set_xys_and_transform(tuple(xys), dat, cnv, dummy=True)
+            ticks._set_bounds_and_transform(tuple(xys), dat, cnv, dummy=True)
             ticks._draw_dummy()
         
         ## Update the bounds of the empty space for the frame
@@ -1926,20 +1951,35 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             xys[i] = None  # growing bound
             xys[i-2] = cxys_outer[i-2]  # outer bound
             ticks = self._get_ticks(side)
-            ticks._set_xys_and_transform(tuple(xys), dat, cnv)
+            ticks._set_bounds_and_transform(tuple(xys), dat, cnv)
             ticks.draw()
-            tfs[side] = ticks._get_transform().copy(bound=True)
+            tfs[side] = ticks._get_transform().copy()
         
         # Draw frame
         self._frame.set_coords(*cxys_inner)
         self._frame.draw()
         
+        # Draw the axes again after the actual frame dimensions are determined
+        for i, side in enumerate('rblt'):
+            xys = list(cxys_inner)
+            xys[i] = None
+            xys[i-2] = cxys_excluding_title[i-2]  # outer bound
+            axis = self._get_axis(side)
+            axis.set_bounds(tuple(xys))
+            axis.draw()
+        
         # Draw user defined artists
         transforms = {}
+        dbounds = dict(zip('rblt', dbounds))
+        cbounds = dict(zip('rblt', cbounds))
         for artist in self.artists:
             x_side, y_side = artist._x_side, artist._y_side
             if (sides := x_side + y_side) not in transforms:
-                transforms[sides] = _Transform2D(tfs[x_side], tfs[y_side])
+                transforms[sides] = _Transform2D(
+                    tfs[x_side], tfs[y_side],
+                    inp_xbounds=dbounds[x_side], inp_ybounds=dbounds[y_side],
+                    out_xbounds=cbounds[x_side], out_ybounds=cbounds[y_side]
+                )
             artist.set_transform(transforms[sides])
             artist.draw()
         
@@ -1949,6 +1989,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
                 key=lambda t: float(t.split('zorder=', 1)[1])
         ):
             self.tag_raise(tag)
+        
+        self._figure.event_generate('<<DrawEnded>>')
     
     def delete_all(self, draw: bool = False):
         for artist in self.artists:
@@ -2312,14 +2354,14 @@ class Figure(UndockedFrame):
         self.bind('<Destroy>', self._on_destroy, add=True)
         self.bind('<<ThemeChanged>>', self._on_theme_changed, add=True)
         
-        self.draw_idle()
+        self.draw_idle()#FIXME: this makes initialization run twice
     
     def _on_destroy(self, event: tk.Event | None = None):
         _cleanup_tk_attributes(self)
     
     def _on_theme_changed(self, event: tk.Event):
         self.update_theme()
-        self.draw_idle()
+        self.draw_idle()#FIXME: this makes initialization run twice
     
     def update_theme(self):
         # Update undock button
@@ -2364,9 +2406,6 @@ class Figure(UndockedFrame):
             self._toolbar.update_theme()
     
     def draw(self):
-        self.event_generate('<<DrawStarted>>')
-        self._initialized = True
-        
         if hasattr(self, '_suptitle'):
             self._suptitle.draw()
         
@@ -2375,7 +2414,7 @@ class Figure(UndockedFrame):
                 if plot:
                     plot.draw()
         
-        self.event_generate('<<DrawEnded>>')
+        self._initialized = True
     
     def draw_idle(self):
         self.after_cancel(self._draw_idle_id)
@@ -2558,7 +2597,6 @@ if __name__ == '__main__':
     y = np.sin(2*np.pi*1*x)
     #x = np.array([3, 6, 6, 3, 3], dtype=float)
     #y = np.array([-0.5, -0.5, 0.5, 0.5, -0.5], dtype=float)
-    x = x[:x.size//2]
     y = 10**x
     
     fig = Figure(root, toolbar=True)
@@ -2576,7 +2614,8 @@ if __name__ == '__main__':
     plt.set_ltickslabels(True)
     #plt.set_ttickslabels(True)
     #plt.set_rtickslabels(True)
-    plt.set_lscale('log')#???
+    plt.set_lscale('log')
+    plt.set_llimits(10, 15000)
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
     
