@@ -2342,14 +2342,15 @@ class Figure(UndockedFrame):
         
         root = self._root()
         self._initialized: bool = False
-        self._req_size: tuple[Int, Int]
+        self._req_size: tuple[Int | None, Int | None] = (None, None)
         self._plots: NDArray[_Plot]
         self._to_px = lambda dim: _to_px(root, dim)
         self._draw_idle_id: str = 'after#'
-        self._default_style: dict[str, Any] = STYLES[
-            self._root().style.theme.type
-        ].copy()
         self._var_coord: vrb.StringVar = vrb.StringVar(self, value='()')
+        self._default_style: dict[str, Any]
+        
+        self.grid_propagate(False)  # allow `self` to be resized
+        self.update_theme()
         self.set_size(width=width, height=height)
         
         self._suptitle: _Suptitle
@@ -2360,21 +2361,27 @@ class Figure(UndockedFrame):
         if toolbar:
             self.set_toolbar(True)
         
-        self.grid_propagate(False)  # allow `self` to be resized
-        
         self.bind('<Destroy>', self._on_destroy, add=True)
         self.bind('<<ThemeChanged>>', self._on_theme_changed, add=True)
         
-        self.draw_idle()#FIXME: this makes initialization run twice
+        self.after_idle(self._initialize)
+    
+    def _initialize(self):
+        if hasattr(self, '_suptitle'):
+            self._suptitle.draw()
+        self._initialized = True
     
     def _on_destroy(self, event: tk.Event | None = None):
         _cleanup_tk_attributes(self)
     
     def _on_theme_changed(self, event: tk.Event):
         self.update_theme()
-        self.draw_idle()#FIXME: this makes initialization run twice
+        if self._initialized:
+            self.draw_idle()
     
     def update_theme(self):
+        self._default_style = deepcopy(STYLES[self._root().style.theme.type])
+        
         # Update undock button
         id_ = str(id(self))
         if not (udbt_style := self.undock_button["style"]).startswith(id_):
@@ -2398,11 +2405,6 @@ class Figure(UndockedFrame):
         )
         self.configure(bg=self._default_style["facecolor"])
         
-        if not self._initialized:
-            return
-        
-        self._default_style = STYLES[self._root().style.theme.type]
-        
         # Update suptitle
         if hasattr(self, '_suptitle'):
             self._suptitle.update_theme()
@@ -2424,8 +2426,6 @@ class Figure(UndockedFrame):
             for plot in self._plots.flat:
                 if plot:
                     plot.draw()
-        
-        self._initialized = True
     
     def draw_idle(self):
         self.after_cancel(self._draw_idle_id)
@@ -2436,17 +2436,23 @@ class Figure(UndockedFrame):
             width: Dimension | None = None,
             height: Dimension | None = None
     ):
-        default_width, default_height = self._default_style["size"]
-        width = default_width if width is None else self._to_px(width)
-        height = default_height if height is None else self._to_px(height)
-        new_size = (width, height)
+        if width is not None:
+            self._req_size[0] = width
+        if height is not None:
+            self._req_size[1] = height
         
-        if not hasattr(self, '_req_size') or self._req_size != new_size:
-            self._req_size = new_size
-            self.configure(width=width, height=height)
+        default_size = self._default_style["size"]
+        new_size = tuple(
+            round(self._to_px(request if request is not None else default))
+            for request, default in zip(self._req_size, default_size)
+        )
+        
+        old_size = self.get_size()
+        if new_size != old_size:
+            self.configure(width=new_size[0], height=new_size[1])
     
     def get_size(self) -> tuple[Int, Int]:
-        return self._req_size
+        return (self.winfo_reqwidth(), self.winfo_reqheight())
     
     def set_suptitle(
             self,
