@@ -27,7 +27,7 @@ from ._figure_config import STYLES
 _ANCHORS = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
 _NP_FLOAT = np.float64
 _NP_FINFO = np.finfo(_NP_FLOAT)
-_PMIN, _MAX = (_NP_FINFO.smallest_normal, _NP_FINFO.max)
+_PMIN, _MIN, _MAX = (_NP_FINFO.smallest_normal, _NP_FINFO.min, _NP_FINFO.max)
 # =============================================================================
 # ---- Helpers
 # =============================================================================
@@ -1452,7 +1452,6 @@ class _Ticks(_BaseRegion):
         assert sum( p is None for p in xys ) == 1, xys
         assert xys[self._growing] is None, (self._side, xys)
         
-        raw_dlimits = list(dlimits)
         (dmin, dmax), (cmin, cmax) = sorted(dlimits), climits
         assert cmin <= cmax, climits
         
@@ -1465,7 +1464,7 @@ class _Ticks(_BaseRegion):
         cmin, cmax = (cmin + marg1), (cmax - marg2)
         if cmin > cmax:
             cmin = cmax = round((cmin + cmax) / 2.)
-        climits = [cmin, cmax]
+        new_climits = [cmin, cmax]
         
         # Fetch the min and max values set by the user
         req_dmin, req_dmax = self._req_limits
@@ -1477,12 +1476,13 @@ class _Ticks(_BaseRegion):
         
         if linear_scale := (self._req_scale == 'linear'):
             tf_cls = _FirstOrderPolynomial
+            dmin, dmax = max(dmin, _MIN), min(dmax, _MAX)
         else:  # log scale
             tf_cls = _Logarithm
-            if dmin <= 0.:
-                dmin = _PMIN
-            if dmin > dmax:
-                dmax = dmin
+            dmin, dmax = max(dmin, _PMIN), min(dmax, _MAX)
+        dmax = max(dmax, dmin)
+        raw_dmin, raw_dmax = (dmin, dmax)
+        
         sci = 1 if not linear_scale \
             else self._default_style[f"{self._tag}.labels.scientific"] \
             if self._req_scientific is None \
@@ -1502,7 +1502,7 @@ class _Ticks(_BaseRegion):
                 if fixed_size:
                     size *= 1.2
                 else:
-                    size *= (max(n_chars, sci) + 1) / n_chars
+                    size *= (max(n_chars, sci) + 2) / n_chars
                 max_n_labels = max(int((cmax - cmin) // size), 0)
             
             # Find appropriate min and max values and the actual number of labels
@@ -1534,11 +1534,17 @@ class _Ticks(_BaseRegion):
                         Decimal('1.'), rounding=ROUND_CEILING
                     ) * step
                     n = (dmax - dmin) / step + 1
-                    
                     dmin, dmax, n = float(dmin), float(dmax), int(n)
-                    self._fitted_labels = {
-                        "start": dmin, "stop": dmax, "num": n
-                    }
+                    
+                    if dmin < _MIN or dmax > _MAX:
+                        dmin, dmax = max(dmin, _MIN), min(dmax, _MAX)
+                        self._fitted_labels = {
+                            "start": raw_dmin, "stop": raw_dmax, "num": 2
+                        }
+                    else:
+                        self._fitted_labels = {
+                            "start": dmin, "stop": dmax, "num": n
+                        }
             else:  # log scale
                 if max_n_labels <= 1:
                     self._fitted_labels = {
@@ -1574,25 +1580,33 @@ class _Ticks(_BaseRegion):
                         if n > max_n_labels:
                             case = 3
                             n = 2
-                    
                     dmin, dmax = float(s1 * 10**e1), float(s2 * 10**e2)
-                    self._fitted_labels = {
-                        "case": case,
-                        "s1": int(s1), "s2": int(s2),
-                        "e1": float(e1), "e2": float(e2)
-                    }
+                    
+                    if dmin < _PMIN or dmax > _MAX:
+                        dmin, dmax = max(dmin, _MIN), min(dmax, _MAX)
+                        self._fitted_labels = {
+                            "case": 0,
+                            "start": raw_dmin, "stop": raw_dmax, "num": 2
+                        }
+                    else:
+                        self._fitted_labels = {
+                            "case": case,
+                            "s1": int(s1), "s2": int(s2),
+                            "e1": float(e1), "e2": float(e2)
+                        }
         
+        # Set the exact data limits if they are requested
         if req_dmin is not None:
             dmin = req_dmin
         if req_dmax is not None:
             dmax = req_dmax
-        dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
-        tf = tf_cls.from_points(dlimits, climits)
+        new_dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
+        tf = tf_cls.from_points(new_dlimits, new_climits)
         
         if dummy:
             self._dummy_xys = xys
             self._dummy_transform = tf
-            self._dummy_limits = raw_dlimits
+            self._dummy_limits = dlimits
             return
         
         if xys != self._req_xys:
@@ -2631,8 +2645,8 @@ if __name__ == '__main__':
     plt.set_ltickslabels(True)
     #plt.set_ttickslabels(True)
     #plt.set_rtickslabels(True)
-    plt.set_lscale('log')
-    plt.set_llimits(10, 150)
+    #plt.set_lscale('log')
+    #plt.set_llimits(10, 150)
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
     
