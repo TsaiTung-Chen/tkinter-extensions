@@ -938,8 +938,6 @@ class _Line(_BaseArtist):
     def __init__(
             self,
             canvas: _Plot | _Suptitle,
-            x: NDArray[IntFloat],  # data x
-            y: NDArray[IntFloat],  # data y
             color: str | None = None,
             width: Dimension | None = None,
             smooth: bool | None = None,
@@ -957,7 +955,6 @@ class _Line(_BaseArtist):
             -100, -100, -100, -100,
             fill='', width='0p', state='hidden', tags=self._tags
         )
-        self.set_data(x=x, y=y)
         self.set_style(color=color, width=width, smooth=smooth)
     
     def draw(self):
@@ -1271,26 +1268,29 @@ class _Ticks(_BaseRegion):
         self._dummy_label: _Text = _Text(
             canvas=self._canvas, text='', tag=f'{self._tag}.labels.text'
         )
+        
         self._stale_labels: bool = True
         self._fitted_labels: dict[str, Any] = {}
-        self._labels: list[_Text] = []
         self._limits: list[IntFloat] = [_PMIN, _MAX]
         self._margins: list[IntFloat] = [0., 0.]
+        self._ticks_cdata: NDArray[float] = np.array([], dtype=float)
+        self._labels: list[_Text] = []
     
     def draw(
             self
     ) -> tuple[dict[str, Any], _Transform1D] | None:
         self._dummy_label._set_state('hidden')
+        texts, positions = self._generate_label_values()
+        
+        if not self._stale_labels:
+            return
+        
         if not self._req_labels_enabled:
             for label in self._labels:
                 label.delete()
             self._labels.clear()
             return
         
-        if not self._stale_labels:
-            return
-        
-        texts, positions = self._make_labels()
         canvas = self._canvas
         tag = f'{self._tag}.labels.text'
         font = self._dummy_label._font
@@ -1299,26 +1299,25 @@ class _Ticks(_BaseRegion):
         bounds = self._dummy_label._req_bounds.copy()
         bounds.pop('xys', None)
         
-        length_increase = len(texts) - len(self._labels)
-        if length_increase < 0:  # delete labels
-            for i in range(-length_increase):
+        number_increase = len(texts) - len(self._labels)
+        if number_increase < 0:  # delete labels
+            for i in range(-number_increase):
                 self._labels.pop().delete()
-        elif length_increase > 0:  # create labels
+        elif number_increase > 0:  # create labels
             self._labels.extend(
                 _Text(canvas, text='', font=font, tag=tag)
-                for i in range(length_increase)
+                for i in range(number_increase)
             )
         
         for label, text, xys in zip(self._labels, texts, positions):
             label.set_style(text=text, **style)
             label.set_bounds(xys=xys, **bounds)
             label.draw()
+        
+        self._stale_labels = False
     
     def _draw_dummy(self):
-        if not self._req_labels_enabled:
-            return
-        
-        texts, positions = self._make_labels(dummy=True)
+        texts, positions = self._generate_label_values(dummy=True)
         
         # Find possibly largest label
         n_chars = [ max( len(t) for t in tx.split('\n', 1) ) for tx in texts ]
@@ -1333,7 +1332,7 @@ class _Ticks(_BaseRegion):
         label.draw()
         
         # Update current size of the text item
-        tx1, ty1, tx2, ty2 = self.bbox(dummy=True)
+        tx1, ty1, tx2, ty2 = self.bbox(dummy=True, regarding_enabled=False)
         w, h = (tx2 - tx1), (ty2 - ty1)
         angle = float(label.cget('angle'))
         vertical = (angle - 90) % 180 == 0  # text direction
@@ -1346,9 +1345,16 @@ class _Ticks(_BaseRegion):
             label.delete()
         self._labels.clear()
     
-    def bbox(self, dummy: bool = False) -> tuple[int, int, int, int] | None:
+    def bbox(
+            self,
+            dummy: bool = False,
+            regarding_enabled: bool = True
+    ) -> tuple[int, int, int, int] | None:
         if dummy:
-            return self._dummy_label.bbox()
+            if regarding_enabled and not self._req_labels_enabled:
+                return None
+            else:
+                return self._dummy_label.bbox()
         elif not self._labels:
             return None
         
@@ -1391,6 +1397,7 @@ class _Ticks(_BaseRegion):
         self._dummy_label.set_bounds(padx=padx, pady=pady)
         self._req_labels_enabled = enable
         self._req_scientific = scientific
+        self._stale_labels = True
     
     def get_labels(self) -> list[_Text]:
         return self._labels
@@ -1431,8 +1438,8 @@ class _Ticks(_BaseRegion):
     def get_limits(self) -> tuple[list[IntFloat], list[Dimension]]:
         return self._limits, self._margins
     
-    def set_scale(self, scale: Literal['linear', 'log'] = None):
-        assert scale in ('linear', 'log'), scale
+    def set_scale(self, scale: Literal['linear', 'log'] | None = None):
+        assert scale in ('linear', 'log', None), scale
         
         if scale is not None and scale != self._req_scale:
             self._req_scale = scale
@@ -1488,112 +1495,111 @@ class _Ticks(_BaseRegion):
             if self._req_scientific is None \
             else self._req_scientific
         
-        if self._req_labels_enabled:
-            if dummy:
-                max_n_labels = 2
+        if dummy:
+            max_n_labels = 2
+        else:
+            # Calculate the max number of labels fitting in the space
+            if self._side in 'tb':  # top or bottom
+                fixed_size = self._dummy_vertical
+            else:  # left or right
+                fixed_size = not self._dummy_vertical
+            n_chars = self._dummy_n_chars
+            size = self._dummy_size
+            if fixed_size:
+                size *= 1.2
             else:
-                # Calculate the max number of labels fitting in the space
-                if self._side in 'tb':  # top or bottom
-                    fixed_size = self._dummy_vertical
-                else:  # left or right
-                    fixed_size = not self._dummy_vertical
-                n_chars = self._dummy_n_chars
-                size = self._dummy_size
-                if fixed_size:
-                    size *= 1.2
-                else:
-                    size *= (max(n_chars, sci) + 2) / n_chars
-                max_n_labels = max(int((cmax - cmin) // size), 0)
-            
-            # Find appropriate min and max values and the actual number of labels
-            if linear_scale:
-                if max_n_labels <= 1:
+                size *= (max(n_chars, sci) + 2) / n_chars
+            max_n_labels = max(int((cmax - cmin) // size), 0)
+        
+        # Find appropriate min and max values and the actual number of labels
+        if linear_scale:
+            if max_n_labels <= 1:
+                self._fitted_labels = {
+                    "start": dmin, "stop": dmax, "num": max_n_labels
+                }
+            else:
+                ## Use `Decimal` to represent numbers exactly
+                dmin, dmax = Decimal(str(dmin)), Decimal(str(dmax))
+                
+                ## Find the nearest a*10^b, where a is an integer
+                step = (dmax - dmin) / (max_n_labels - 1)  # excluding limits
+                log_e, log_s = divmod(float(step.log10()), 1)
+                log_e, log_s = Decimal(str(log_e)), Decimal(str(log_s))
+                if (s := round(10**log_s, 0)) > 5:
+                    s = 1
+                    log_e += 1
+                elif s > 2:
+                    s = 5
+                assert int(s) in (1, 2, 5), s
+                step = s * 10**log_e
+                
+                dmin = (dmin / step).quantize(
+                    Decimal('1.'), rounding=ROUND_FLOOR
+                ) * step
+                dmax = (dmax / step).quantize(
+                    Decimal('1.'), rounding=ROUND_CEILING
+                ) * step
+                n = (dmax - dmin) / step + 1
+                dmin, dmax, n = float(dmin), float(dmax), int(n)
+                
+                if dmin < _MIN or dmax > _MAX:
+                    dmin, dmax = max(dmin, _MIN), min(dmax, _MAX)
                     self._fitted_labels = {
-                        "start": dmin, "stop": dmax, "num": max_n_labels
+                        "start": raw_dmin, "stop": raw_dmax, "num": 2
                     }
                 else:
-                    ## Use `Decimal` to represent numbers exactly
-                    dmin, dmax = Decimal(str(dmin)), Decimal(str(dmax))
-                    
-                    ## Find the nearest a*10^b, where a is an integer
-                    step = (dmax - dmin) / (max_n_labels - 1)  # excluding limits
-                    log_e, log_s = divmod(float(step.log10()), 1)
-                    log_e, log_s = Decimal(str(log_e)), Decimal(str(log_s))
-                    if (s := round(10**log_s, 0)) > 5:
-                        s = 1
-                        log_e += 1
-                    elif s > 2:
-                        s = 5
-                    assert int(s) in (1, 2, 5), s
-                    step = s * 10**log_e
-                    
-                    dmin = (dmin / step).quantize(
-                        Decimal('1.'), rounding=ROUND_FLOOR
-                    ) * step
-                    dmax = (dmax / step).quantize(
-                        Decimal('1.'), rounding=ROUND_CEILING
-                    ) * step
-                    n = (dmax - dmin) / step + 1
-                    dmin, dmax, n = float(dmin), float(dmax), int(n)
-                    
-                    if dmin < _MIN or dmax > _MAX:
-                        dmin, dmax = max(dmin, _MIN), min(dmax, _MAX)
-                        self._fitted_labels = {
-                            "start": raw_dmin, "stop": raw_dmax, "num": 2
-                        }
-                    else:
-                        self._fitted_labels = {
-                            "start": dmin, "stop": dmax, "num": n
-                        }
-            else:  # log scale
-                if max_n_labels <= 1:
+                    self._fitted_labels = {
+                        "start": dmin, "stop": dmax, "num": n
+                    }
+        else:  # log scale
+            if max_n_labels <= 1:
+                self._fitted_labels = {
+                    "case": 0,
+                    "dmin": dmin, "dmax": dmax, "n": max_n_labels
+                }
+            else:
+                ## Find the nearest a*10^b, where a is an integer
+                e1, log_s1 = divmod(np.log10(dmin), 1)
+                e1, log_s1 = Decimal(str(e1)), Decimal(str(log_s1))
+                s1 = (10**log_s1).quantize(
+                    Decimal('1.'), rounding=ROUND_FLOOR
+                )
+                
+                ## Find the nearest a*10^b, where a is an integer
+                e2, log_s2 = divmod(np.log10(dmax), 1)
+                e2, log_s2 = Decimal(str(e2)), Decimal(str(log_s2))
+                s2 = (10**log_s2).quantize(
+                    Decimal('1.'), rounding=ROUND_CEILING
+                )
+                
+                # Find `n`, the largest integer smaller than `max_n_labels`
+                ## a*10^b
+                case = 1
+                n = int((e2 - e1) * 9 + 1 - (s1 - 1) + (s2 - 1))
+                if n > max_n_labels:
+                    case = 2
+                    ## Only 1*10^b
+                    if s2 > 1:
+                        e2 += 1
+                    s1 = s2 = 1
+                    n = int(e2 - e1 + 1)
+                    if n > max_n_labels:
+                        case = 3
+                        n = 2
+                dmin, dmax = float(s1 * 10**e1), float(s2 * 10**e2)
+                
+                if dmin < _PMIN or dmax > _MAX:
+                    dmin, dmax = max(dmin, _MIN), min(dmax, _MAX)
                     self._fitted_labels = {
                         "case": 0,
-                        "dmin": dmin, "dmax": dmax, "n": max_n_labels
+                        "start": raw_dmin, "stop": raw_dmax, "num": 2
                     }
                 else:
-                    ## Find the nearest a*10^b, where a is an integer
-                    e1, log_s1 = divmod(np.log10(dmin), 1)
-                    e1, log_s1 = Decimal(str(e1)), Decimal(str(log_s1))
-                    s1 = (10**log_s1).quantize(
-                        Decimal('1.'), rounding=ROUND_FLOOR
-                    )
-                    
-                    ## Find the nearest a*10^b, where a is an integer
-                    e2, log_s2 = divmod(np.log10(dmax), 1)
-                    e2, log_s2 = Decimal(str(e2)), Decimal(str(log_s2))
-                    s2 = (10**log_s2).quantize(
-                        Decimal('1.'), rounding=ROUND_CEILING
-                    )
-                    
-                    # Find `n`, the largest integer smaller than `max_n_labels`
-                    ## a*10^b
-                    case = 1
-                    n = int((e2 - e1) * 9 + 1 - (s1 - 1) + (s2 - 1))
-                    if n > max_n_labels:
-                        case = 2
-                        ## Only 1*10^b
-                        if s2 > 1:
-                            e2 += 1
-                        s1 = s2 = 1
-                        n = int(e2 - e1 + 1)
-                        if n > max_n_labels:
-                            case = 3
-                            n = 2
-                    dmin, dmax = float(s1 * 10**e1), float(s2 * 10**e2)
-                    
-                    if dmin < _PMIN or dmax > _MAX:
-                        dmin, dmax = max(dmin, _MIN), min(dmax, _MAX)
-                        self._fitted_labels = {
-                            "case": 0,
-                            "start": raw_dmin, "stop": raw_dmax, "num": 2
-                        }
-                    else:
-                        self._fitted_labels = {
-                            "case": case,
-                            "s1": int(s1), "s2": int(s2),
-                            "e1": float(e1), "e2": float(e2)
-                        }
+                    self._fitted_labels = {
+                        "case": case,
+                        "s1": int(s1), "s2": int(s2),
+                        "e1": float(e1), "e2": float(e2)
+                    }
         
         # Set the exact data limits if they are requested
         if req_dmin is not None:
@@ -1621,7 +1627,7 @@ class _Ticks(_BaseRegion):
     def _get_transform(self) -> _Transform1D:
         return self._req_transform
     
-    def _make_labels(
+    def _generate_label_values(
             self,
             dummy: bool = False
     ) -> tuple[list[str], NDArray[Float]]:
@@ -1629,7 +1635,6 @@ class _Ticks(_BaseRegion):
             x1, y1, x2, y2 = self._dummy_xys
             transform = self._dummy_transform
         else:
-            assert self._stale_labels, self._stale_labels
             x1, y1, x2, y2 = self._req_xys
             transform = self._req_transform
         linear_scale = self._req_scale == 'linear'
@@ -1692,16 +1697,15 @@ class _Ticks(_BaseRegion):
         
         # Transform the data coordinates into the canvas coordinates
         if dummy:
-            transformed_data = np.zeros_like(data)
+            cdata = np.zeros_like(data)
         else:
-            transformed_data = transform(data, round_=True)
-        if self._side in ('t', 'b'):
-            positions = [ (x, y1, x, y2) for x in transformed_data ]
-        else:  # left or right
-            positions = [ (x1, y, x2, y) for y in transformed_data ]
+            cdata = transform(data, round_=True)
+            self._ticks_cdata = cdata
         
-        if not dummy:
-            self._stale_labels = False
+        if self._side in ('t', 'b'):
+            positions = [ (x, y1, x, y2) for x in cdata ]
+        else:  # left or right
+            positions = [ (x1, y, x2, y) for y in cdata ]
         
         return texts, positions
 
@@ -1709,12 +1713,63 @@ class _Ticks(_BaseRegion):
 class _Frame(_BaseRegion):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._req_grid_enabled: dict[str, bool | None] = dict.fromkeys('rblt')
+        self._req_grid_cdata: dict[str, NDArray[float]] = {}
+        
+        self._stale_grid: bool = True
+        self._grid: dict[str, list[_Line]] = {"r": [], "b": [], "l": [], "t": []}
+        
+        self._dummy_grid: dict[str, _Line] = {
+            "r": _Line(canvas=self._canvas, tag=f'{self._tag}.grid.line'),
+            "b": _Line(canvas=self._canvas, tag=f'{self._tag}.grid.line'),
+            "l": _Line(canvas=self._canvas, tag=f'{self._tag}.grid.line'),
+            "t": _Line(canvas=self._canvas, tag=f'{self._tag}.grid.line')
+        }
         self._rect: _Rectangle = _Rectangle(
             self._canvas, tag=f'{self._tag}.rect'
         )
     
     def draw(self):
         self._rect.draw()
+        
+        if not self._stale_grid:
+            return
+        
+        default_enabled = self._default_style[f'{self._tag}.grid.enabled']
+        canvas = self._canvas
+        tag = f'{self._tag}.grid.line'
+        x1, y1, x2, y2 = self._rect.bbox()
+        for side, grid in self._grid.items():
+            if (enabled := self._req_grid_enabled[side]) is None:
+                enabled = side in default_enabled
+            if not enabled:
+                for line in grid:
+                    line.delete()
+                grid.clear()
+                continue
+            
+            style = self._dummy_grid[side]._req_style
+            positions = self._req_grid_cdata[side]
+            if side in ('t', 'b'):
+                positions = [ (p, y1+2, p, y2-2) for p in positions ]
+            else:
+                positions = [ (x1+2, p, x2-2, p) for p in positions ]
+            
+            number_increase = len(positions) - len(grid)
+            if number_increase < 0:  # delete labels
+                for i in range(-number_increase):
+                    grid.pop().delete()
+            elif number_increase > 0:  # create labels
+                grid.extend(
+                    _Line(canvas, tag=tag) for i in range(number_increase)
+                )
+            
+            for line, xys in zip(grid, positions):
+                line.set_style(**style)
+                line.set_coords(*xys)
+                line.draw()
+        
+        self._stale_grid = False
     
     def delete(self):
         self._rect.delete()
@@ -1730,6 +1785,41 @@ class _Frame(_BaseRegion):
     
     def get_rect(self) -> _Rectangle:
         return self._rect
+    
+    def set_grid(
+            self,
+            side: Literal['r', 'b', 'l', 't'],
+            enabled: bool = True,
+            color: str | None = None,
+            width: Dimension | None = None,
+            smooth: bool | None = None
+    ):
+        assert side in ('r', 'b', 'l', 't'), side
+        assert isinstance(enabled, bool), enabled
+        
+        if enabled != self._req_grid_enabled[side]:
+            self._req_grid_enabled[side] = enabled
+        
+        self._dummy_grid[side].set_style(color=color, width=width, smooth=smooth)
+        self._stale_grid = True
+    
+    def get_grid(self) -> dict[str, list[_Line]]:
+        return self._grid
+    
+    def _set_grid_cdata(
+            self,
+            r: NDArray[float],
+            b: NDArray[float],
+            l: NDArray[float],
+            t: NDArray[float]
+    ):
+        cdata = {"r": r, "b": b, "l": l, "t": t}
+        if not self._req_grid_cdata or not all(
+                np.array_equal(cdata[side], self._req_grid_cdata[side])
+                for side in 'rblt'
+        ):
+            self._req_grid_cdata = cdata
+            self._stale_grid = True
 
 
 # =============================================================================
@@ -1971,6 +2061,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         ## Draw ticks and update the data limits and canvas limits
         cbounds = np.asarray([[cy1, cy2], [cx1, cx2]] * 2)  # shape: (4, 2)
         tfs = {}
+        tick_cdata = {}
         for i, (side, dat, cnv) in enumerate(zip('rblt', dbounds, cbounds)):
             xys = list(cxys_inner)
             xys[i] = None  # growing bound
@@ -1979,9 +2070,11 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             ticks._set_bounds_and_transform(tuple(xys), dat, cnv)
             ticks.draw()
             tfs[side] = ticks._get_transform().copy()
+            tick_cdata[side] = ticks._ticks_cdata
         
         # Draw frame
         self._frame.set_coords(*cxys_inner)
+        self._frame._set_grid_cdata(**tick_cdata)
         self._frame.draw()
         
         # Draw the axes again after the actual frame dimensions are determined
@@ -2220,6 +2313,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def get_rscale(self) -> Literal['linear', 'log']:
         return self._rticks.get_scale()
     
+    def set_grid(self, *args, **kwargs):
+        self._frame.set_grid(*args, **kwargs)
+    
     def plot(
             self,
             b: ArrayLike | None = None,
@@ -2264,8 +2360,6 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         
         line = _Line(
             self,
-            x=x.ravel(),
-            y=y.ravel(),
             color=next(color_cycle),
             width=width,
             smooth=smooth,
@@ -2277,6 +2371,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             user=True,
             tag='line'
         )
+        line.set_data(x.ravel(), y.ravel())
         x_lines.append(line)
         y_lines.append(line)
         
@@ -2645,7 +2740,7 @@ if __name__ == '__main__':
     plt.set_ltickslabels(True)
     #plt.set_ttickslabels(True)
     #plt.set_rtickslabels(True)
-    #plt.set_lscale('log')
+    plt.set_lscale('log')
     #plt.set_llimits(10, 150)
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))

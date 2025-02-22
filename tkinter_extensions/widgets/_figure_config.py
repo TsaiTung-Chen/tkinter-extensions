@@ -145,9 +145,10 @@ common_style = {
         "width": '1p'
     },
     
-    "grid.enabled": ('b', 'l'),
-    "grid.line": {
-        "zorder": 1.0
+    "frame.grid.enabled": ('b', 'l'),
+    "frame.grid.line": {
+        "zorder": 1.0,
+        "width": '1p'
     },
     
     "legend.enabled": True,
@@ -282,8 +283,10 @@ light_style.update({
         "facecolor": '#CFD9E8',
         "edgecolor": '#666666'
     },
-    
-    "grid.color": 'white',
+    "frame.grid.line": {
+        **common_style["frame.grid.line"],
+        "color": 'white'
+    },
     
     "legend.text": {
         **common_style["legend.text"],
