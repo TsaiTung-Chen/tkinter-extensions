@@ -1198,12 +1198,12 @@ class _Axis(_BaseRegion):
     def __init__(
             self,
             canvas: _Plot | _Suptitle,
-            side: Literal['t', 'b', 'l', 'r'],
+            side: Literal['r', 'b', 'l', 't'],
             *args, 
             **kwargs
     ):
         super().__init__(canvas=canvas, *args, **kwargs)
-        self._side: Literal['t', 'b', 'l', 'r'] = side
+        self._side: Literal['r', 'b', 'l', 't'] = side
         self._label: _Text = _Text(
             canvas=self._canvas, text='', tag=f'{self._tag}.label.text'
         )
@@ -1239,14 +1239,15 @@ class _Ticks(_BaseRegion):
     def __init__(
             self,
             canvas: _Plot | _Suptitle,
-            side: Literal['t', 'b', 'l', 'r'],
+            side: Literal['r', 'b', 'l', 't'],
             *args, 
             **kwargs
     ):
         super().__init__(canvas=canvas, *args, **kwargs)
-        self._side: Literal['t', 'b', 'l', 'r'] = side
-        self._growing: int = {"r": 0, "b": 1, "l": 2, "t": 3}[side]
+        self._side: Literal['r', 'b', 'l', 't'] = side
+        self._growing_side: int = {"r": 0, "b": 1, "l": 2, "t": 3}[side]
         
+        self._req_ticks_enabled: bool = False
         self._req_labels_enabled: bool = False
         self._req_scientific: Int | None = None
         self._req_xys: tuple[
@@ -1268,13 +1269,18 @@ class _Ticks(_BaseRegion):
         self._dummy_label: _Text = _Text(
             canvas=self._canvas, text='', tag=f'{self._tag}.labels.text'
         )
+        self._dummy_tick: _Line = _Line(
+            canvas=self._canvas, tag=f'{self._tag}.ticks.line'
+        )
         
-        self._stale_labels: bool = True
+        self._stale: bool = True
         self._fitted_labels: dict[str, Any] = {}
         self._limits: list[IntFloat] = [_PMIN, _MAX]
         self._margins: list[IntFloat] = [0., 0.]
+        self._growing_p: IntFloat = 0.
         self._ticks_cdata: NDArray[float] = np.array([], dtype=float)
         self._labels: list[_Text] = []
+        self._ticks: list[_Line] = []
     
     def draw(
             self
@@ -1282,39 +1288,61 @@ class _Ticks(_BaseRegion):
         self._dummy_label._set_state('hidden')
         texts, positions = self._generate_label_values()
         
-        if not self._stale_labels:
+        if not self._stale:
             return
         
+        canvas = self._canvas
         if not self._req_labels_enabled:
             for label in self._labels:
                 label.delete()
             self._labels.clear()
-            return
+        else:
+            tag = f'{self._tag}.labels.text'
+            font = self._dummy_label._font
+            style = self._dummy_label._req_style
+            style.pop('text', None)
+            bounds = self._dummy_label._req_bounds.copy()
+            bounds.pop('xys', None)
+            
+            number_increase = len(texts) - len(self._labels)
+            if number_increase < 0:  # delete labels
+                for i in range(-number_increase):
+                    self._labels.pop().delete()
+            elif number_increase > 0:  # create labels
+                self._labels.extend(
+                    _Text(canvas, text='', font=font, tag=tag)
+                    for i in range(number_increase)
+                )
+            
+            for label, text, xys in zip(self._labels, texts, positions):
+                label.set_style(text=text, **style)
+                label.set_bounds(xys=xys, **bounds)
+                label.draw()
         
-        canvas = self._canvas
-        tag = f'{self._tag}.labels.text'
-        font = self._dummy_label._font
-        style = self._dummy_label._req_style
-        style.pop('text', None)
-        bounds = self._dummy_label._req_bounds.copy()
-        bounds.pop('xys', None)
+        if self._req_ticks_enabled:
+            tag = f'{self._tag}.ticks.line'
+            style = self._dummy_tick._req_style
+            p = self._growing_p
+            if self._side in ('t', 'b'):
+                positions = [ (x1, p-2, x2, p+2) for x1, y1, x2, y2 in positions ]
+            else:
+                positions = [ (p-2, y1, p+2, y2) for x1, y1, x2, y2 in positions ]
+            
+            number_increase = len(positions) - len(self._ticks)
+            if number_increase < 0:  # delete lines
+                for i in range(-number_increase):
+                    self._ticks.pop().delete()
+            elif number_increase > 0:  # create lines
+                self._ticks.extend(
+                    _Line(canvas, tag=tag) for i in range(number_increase)
+                )
+            
+            for line, xys in zip(self._ticks, positions):
+                line.set_style(**style)
+                line.set_coords(*xys)
+                line.draw()
         
-        number_increase = len(texts) - len(self._labels)
-        if number_increase < 0:  # delete labels
-            for i in range(-number_increase):
-                self._labels.pop().delete()
-        elif number_increase > 0:  # create labels
-            self._labels.extend(
-                _Text(canvas, text='', font=font, tag=tag)
-                for i in range(number_increase)
-            )
-        
-        for label, text, xys in zip(self._labels, texts, positions):
-            label.set_style(text=text, **style)
-            label.set_bounds(xys=xys, **bounds)
-            label.draw()
-        
-        self._stale_labels = False
+        self._stale = False
     
     def _draw_dummy(self):
         texts, positions = self._generate_label_values(dummy=True)
@@ -1369,6 +1397,19 @@ class _Ticks(_BaseRegion):
         
         return x1, y1, x2, y2
     
+    def set_ticks(
+            self,
+            enable: bool = True,
+            color: str | None = None,
+            width: Dimension | None = None,
+            smooth: bool | None = None
+    ):
+        assert isinstance(enable, bool), enable
+        
+        self._dummy_tick.set_style(color=color, width=width, smooth=smooth)
+        self._req_ticks_enabled = enable
+        self._stale = True
+    
     def set_labels(
             self,
             enable: bool = True,
@@ -1397,7 +1438,7 @@ class _Ticks(_BaseRegion):
         self._dummy_label.set_bounds(padx=padx, pady=pady)
         self._req_labels_enabled = enable
         self._req_scientific = scientific
-        self._stale_labels = True
+        self._stale = True
     
     def get_labels(self) -> list[_Text]:
         return self._labels
@@ -1443,21 +1484,28 @@ class _Ticks(_BaseRegion):
         
         if scale is not None and scale != self._req_scale:
             self._req_scale = scale
-            self._stale_labels = True
+            self._stale = True
     
     def get_scale(self) -> Literal['linear', 'log']:
         return self._scale
     
     def _set_bounds_and_transform(
             self,
-            xys: tuple[Dimension, Dimension, Dimension, Dimension],
+            xys: tuple[
+                Dimension | None,
+                Dimension | None,
+                Dimension | None,
+                Dimension | None
+            ],
             dlimits: ArrayLike,
             climits: ArrayLike,
+            growing_p: Dimension | None = None,
             dummy: bool = False
     ):
         assert isinstance(xys, tuple) and len(xys) == 4, xys
+        assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
         assert sum( p is None for p in xys ) == 1, xys
-        assert xys[self._growing] is None, (self._side, xys)
+        assert isinstance(growing_p, (Dimension, type(None))), growing_p
         
         (dmin, dmax), (cmin, cmax) = sorted(dlimits), climits
         assert cmin <= cmax, climits
@@ -1617,12 +1665,13 @@ class _Ticks(_BaseRegion):
         
         if xys != self._req_xys:
             self._req_xys = xys
-            self._stale_labels = True
+            self._stale = True
         if tf != self._req_transform:
             self._req_transform = tf
-            self._stale_labels = True
+            self._stale = True
         self._limits = [dmin, dmax]
         self._margins = [marg1, marg2]
+        self._growing_p = growing_p
     
     def _get_transform(self) -> _Transform1D:
         return self._req_transform
@@ -1738,7 +1787,7 @@ class _Frame(_BaseRegion):
         default_enabled = self._default_style[f'{self._tag}.grid.enabled']
         canvas = self._canvas
         tag = f'{self._tag}.grid.line'
-        x1, y1, x2, y2 = self._rect.bbox()
+        x1, y1, x2, y2 = self._rect.get_coords()
         for side, grid in self._grid.items():
             if (enabled := self._req_grid_enabled[side]) is None:
                 enabled = side in default_enabled
@@ -1751,15 +1800,15 @@ class _Frame(_BaseRegion):
             style = self._dummy_grid[side]._req_style
             positions = self._req_grid_cdata[side]
             if side in ('t', 'b'):
-                positions = [ (p, y1+2, p, y2-2) for p in positions ]
+                positions = [ (p, y1+1, p, y2-1) for p in positions ]
             else:
-                positions = [ (x1+2, p, x2-2, p) for p in positions ]
+                positions = [ (x1+1, p, x2-1, p) for p in positions ]
             
             number_increase = len(positions) - len(grid)
-            if number_increase < 0:  # delete labels
+            if number_increase < 0:  # delete lines
                 for i in range(-number_increase):
                     grid.pop().delete()
-            elif number_increase > 0:  # create labels
+            elif number_increase > 0:  # create lines
                 grid.extend(
                     _Line(canvas, tag=tag) for i in range(number_increase)
                 )
@@ -1789,16 +1838,16 @@ class _Frame(_BaseRegion):
     def set_grid(
             self,
             side: Literal['r', 'b', 'l', 't'],
-            enabled: bool = True,
+            enable: bool = True,
             color: str | None = None,
             width: Dimension | None = None,
             smooth: bool | None = None
     ):
         assert side in ('r', 'b', 'l', 't'), side
-        assert isinstance(enabled, bool), enabled
+        assert isinstance(enable, bool), enable
         
-        if enabled != self._req_grid_enabled[side]:
-            self._req_grid_enabled[side] = enabled
+        if enable != self._req_grid_enabled[side]:
+            self._req_grid_enabled[side] = enable
         
         self._dummy_grid[side].set_style(color=color, width=width, smooth=smooth)
         self._stale_grid = True
@@ -1969,6 +2018,10 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self._frame: _Frame = _Frame(self, tag='frame')
         
         self.set_facecolor()
+        self.set_btickslabels(True)
+        self.set_ltickslabels(True)
+        self.set_bticksticks(True)
+        self.set_lticksticks(True)
     
     @property
     def artists(self) -> set:
@@ -2063,11 +2116,12 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         tfs = {}
         tick_cdata = {}
         for i, (side, dat, cnv) in enumerate(zip('rblt', dbounds, cbounds)):
+            growing_p = cxys_inner[i-2]
             xys = list(cxys_inner)
             xys[i] = None  # growing bound
             xys[i-2] = cxys_outer[i-2]  # outer bound
             ticks = self._get_ticks(side)
-            ticks._set_bounds_and_transform(tuple(xys), dat, cnv)
+            ticks._set_bounds_and_transform(tuple(xys), dat, cnv, growing_p)
             ticks.draw()
             tfs[side] = ticks._get_transform().copy()
             tick_cdata[side] = ticks._ticks_cdata
@@ -2163,8 +2217,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def get_title(self) -> _Text:
         return self._title
     
-    def _get_axis(self, side: Literal['t', 'b', 'l', 'r']) -> _Axis:
-        assert side in ('t', 'b', 'l', 'r'), side
+    def _get_axis(self, side: Literal['r', 'b', 'l', 't']) -> _Axis:
+        assert side in ('r', 'b', 'l', 't'), side
         return getattr(self, f'_{side}axis')
     
     def get_taxis(self) -> _Axis:
@@ -2181,7 +2235,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     
     def _set_axislabel(
             self,
-            side: Literal['t', 'b', 'l', 'r'],
+            side: Literal['r', 'b', 'l', 't'],
             text: str | None = None,
             color: str | None = None,
             angle: IntFloat | None = None,
@@ -2225,8 +2279,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def set_rlabel(self, *args, **kwargs):
         return self._set_axislabel('r', *args, **kwargs)
     
-    def _get_ticks(self, side: Literal['t', 'b', 'l', 'r']) -> _Ticks:
-        assert side in ('t', 'b', 'l', 'r'), side
+    def _get_ticks(self, side: Literal['r', 'b', 'l', 't']) -> _Ticks:
+        assert side in ('r', 'b', 'l', 't'), side
         return getattr(self, f'_{side}ticks')
     
     def get_tticks(self) -> _Ticks:
@@ -2241,9 +2295,30 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def get_rticks(self) -> _Ticks:
         return self._get_ticks('r')
     
+    def _set_ticksticks(
+            self,
+            side: Literal['r', 'b', 'l', 't'],
+            *args,
+            **kwargs
+    ):
+        ticks = self._get_ticks(side)
+        ticks.set_ticks(*args, **kwargs)
+    
+    def set_tticksticks(self, *args, **kwargs):
+        return self._set_ticksticks('t', *args, **kwargs)
+    
+    def set_bticksticks(self, *args, **kwargs):
+        return self._set_ticksticks('b', *args, **kwargs)
+    
+    def set_lticksticks(self, *args, **kwargs):
+        return self._set_ticksticks('l', *args, **kwargs)
+    
+    def set_rticksticks(self, *args, **kwargs):
+        return self._set_ticksticks('r', *args, **kwargs)
+    
     def _set_tickslabels(
             self,
-            side: Literal['t', 'b', 'l', 'r'],
+            side: Literal['r', 'b', 'l', 't'],
             *args,
             **kwargs
     ):
@@ -2261,9 +2336,6 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     
     def set_rtickslabels(self, *args, **kwargs):
         return self._set_tickslabels('r', *args, **kwargs)
-    
-    def get_frame(self) -> _Frame:
-        return self._frame
     
     def set_tlimits(self, *args, **kwargs):
         self._tticks.set_limits(*args, **kwargs)
@@ -2313,8 +2385,14 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def get_rscale(self) -> Literal['linear', 'log']:
         return self._rticks.get_scale()
     
+    def get_frame(self) -> _Frame:
+        return self._frame
+    
     def set_grid(self, *args, **kwargs):
         self._frame.set_grid(*args, **kwargs)
+    
+    def get_grid(self) -> dict[str, list[_Line]]:
+        return self._frame.get_grid()
     
     def plot(
             self,
@@ -2736,8 +2814,6 @@ if __name__ == '__main__':
     plt.set_blabel('<bottom-label>')
     plt.set_llabel('<left-label>')
     plt.set_rlabel('<right-label>')
-    plt.set_btickslabels(True)
-    plt.set_ltickslabels(True)
     #plt.set_ttickslabels(True)
     #plt.set_rtickslabels(True)
     plt.set_lscale('log')

@@ -84,7 +84,7 @@ common_style = {
     "tticks.labels.scientific": 4,
     "tticks.labels.max_ticks": 13,
     "tticks.margins": ('9p', '9p'),
-    "tticks.line": {
+    "tticks.ticks.line": {
         "zorder": 2.0,
         "width": '1p'
     },
@@ -101,7 +101,7 @@ common_style = {
     "bticks.labels.scientific": 4,
     "bticks.labels.max_ticks": 13,
     "bticks.margins": ('9p', '9p'),
-    "bticks.line": {
+    "bticks.ticks.line": {
         "zorder": 2.0,
         "width": '1p'
     },
@@ -118,7 +118,7 @@ common_style = {
     "lticks.labels.scientific": 4,
     "lticks.labels.max_ticks": 13,
     "lticks.margins": ('9p', '9p'),
-    "lticks.line": {
+    "lticks.ticks.line": {
         "zorder": 2.0,
         "width": '1p'
     },
@@ -135,7 +135,7 @@ common_style = {
     "rticks.labels.scientific": 4,
     "rticks.labels.max_ticks": 13,
     "rticks.margins": ('9p', '9p'),
-    "rticks.line": {
+    "rticks.ticks.line": {
         "zorder": 2.0,
         "width": '1p'
     },
@@ -246,8 +246,8 @@ light_style.update({
         **common_style["tticks.labels.text"],
         "color": '#1A1A1A'
     },
-    "tticks.line": {
-        **common_style["tticks.line"],
+    "tticks.ticks.line": {
+        **common_style["tticks.ticks.line"],
         "color": 'black'
     },
     
@@ -255,8 +255,8 @@ light_style.update({
         **common_style["bticks.labels.text"],
         "color": '#1A1A1A'
     },
-    "bticks.line": {
-        **common_style["bticks.line"],
+    "bticks.ticks.line": {
+        **common_style["bticks.ticks.line"],
         "color": 'black'
     },
     
@@ -264,8 +264,8 @@ light_style.update({
         **common_style["lticks.labels.text"],
         "color": '#1A1A1A'
     },
-    "lticks.line": {
-        **common_style["lticks.line"],
+    "lticks.ticks.line": {
+        **common_style["lticks.ticks.line"],
         "color": 'black'
     },
     
@@ -273,8 +273,8 @@ light_style.update({
         **common_style["rticks.labels.text"],
         "color": '#1A1A1A'
     },
-    "rticks.line": {
-        **common_style["rticks.line"],
+    "rticks.ticks.line": {
+        **common_style["rticks.ticks.line"],
         "color": 'black'
     },
     
