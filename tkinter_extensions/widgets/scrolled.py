@@ -70,7 +70,7 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
         assert self._manager == 'grid', self._manager
         
         self.autohide = autohide
-        id_ = time.time()
+        id_ = time.monotonic()
         self._last_func = {"name": 'show', "id": id_}
         
         if after_ms < 0:
@@ -84,7 +84,7 @@ class AutoHiddenScrollbar(ttk.Scrollbar):  # hide if all visible
         assert self._manager == 'grid', self._manager
         
         self.autohide = autohide
-        id_ = time.time()
+        id_ = time.monotonic()
         self._last_func = {"name": 'hide', "id": id_}
         
         if after_ms < 0:
@@ -603,12 +603,13 @@ class ScrolledCanvas(_Scrolled, tk.Canvas):
         if super().yview() != (0.0, 1.0):  # prevent from over scrolling
             super().yview(*args)
     
-    def _update_scrollregion(self):
+    def _update_scrollregion(self) -> tuple:
         self.update_idletasks()
         x1, y1, x2, y2 = self.bbox('all')
         x2, y2 = max(x2, 0), max(y2, 0)
-        self.configure(scrollregion=(0, 0, x2, y2))
-        return (0, 0, x2, y2)
+        scrollregion = (0, 0, x2, y2)
+        self.configure(scrollregion=scrollregion)
+        return scrollregion
     
     def _on_configure(self, event=None):
         # Fill the space with content in the non-scrollable direction
@@ -646,7 +647,6 @@ class ScrolledCanvas(_Scrolled, tk.Canvas):
         # Resize the canvas to fit the content
         x1, y1, x2, y2 = self.bbox('all')
         self.configure(width=x2, height=y2)
-        self._on_configure()
     
     def content_size(
             self, hbar: bool = False, vbar: bool = False) -> tuple[int, int]:
@@ -786,10 +786,13 @@ if __name__ == '__main__':
     win3.lift()
     
     sc = ScrolledCanvas(
-        win3, scroll_orient='vertical', autohide=False, vbootstyle='round-light')
+        win3, scroll_orient='vertical', autohide=False, vbootstyle='round-light'
+    )
     sc.pack(fill='both', expand=True)
-    sc.create_polygon((10, 5), (600, 300), (900, 600), (300, 600), (300, 600),
-                      outline='red', stipple='gray25')
+    sc.create_polygon(
+        (10, 5), (600, 300), (900, 600), (300, 600), (300, 600),
+        outline='red', stipple='gray25'
+    )
     sc.configure(bg='gray')
     
     

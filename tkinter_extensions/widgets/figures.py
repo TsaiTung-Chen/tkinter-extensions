@@ -47,10 +47,9 @@ def _to_px(
     
     if dimension is None:
         return None
-    
     if isinstance(dimension, (str, IntFloat)):
         return None if dimension is None else to_pixels(dimension)
-    return tuple( d if d is None else to_pixels(d) for d in dimension )
+    return tuple( None if d is None else to_pixels(d) for d in dimension )
 
 
 def _get_sticky_p(
@@ -520,14 +519,16 @@ class _BaseElement:
         assert isinstance(canvas, (_Plot, _Suptitle)), canvas
         assert isinstance(tag, str), tag
         
-        root = canvas._root()
+        self._root = canvas._root
         self._canvas: _Plot | _Suptitle = canvas
         self._figure: Figure = canvas._figure
-        self._to_px = lambda dim: _to_px(root, dim)
         self._tag: str = tag
     
     def __del__(self):
         _cleanup_tk_attributes(self)
+    
+    def _to_px(self, dimension: Dimension) -> float | tuple[float, ...]:
+        return _to_px(self._root(), dimension)
     
     def draw(self):
         raise NotImplementedError
@@ -1879,10 +1880,8 @@ class _BaseSubwidget:
         assert isinstance(figure, Figure), figure
         
         super().__init__(master=figure, **kwargs)
-        root = figure._root()
         self._resize = defer(100)(self._resize)
         self._figure = figure
-        self._to_px = lambda dim: _to_px(root, dim)
         self._resizing: bool = False
         self._draw_idle_id: str = 'after#'
         self._zorder_tags: dict[_BaseArtist, str] = {}
@@ -1897,6 +1896,9 @@ class _BaseSubwidget:
     @property
     def _default_style(self) -> dict[str, Any]:
         return self._figure._default_style
+    
+    def _to_px(self, dimension: Dimension) -> float | tuple[float, ...]:
+        return _to_px(self._root(), dimension)
     
     def _on_configure(self, event: tk.Event):
         def _resize():
@@ -2527,11 +2529,9 @@ class Figure(UndockedFrame):
             master, window_title=window_title, padx=padx, pady=pady, **kwargs
         )
         
-        root = self._root()
         self._initialized: bool = False
         self._req_size: tuple[Int | None, Int | None] = (None, None)
         self._plots: NDArray[_Plot]
-        self._to_px = lambda dim: _to_px(root, dim)
         self._draw_idle_id: str = 'after#'
         self._var_coord: vrb.StringVar = vrb.StringVar(self, value='()')
         self._default_style: dict[str, Any]
@@ -2552,6 +2552,9 @@ class Figure(UndockedFrame):
         self.bind('<<ThemeChanged>>', self._on_theme_changed, add=True)
         
         self.after_idle(self._initialize)
+    
+    def _to_px(self, dimension: Dimension) -> float | tuple[float, ...]:
+        return _to_px(self._root(), dimension)
     
     def _initialize(self):
         if hasattr(self, '_suptitle'):
