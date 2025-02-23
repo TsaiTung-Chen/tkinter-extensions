@@ -21,6 +21,7 @@ import ttkbootstrap as ttk
 from .. import variables as vrb
 from ..constants import Int, IntFloat, Float, Dimension
 from ..utils import defer
+from .scrolled import ScrolledCanvas
 from ._others import UndockedFrame
 from ._figure_config import STYLES
 
@@ -548,7 +549,7 @@ class _BaseArtist(_BaseElement):
             x_side: Literal['b', 't'] | None = None,
             y_side: Literal['l', 'r'] | None = None,
             user: bool = False,
-            antialias: bool = True,
+            antialias: bool = False,
             antialias_bg: Callable[[], str] | None = None,
             **kwargs
     ):
@@ -942,9 +943,10 @@ class _Line(_BaseArtist):
             color: str | None = None,
             width: Dimension | None = None,
             smooth: bool | None = None,
+            antialias: bool = False,
             **kwargs
     ):
-        super().__init__(canvas=canvas, **kwargs)
+        super().__init__(canvas=canvas, antialias=antialias, **kwargs)
         self._xlims: NDArray[Float] = np.array([0., 1.], float)
         self._ylims: NDArray[Float] = np.array([0., 1.], float)
         self._req_xy: NDArray[Float] = np.array([[]], dtype=float)
@@ -1293,14 +1295,10 @@ class _Ticks(_BaseRegion):
             return
         
         canvas = self._canvas
-        if not self._req_labels_enabled:
-            for label in self._labels:
-                label.delete()
-            self._labels.clear()
-        else:
+        if self._req_labels_enabled:
             tag = f'{self._tag}.labels.text'
             font = self._dummy_label._font
-            style = self._dummy_label._req_style
+            style = self._dummy_label._req_style.copy()
             style.pop('text', None)
             bounds = self._dummy_label._req_bounds.copy()
             bounds.pop('xys', None)
@@ -1319,6 +1317,10 @@ class _Ticks(_BaseRegion):
                 label.set_style(text=text, **style)
                 label.set_bounds(xys=xys, **bounds)
                 label.draw()
+        else:
+            for label in self._labels:
+                label.delete()
+            self._labels.clear()
         
         if self._req_ticks_enabled:
             tag = f'{self._tag}.ticks.line'
@@ -1338,10 +1340,14 @@ class _Ticks(_BaseRegion):
                     _Line(canvas, tag=tag) for i in range(number_increase)
                 )
             
-            for line, xys in zip(self._ticks, positions):
-                line.set_style(**style)
-                line.set_coords(*xys)
-                line.draw()
+            for tick, xys in zip(self._ticks, positions):
+                tick.set_style(**style)
+                tick.set_coords(*xys)
+                tick.draw()
+        else:
+            for tick in self._ticks:
+                tick.delete()
+            self._ticks.clear()
         
         self._stale = False
     
@@ -1361,7 +1367,7 @@ class _Ticks(_BaseRegion):
         label.draw()
         
         # Update current size of the text item
-        tx1, ty1, tx2, ty2 = self.bbox(dummy=True, regarding_enabled=False)
+        tx1, ty1, tx2, ty2 = label.bbox()
         w, h = (tx2 - tx1), (ty2 - ty1)
         angle = float(label.cget('angle'))
         vertical = (angle - 90) % 180 == 0  # text direction
@@ -1376,14 +1382,12 @@ class _Ticks(_BaseRegion):
     
     def bbox(
             self,
-            dummy: bool = False,
-            regarding_enabled: bool = True
+            dummy: bool = False
     ) -> tuple[int, int, int, int] | None:
         if dummy:
-            if regarding_enabled and not self._req_labels_enabled:
-                return None
-            else:
+            if self._req_labels_enabled:
                 return self._dummy_label.bbox()
+            return None
         elif not self._labels:
             return None
         
@@ -1814,10 +1818,10 @@ class _Frame(_BaseRegion):
                     _Line(canvas, tag=tag) for i in range(number_increase)
                 )
             
-            for line, xys in zip(grid, positions):
-                line.set_style(**style)
-                line.set_coords(*xys)
-                line.draw()
+            for tick, xys in zip(grid, positions):
+                tick.set_style(**style)
+                tick.set_coords(*xys)
+                tick.draw()
         
         self._stale_grid = False
     
@@ -1933,7 +1937,7 @@ class _BaseSubwidget:
         
         default_color = self._default_style["facecolor"]
         new_color = default_color if color is None else color
-        self.configure(bg=new_color)
+        self.configure(background=new_color)
         self._req_facecolor = color
         
         return new_color
@@ -1961,11 +1965,9 @@ class _Suptitle(_BaseSubwidget, tk.Canvas):
     def draw(self):
         self._text.draw()
         xys = self._text.bbox()
-        if xys is None:
-            self._text.draw()
-        else:
+        if xys is not None:
             x1, y1, x2, y2 = xys
-            self.configure(width=x2 - x1, height=y2 - y1)
+            self.configure(width=x2-x1, height=y2-y1)
             self.update_idletasks()  # triggers `self._on_configure`
     
     def get_title(self) -> _Text:
@@ -1993,6 +1995,216 @@ class _Suptitle(_BaseSubwidget, tk.Canvas):
     
     def get_style(self) -> dict[str, Any]:
         return self._text.get_style()
+
+
+class _Legend(_BaseSubwidget, ScrolledCanvas):#???
+    _tag: str = 'legend'
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._req_enabled: bool = False
+        self._req_edgecolor: str | None = None
+        self._req_edgewidth: Dimension | None = None
+        self._req_bounds: dict[str, Any] = {}
+        self._req_artists: list[dict[str, Any]] = []
+        self._req_labels: list[str] = []
+        
+        self._id: int
+        self._padx: tuple[Dimension, Dimension] = (0., 0.)
+        self._dummy_label: _Text = _Text(self, text='', tag=f'{self._tag}.text')
+        self._artists: list[_BaseArtist] = []
+        self._labels: list[_Text] = []
+        
+        self.set_facecolor()
+    
+    def draw(self):
+        if not self._stale:
+            return
+        
+        self.master.itemconfigure(self._id, state='hidden')
+        
+        defaults = self._default_style
+        x1, y1, x2, y2 = self._req_bounds["xys"]
+        px1, px2 = padx = self._req_bounds.get(
+            'padx', defaults[f"{self._tag}.padx"]
+        )
+        width = self._req_bounds.get('width', defaults[f"{self._tag}.width"])
+        xys = (x2-px2-width, y1, x2-px2, y2)
+        x1 = x2 - px2 - width
+        self.master.coords(self._id, x1, y1)
+        self.master.itemconfigure(self._id, width=width, height=y2-y1)
+        
+        for artist in self._artists:
+            artist.delete()
+        self._artists.clear()
+        for label in self._labels:
+            label.delete()
+        self._labels.clear()
+        
+        if self._req_enabled and self._req_labels:
+            artwidth = self._to_px(defaults[f"{self._tag}.artists.width"])
+            artpadx = self._to_px(defaults[f"{self._tag}.artists.padx"])
+            req_labels, req_artists = self._req_labels, self._req_artists
+            labels, artists = self._labels, self._artists
+            tag = f'{self._tag}.labels.text'
+            font = self._dummy_label._font
+            style = self._dummy_label._req_style.copy()
+            style.pop('text', None)
+            bounds = self._dummy_label._req_bounds.copy()
+            bounds.pop('xys', None)
+            
+            for i, (text, artkw) in enumerate(zip(req_labels, req_artists)):
+                if i == 0:
+                    xys = (artwidth + sum(artpadx), 0, None, None)
+                else:
+                    x1, y1, x2, y2 = labels[-1].bbox()
+                    xys = (artwidth + sum(artpadx), y2 + 1, None, None)
+                label = _Text(self, text=text, font=font, tag=tag)
+                label.set_style(**style)
+                label.set_bounds(xys=xys, **bounds)
+                label.draw()
+                labels.append(label)
+                
+                x1, y1, x2, y2 = label.bbox()
+                y = round((y1 + y2) / 2.)
+                xys = (artpadx[0], y, xys[0]-artpadx[1]-1, y)
+                artist = artkw["cls"](self, tag=artkw["tag"], **artkw["style"])
+                artist.set_coords(*xys)
+                artist.draw()
+                artists.append(artist)
+            
+            self.master.itemconfigure(self._id, state='normal')
+        
+        self._padx = padx
+        self._stale = False
+    
+    def bbox(self) -> tuple[int, int, int, int] | None:
+        if not self._req_enabled or not self._labels:
+            return None
+        
+        bbox = self.master.bbox(self._id)
+        if bbox is None:
+            return None
+        x1, y1, x2, y2 = bbox
+        p1, p2 = self._padx
+        return (x1-p1, y1, x2+p2, y2)
+    
+    def _set_facecolor(self, color: str | None = None) -> str:
+        assert isinstance(color, (str, type(None))), color
+        
+        default_color = self._default_style[f"{self._tag}.facecolor"]
+        new_color = default_color if color is None else color
+        self.configure(background=new_color)
+        self._req_facecolor = color
+        
+        return new_color
+    
+    def set_edge(
+            self, color: str | None = None, width: Dimension | None = None
+    ):
+        assert isinstance(color, (str, type(None))), color
+        assert isinstance(width, (Dimension, type(None))), width
+        
+        default_color = self._default_style[f"{self._tag}.edgecolor"]
+        default_width = self._default_style[f"{self._tag}.edgewidth"]
+        new_color = default_color if color is None else color
+        new_width = default_width if width is None else width
+        self.container.configure(background=new_color, padding=new_width)
+        self._req_edgecolor = color
+        self._req_edgewidth = width
+    
+    def get_edge(self) -> dict[str, Any]:
+        return {
+            "color": self.container["background"],
+            "width": self.container["padding"]
+        }
+    
+    def set_enabled(self, enable: bool = True):
+        if enable != self._req_enabled:
+            self._req_enabled = enable
+            self._stale = True
+    
+    def _set_bounds(
+            self,
+            xys: tuple[Dimension, Dimension, Dimension, Dimension]
+    ):
+        assert isinstance(xys, (tuple, type(None))), xys
+        assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
+        
+        if xys != self._req_bounds.get('xys', None):
+            self._req_bounds["xys"] = xys
+            self._stale = True
+    
+    def set_size(
+            self,
+            width: Dimension | None = None,
+            padx: tuple[Dimension, Dimension] | None = None
+    ):
+        assert isinstance(width, (Dimension, type(None))), width
+        assert isinstance(padx, (tuple, type(None))), padx
+        if padx is not None:
+            assert len(padx) == 4, padx
+            assert all( isinstance(p, Dimension) for p in padx ), padx
+        
+        if width is not None and width != self._req_bounds.get('width', None):
+            self._req_bounds["width"] = width
+            self._stale = True
+        if padx is not None and padx != self._req_bounds.get(
+                'padx', None):
+            self._req_bounds["padx"] = padx
+            self._stale = True
+    
+    def get_padx(self) -> tuple[float, float]:
+        return self._padx
+    
+    def set_labels(
+            self,
+            color: str | None = None,
+            angle: IntFloat | None = None,
+            family: str | None = None,
+            size: Int | None = None,
+            weight: str | None = None,
+            slant: str | None = None,
+            underline: bool | None = None,
+            overstrike: bool | None = None,
+            padx: Dimension | tuple[Dimension, Dimension] | None = None,
+            pady: Dimension | tuple[Dimension, Dimension] | None = None,
+            scientific: Int | None = None
+    ):
+        self._dummy_label.set_style(
+            color=color,
+            angle=angle,
+            family=family,
+            size=size,
+            weight=weight,
+            slant=slant,
+            underline=underline,
+            overstrike=overstrike
+        )
+        self._dummy_label.set_bounds(padx=padx, pady=pady)
+        self._stale = True
+    
+    def get_labels(self) -> list[_Text]:
+        return self._labels
+    
+    def _set_artists_and_labels(
+            self, artists: list[_BaseArtist], labels: list[str]
+    ):
+        assert isinstance(artists, list), artists
+        assert isinstance(labels, list), labels
+        assert len(artists) == len(labels), (len(artists), len(labels))
+        
+        artists_kw = [
+            {"cls": type(art), "tag": art._tag, "style": art._req_style.copy()}
+            for art in artists
+        ]
+        
+        if artists_kw != self._req_artists:
+            self._req_artists = artists_kw
+            self._stale = True
+        if labels != self._req_labels:
+            self._req_labels = labels
+            self._stale = True
 
 
 class _Plot(_BaseSubwidget, tk.Canvas):
@@ -2491,7 +2703,7 @@ class _Toolbar(_BaseSubwidget, tk.Frame):
     
     def set_facecolor(self, color: str | None = None):
         new_color = super()._set_facecolor(color=color)
-        self._xyz_lb.configure(bg=new_color)
+        self._xyz_lb.configure(background=new_color)
     
     def _home_view(self):
         raise NotImplementedError
@@ -2593,7 +2805,7 @@ class Figure(UndockedFrame):
                 []
             )
         )
-        self.configure(bg=self._default_style["facecolor"])
+        self.configure(background=self._default_style["facecolor"])
         
         # Update suptitle
         if hasattr(self, '_suptitle'):

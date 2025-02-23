@@ -152,10 +152,12 @@ common_style = {
     },
     
     "legend.enabled": True,
-    "legend.rect": {
-        "zorder": 0.0
-    },
-    "legend.text": {
+    "legend.edgewidth": '1p',
+    "legend.width": '50p',
+    "legend.padx": ('3p', '3p'),
+    "legend.artists.width": '12p',#???
+    "legend.artists.padx": ('2p', '0p'),
+    "legend.labels.text": {
         "zorder": 1.0,
         "size": 12,
         "weight": 'normal',
@@ -288,14 +290,11 @@ light_style.update({
         "color": 'white'
     },
     
-    "legend.text": {
-        **common_style["legend.text"],
+    "legend.facecolor": '#CFD9E8',
+    "legend.edgecolor": '#666666',
+    "legend.labels.text": {
+        **common_style["legend.labels.text"],
         "color": 'black'
-    },
-    "legend.rect": {
-        **common_style["legend.rect"],
-        "facecolor": '#CFD9E8',
-        "edgecolor": '#666666'
     },
     
     "text": {
