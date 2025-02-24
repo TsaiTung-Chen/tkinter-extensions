@@ -153,8 +153,8 @@ common_style = {
     
     "legend.enabled": True,
     "legend.edgewidth": '1p',
-    "legend.width": '50p',
-    "legend.padx": ('3p', '3p'),
+    "legend.width": '200p',
+    "legend.padx": ('6p', '0p'),
     "legend.artists.width": '12p',#???
     "legend.artists.padx": ('2p', '0p'),
     "legend.labels.text": {

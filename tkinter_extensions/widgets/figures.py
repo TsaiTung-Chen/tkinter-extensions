@@ -517,7 +517,7 @@ class _Transform2D:  # 2D transformation
 
 class _BaseElement:
     def __init__(self, canvas: _Plot | _Suptitle, tag: str = ''):
-        assert isinstance(canvas, (_Plot, _Suptitle)), canvas
+        assert isinstance(canvas, (_Plot, _Suptitle, _Legend)), canvas
         assert isinstance(tag, str), tag
         
         self._root = canvas._root
@@ -1880,12 +1880,13 @@ class _Frame(_BaseRegion):
 # ---- Figure Subwidgets
 # =============================================================================
 class _BaseSubwidget:
-    def __init__(self, figure: Figure, **kwargs):
-        assert isinstance(figure, Figure), figure
+    def __init__(self, master: tk.Canvas, **kwargs):
+        assert isinstance(master, (Figure, _BaseSubwidget)), master
+        assert isinstance(master, Figure) or isinstance(master.master, Figure)
         
-        super().__init__(master=figure, **kwargs)
+        super().__init__(master=master, **kwargs)
         self._resize = defer(100)(self._resize)
-        self._figure = figure
+        self._figure = master if isinstance(master, Figure) else master.master
         self._resizing: bool = False
         self._draw_idle_id: str = 'after#'
         self._zorder_tags: dict[_BaseArtist, str] = {}
@@ -1967,7 +1968,7 @@ class _Suptitle(_BaseSubwidget, tk.Canvas):
         xys = self._text.bbox()
         if xys is not None:
             x1, y1, x2, y2 = xys
-            self.configure(width=x2-x1, height=y2-y1)
+            self.configure(width=x2-x1+1, height=y2-y1+1)
             self.update_idletasks()  # triggers `self._on_configure`
     
     def get_title(self) -> _Text:
@@ -2001,10 +2002,13 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
     _tag: str = 'legend'
     
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, container_type='tk', **kwargs)
+        assert isinstance(self.container.master, _Plot), self.container.master
+        
+        self._plot: _Plot = self.container.master
+        
         self._req_enabled: bool = False
-        self._req_edgecolor: str | None = None
-        self._req_edgewidth: Dimension | None = None
+        self._req_edge: dict[str, Any] = {}
         self._req_bounds: dict[str, Any] = {}
         self._req_artists: list[dict[str, Any]] = []
         self._req_labels: list[str] = []
@@ -2016,23 +2020,31 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
         self._labels: list[_Text] = []
         
         self.set_facecolor()
+        self.set_edge()
+    
+    def update_theme(self):
+        super().update_theme()
+        self.set_edge(**self._req_edge)
     
     def draw(self):
         if not self._stale:
             return
         
-        self.master.itemconfigure(self._id, state='hidden')
+        self._plot.itemconfigure(self._id, state='hidden')
         
         defaults = self._default_style
         x1, y1, x2, y2 = self._req_bounds["xys"]
-        px1, px2 = padx = self._req_bounds.get(
-            'padx', defaults[f"{self._tag}.padx"]
+        px1, px2 = padx = self._to_px(
+            self._req_bounds.get(
+                'padx', defaults[f"{self._tag}.padx"]
+            )
         )
-        width = self._req_bounds.get('width', defaults[f"{self._tag}.width"])
-        xys = (x2-px2-width, y1, x2-px2, y2)
+        width = self._to_px(
+            self._req_bounds.get('width', defaults[f"{self._tag}.width"])
+        )
         x1 = x2 - px2 - width
-        self.master.coords(self._id, x1, y1)
-        self.master.itemconfigure(self._id, width=width, height=y2-y1)
+        self._plot.coords(self._id, x1, y1)
+        self._plot.itemconfigure(self._id, width=width, height=y2-y1+1)
         
         for artist in self._artists:
             artist.delete()
@@ -2072,17 +2084,18 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
                 artist.set_coords(*xys)
                 artist.draw()
                 artists.append(artist)
-            
-            self.master.itemconfigure(self._id, state='normal')
         
+        self._plot.itemconfigure(self._id, state='normal')
         self._padx = padx
         self._stale = False
     
-    def bbox(self) -> tuple[int, int, int, int] | None:
-        if not self._req_enabled or not self._labels:
+    def bbox(self, dummy: bool = False) -> tuple[int, int, int, int] | None:
+        if not self._req_enabled:
+            return None
+        if not dummy and not self._labels:
             return None
         
-        bbox = self.master.bbox(self._id)
+        bbox = self._plot.bbox(self._id)
         if bbox is None:
             return None
         x1, y1, x2, y2 = bbox
@@ -2109,9 +2122,14 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
         default_width = self._default_style[f"{self._tag}.edgewidth"]
         new_color = default_color if color is None else color
         new_width = default_width if width is None else width
-        self.container.configure(background=new_color, padding=new_width)
-        self._req_edgecolor = color
-        self._req_edgewidth = width
+        self.container.configure(
+            background=new_color, padx=new_width, pady=new_width
+        )
+        
+        if color is not None and color != self._req_edge.get('color', None):
+            self._req_edge["color"] = color
+        if width is not None and width != self._req_edge.get('width', None):
+            self._req_edge["width"] = width
     
     def get_edge(self) -> dict[str, Any]:
         return {
@@ -2230,6 +2248,10 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self._lticks: _Ticks = _Ticks(self, side='l', tag='lticks')
         self._rticks: _Ticks = _Ticks(self, side='r', tag='rticks')
         self._frame: _Frame = _Frame(self, tag='frame')
+        self._legend: _Legend = _Legend(self)
+        self._legend._id = self.create_window(
+            0, 0, anchor='nw', window=self._legend.container, state='hidden'
+        )
         
         self.set_facecolor()
         self.set_btickslabels(True)
@@ -2248,6 +2270,10 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def _resize(self, event: tk.Event):
         super()._resize(event)
         self.draw()
+    
+    def update_theme(self):
+        super().update_theme()
+        self._legend.update_theme()
     
     def draw(self):
         self._figure.event_generate('<<DrawStarted>>')
@@ -2280,50 +2306,73 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         ## Draw title
         self._title.set_bounds((cx1, cy1, cx2, cy2))
         self._title.draw()
-        
-        ## Update the upper bound of the empty space if the title exists
         if bbox := self._title.bbox():
             cy1 = bbox[3] + 1
             if cy1 > cy2:
-                cy1 = cy2 = round((cy1 + cy2) / 2)
-        cxys_excluding_title = (cx1, cy1, cx2, cy2)
+                cy1 = cy2 = round((cy1 + cy2) / 2.)
+        cxys_axes = [cx1, cy1, cx2, cy2]
         
-        ## Draw axes
+        ## Draw axes (top and bottom)
         ## These axes will be drawn again later after the actual frame dimensions
         ## are determined
-        for i, side in enumerate('rblt'):
-            xys = list(cxys_excluding_title)
-            xys[i] = None
-            axis = self._get_axis(side)
-            axis.set_bounds(tuple(xys))
-            axis.draw()
-        
-        ## Update the bounds of the empty space for the ticks and frame
-        if bbox := self._raxis.bbox(): cx2 = bbox[0] - 1
+        self._baxis.set_bounds((cx1, None, cx2, cy2))
+        self._baxis.draw()
+        self._taxis.set_bounds((cx1, cy1, cx2, None))
+        self._taxis.draw()
         if bbox := self._baxis.bbox(): cy2 = bbox[1] - 1
-        if bbox := self._laxis.bbox(): cx1 = bbox[2] + 1
         if bbox := self._taxis.bbox(): cy1 = bbox[3] + 1
-        if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2)
-        if cy1 > cy2: cy1 = cy2 = round((cy1 + cy2) / 2)
-        cxys_outer = (cx1, cy1, cx2, cy2)  # empty space for the ticks and frame
+        cxys_outer = [cx1, cy1, cx2, cy2]  # empty space for the ticks and frame
         
-        ## Draw dummy ticks
+        ## Draw dummy ticks (top and bottom)
         cbounds = [[cy1, cy2], [cx1, cx2]] * 2  # shape: (4, 2)
-        for i, (side, dat, cnv) in enumerate(zip('rblt', dbounds, cbounds)):
-            xys = list(cxys_outer)
-            xys[i] = None  # growing bound
-            ticks = self._get_ticks(side)
-            ticks._set_bounds_and_transform(tuple(xys), dat, cnv, dummy=True)
-            ticks._draw_dummy()
-        
-        ## Update the bounds of the empty space for the frame
-        if bbox := self._rticks.bbox(dummy=True): cx2 = bbox[0] - 1
+        self._bticks._set_bounds_and_transform(
+            (cx1, None, cx2, cy2), dbounds[1], cbounds[1], dummy=True
+        )
+        self._bticks._draw_dummy()
+        self._tticks._set_bounds_and_transform(
+            (cx1, cy1, cx2, None), dbounds[3], cbounds[3], dummy=True
+        )
+        self._tticks._draw_dummy()
         if bbox := self._bticks.bbox(dummy=True): cy2 = bbox[1] - 1
-        if bbox := self._lticks.bbox(dummy=True): cx1 = bbox[2] + 1
         if bbox := self._tticks.bbox(dummy=True): cy1 = bbox[3] + 1
-        if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2)
-        if cy1 > cy2: cy1 = cy2 = round((cy1 + cy2) / 2)
-        cxys_inner = (cx1, cy1, cx2, cy2)  # empty space for the frame
+        if cy1 > cy2: cy1 = cy2 = round((cy1 + cy2) / 2.)
+        
+        ## Draw legend
+        ## This will be drawn again later after the user-defined artists are drawn
+        self._legend._set_bounds((None, cy1, cx2, cy2))
+        self._legend.draw()
+        ## Update the bounds of the empty space for the frame (left and right)
+        if bbox := self._legend.bbox(dummy=True):
+            cx2 = bbox[0] - 1
+        if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2.)
+        cxys_axes[2] = cx2
+        
+        ## Draw axes (top and bottom)
+        ## These axes will be drawn again later after the actual frame dimensions
+        ## are determined
+        self._raxis.set_bounds((None, *cxys_axes[1:]))
+        self._raxis.draw()
+        self._laxis.set_bounds((*cxys_axes[:2], None, cxys_axes[3]))
+        self._laxis.draw()
+        if bbox := self._raxis.bbox(): cx2 = bbox[0] - 1
+        if bbox := self._laxis.bbox(): cx1 = bbox[2] + 1
+        if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2.)
+        if cy1 > cy2: cy1 = cy2 = round((cy1 + cy2) / 2.)
+        cxys_outer[0], cxys_outer[2] = (cx1, cx2)
+        
+        ## Draw dummy ticks (left and right)
+        self._rticks._set_bounds_and_transform(
+            (None, cy1, cx2, cy2), dbounds[0], cbounds[0], dummy=True
+        )
+        self._rticks._draw_dummy()
+        self._lticks._set_bounds_and_transform(
+            (cx1, cy1, None, cy2), dbounds[2], cbounds[2], dummy=True
+        )
+        self._lticks._draw_dummy()
+        if bbox := self._rticks.bbox(dummy=True): cx2 = bbox[0] - 1
+        if bbox := self._lticks.bbox(dummy=True): cx1 = bbox[2] + 1
+        if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2.)
+        cxys_inner = [cx1, cy1, cx2, cy2]  # empty space for the frame
         
         ## Draw ticks and update the data limits and canvas limits
         cbounds = np.asarray([[cy1, cy2], [cx1, cx2]] * 2)  # shape: (4, 2)
@@ -2331,7 +2380,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         tick_cdata = {}
         for i, (side, dat, cnv) in enumerate(zip('rblt', dbounds, cbounds)):
             growing_p = cxys_inner[i-2]
-            xys = list(cxys_inner)
+            xys = cxys_inner.copy()
             xys[i] = None  # growing bound
             xys[i-2] = cxys_outer[i-2]  # outer bound
             ticks = self._get_ticks(side)
@@ -2347,9 +2396,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         
         # Draw the axes again after the actual frame dimensions are determined
         for i, side in enumerate('rblt'):
-            xys = list(cxys_inner)
+            xys = cxys_inner.copy()
             xys[i] = None
-            xys[i-2] = cxys_excluding_title[i-2]  # outer bound
+            xys[i-2] = cxys_axes[i-2]  # outer bound
             axis = self._get_axis(side)
             axis.set_bounds(tuple(xys))
             axis.draw()
@@ -2368,6 +2417,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
                 )
             artist.set_transform(transforms[sides])
             artist.draw()
+        
+        ## Draw legend again after the user-defined artists are drawn
+        self._legend.draw()
         
         # Raise artists in order
         for tag in sorted(
@@ -2608,6 +2660,13 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def get_grid(self) -> dict[str, list[_Line]]:
         return self._frame.get_grid()
     
+    def set_legend(self, enable: bool = True, **kwargs):
+        self._legend.set_enabled(enable)
+        self._legend.set_labels(**kwargs)
+    
+    def get_legend(self) -> _Legend:
+        return self._legend
+    
     def plot(
             self,
             b: ArrayLike | None = None,
@@ -2679,7 +2738,7 @@ class _Toolbar(_BaseSubwidget, tk.Frame):
             var_coord: tk.Variable,
             **kwargs
     ):
-        super().__init__(figure=figure, **kwargs)
+        super().__init__(master=figure, **kwargs)
         
         self._home_bt = ttk.Button(self, text='Home', command=self._home_view)
         self._home_bt.pack(side='left')
@@ -3033,6 +3092,7 @@ if __name__ == '__main__':
     #plt.set_rtickslabels(True)
     plt.set_lscale('log')
     #plt.set_llimits(10, 150)
+    plt.set_legend(True)
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
     

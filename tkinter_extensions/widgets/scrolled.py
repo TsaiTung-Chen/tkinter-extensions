@@ -9,6 +9,7 @@ Created on Mon May 22 22:35:24 2023
 import time
 import tkinter as tk
 from tkinter.font import nametofont
+from typing import Literal
 
 import ttkbootstrap as ttk
 
@@ -308,19 +309,23 @@ class _Scrolled:
                                   | list[float, float] = 1.,
             builtin_method=False,
             propagate_geometry=True,
+            container_type: Literal['tk', 'ttk'] = 'ttk',
             **kwargs
     ):
+        assert container_type in ('tk', 'ttk'), container_type
         valid_orients = ('vertical', 'horizontal', 'both')
         assert scroll_orient in valid_orients, (valid_orients, scroll_orient)
         self._builtin_method = builtin_method
         self.set_scroll_sensitivities(scroll_sensitivities)
         
         # Outer frame (container)
-        self._container = container = ttk.Frame(
-            master=master, relief='flat', borderwidth=0)
+        container = (tk.Frame if container_type == 'tk' else ttk.Frame)(
+            master=master, relief='flat', borderwidth=0
+        )
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
         container.grid_propagate(propagate_geometry)
+        self._container = container
         
         self._cropper = None
         if builtin_method:
