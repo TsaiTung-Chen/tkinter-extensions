@@ -650,8 +650,9 @@ class ScrolledCanvas(_Scrolled, tk.Canvas):
                 self.itemconfigure(oid, width=width, height=height)
         
         # Resize the canvas to fit the content
-        x1, y1, x2, y2 = self.bbox('all')
-        self.configure(width=x2, height=y2)
+        if bbox := self.bbox('all'):
+            x1, y1, x2, y2 = bbox
+            self.configure(width=x2, height=y2)
     
     def content_size(
             self, hbar: bool = False, vbar: bool = False) -> tuple[int, int]:

@@ -549,20 +549,22 @@ class _BaseArtist(_BaseElement):
             x_side: Literal['b', 't'] | None = None,
             y_side: Literal['l', 'r'] | None = None,
             user: bool = False,
+            label: str | None = None,
             antialias: bool = False,
             antialias_bg: Callable[[], str] | None = None,
             **kwargs
     ):
         assert x_side in ('b', 't', None), x_side
         assert y_side in ('l', 'r', None), y_side
+        assert isinstance(user, bool), user
+        assert isinstance(label, (str, type(None))), label
         assert antialias_bg is None or callable(antialias_bg), antialias_bg
         
         super().__init__(*args, **kwargs)
         
-        tag_length = len(self._tag)
         subtags = self._tag.split('.')
         tags = [
-            '.'.join(subtags[:i]) for i in range(1, tag_length)
+            '.'.join(subtags[:i]) for i in range(1, len(subtags)+1)
         ]
         tags.append(f'user={user}')
         tags = tuple(dict.fromkeys(tags))  # unique elements
@@ -572,6 +574,7 @@ class _BaseArtist(_BaseElement):
         self._y_side: Literal['l', 'r'] | None = y_side
         self._antialias_enabled: bool = bool(antialias)
         self._antialias_bg: Callable[[], str] | None = antialias_bg
+        self._req_label: str | None = label
         self._req_transform: _Transform2D = transform
         self._req_coords: list[Dimension] = []
         self._req_state: Literal['normal', 'hidden', 'disabled'] = 'normal'
@@ -629,10 +632,19 @@ class _BaseArtist(_BaseElement):
     def get_transform(self) -> _Transform2D:
         return self._req_transform
     
+    def set_label(self, label: str | None = None):
+        assert isinstance(label, (str, type(None))), label
+        
+        if label is not None and label != self._req_label:
+            self._req_label = label
+    
+    def get_label(self) -> str | None:
+        return self._req_label
+    
     def set_coords(self, *ps: Dimension):
         assert all( isinstance(p, (Dimension, type(None))) for p in ps ), ps
         
-        if ps and ps != self._req_coords:
+        if ps is not None and ps != self._req_coords:
             self._req_coords[:] = ps
             self._stale = True
     
@@ -705,6 +717,12 @@ class _BaseArtist(_BaseElement):
     
     def set_style(self, *args, **kwargs):
         raise NotImplementedError
+    
+    def get_style(self):
+        raise NotImplementedError
+    
+    def _get_legend_config(self):
+        raise NotImplementedError
 
 
 class _Text(_BaseArtist):
@@ -733,7 +751,7 @@ class _Text(_BaseArtist):
         self._pady: tuple[float, float] = (0., 0.)
         self._font: Font = Font() if font is None else font
         self._id = canvas.create_text(
-            -100, -100, anchor='se',
+            0, 0, anchor='se',
             text=text, font=self._font, state='hidden', tags=self._tags
         )
         self.set_style(
@@ -788,6 +806,7 @@ class _Text(_BaseArtist):
             })
             
             # Get text size
+            self._set_state('normal')
             if bbox := self.bbox():
                 tx1, ty1, tx2, ty2 = bbox
                 tw, th = (tx2 - tx1), (ty2 - ty1)
@@ -927,9 +946,9 @@ class _Text(_BaseArtist):
     
     def get_style(self) -> dict[str, Any]:
         return {
-            "text": self.cget(self._id, 'text'),
-            "color": self.cget(self._id, 'fill'),
-            "angle": self.cget(self._id, 'angle'),
+            "text": self.cget('text'),
+            "color": self.cget('fill'),
+            "angle": self.cget('angle'),
             **self._font.actual()
         }
 
@@ -951,19 +970,16 @@ class _Line(_BaseArtist):
         self._ylims: NDArray[Float] = np.array([0., 1.], float)
         self._req_xy: NDArray[Float] = np.array([[]], dtype=float)
         self._id = self._canvas.create_line(
-            -100, -100, -100, -100,
+            0, 0, 0, 0,
             fill='', width='0p', state='hidden', tags=self._tags
         )
         self._id_aa = self._canvas.create_line(
-            -100, -100, -100, -100,
+            0, 0, 0, 0,
             fill='', width='0p', state='hidden', tags=self._tags
         )
         self.set_style(color=color, width=width, smooth=smooth)
     
     def draw(self):
-        import time
-        t0 = time.monotonic()
-        
         state = self._req_state
         
         if not self._stale:
@@ -983,7 +999,7 @@ class _Line(_BaseArtist):
                 xy = _cutoff_z_patterns(xy)
             xys = xy.ravel(order='F')  # x0, y0, x1, y1, x2, y2, ...
             if len(xys) < 4:
-                xys = (-100, -100, -100, -100)
+                xys = (-1e100, -1e100, -1e100, -1e100)
         self.coords(*xys)
         
         # Update style
@@ -1004,9 +1020,6 @@ class _Line(_BaseArtist):
         self._update_zorder()
         self._set_state(state)
         self._stale = False
-        
-        t1 = time.monotonic()
-        print(t1-t0)#???
     
     def _antialias(
             self, xys: ArrayLike, fill: str, width: Dimension, smooth: bool
@@ -1055,9 +1068,16 @@ class _Line(_BaseArtist):
     
     def get_style(self) -> dict[str, Any]:
         return {
-            "color": self.cget('color'),
+            "color": self.cget('fill'),
             "width": self.cget('width'),
             "smooth": self.cget('smooth')
+        }
+    
+    def _get_legend_config(self) -> dict[str, Any]:
+        return {
+            "tag": self._tag,
+            "color": self.cget('fill'),
+            "width": self.cget('width')
         }
     
     def set_data(
@@ -1119,7 +1139,7 @@ class _Rectangle(_BaseArtist):
     ):
         super().__init__(canvas=canvas, antialias=False, **kwargs)
         self._id = self._canvas.create_rectangle(
-            -100, -100, -100, -100,
+            0, 0, 0, 0,
             fill='', outline='', width='0p', state='hidden', tags=self._tags
         )
         self.set_style(facecolor=facecolor, edgecolor=edgecolor, width=width)
@@ -2002,7 +2022,13 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
     _tag: str = 'legend'
     
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, container_type='tk', **kwargs)
+        super().__init__(
+            *args,
+            container_type='tk',
+            propagate_geometry=False,
+            scroll_orient='both',
+            **kwargs
+        )
         assert isinstance(self.container.master, _Plot), self.container.master
         
         self._plot: _Plot = self.container.master
@@ -2010,13 +2036,13 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
         self._req_enabled: bool = False
         self._req_edge: dict[str, Any] = {}
         self._req_bounds: dict[str, Any] = {}
-        self._req_artists: list[dict[str, Any]] = []
+        self._req_symbols: list[dict[str, Any]] = []
         self._req_labels: list[str] = []
         
         self._id: int
         self._padx: tuple[Dimension, Dimension] = (0., 0.)
         self._dummy_label: _Text = _Text(self, text='', tag=f'{self._tag}.text')
-        self._artists: list[_BaseArtist] = []
+        self._symbols: list[_Line] = []
         self._labels: list[_Text] = []
         
         self.set_facecolor()
@@ -2039,25 +2065,29 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
                 'padx', defaults[f"{self._tag}.padx"]
             )
         )
-        width = self._to_px(
-            self._req_bounds.get('width', defaults[f"{self._tag}.width"])
-        )
+        if self._req_enabled:
+            width = self._to_px(
+                self._req_bounds.get('width', defaults[f"{self._tag}.width"])
+            )
+        else:
+            width = 0
         x1 = x2 - px2 - width
+        if x1 > x2: x1 = x2 = round((x1 + x2) / 2.)
         self._plot.coords(self._id, x1, y1)
         self._plot.itemconfigure(self._id, width=width, height=y2-y1+1)
         
-        for artist in self._artists:
-            artist.delete()
-        self._artists.clear()
+        for symbol in self._symbols:
+            symbol.delete()
+        self._symbols.clear()
         for label in self._labels:
             label.delete()
         self._labels.clear()
         
         if self._req_enabled and self._req_labels:
-            artwidth = self._to_px(defaults[f"{self._tag}.artists.width"])
-            artpadx = self._to_px(defaults[f"{self._tag}.artists.padx"])
-            req_labels, req_artists = self._req_labels, self._req_artists
-            labels, artists = self._labels, self._artists
+            sym_width = self._to_px(defaults[f"{self._tag}.symbols.width"])
+            sym_padx = self._to_px(defaults[f"{self._tag}.symbols.padx"])
+            req_symbols, req_labels = self._req_symbols, self._req_labels
+            labels, symbols = self._labels, self._symbols
             tag = f'{self._tag}.labels.text'
             font = self._dummy_label._font
             style = self._dummy_label._req_style.copy()
@@ -2065,27 +2095,28 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
             bounds = self._dummy_label._req_bounds.copy()
             bounds.pop('xys', None)
             
-            for i, (text, artkw) in enumerate(zip(req_labels, req_artists)):
+            for i, (text, sym_kw) in enumerate(zip(req_labels, req_symbols)):
                 if i == 0:
-                    xys = (artwidth + sum(artpadx), 0, None, None)
+                    xys = (sym_width + sum(sym_padx), 0, None, None)
                 else:
-                    x1, y1, x2, y2 = labels[-1].bbox()
-                    xys = (artwidth + sum(artpadx), y2 + 1, None, None)
+                    xys = (sym_width + sum(sym_padx), y2 + 1, None, None)
                 label = _Text(self, text=text, font=font, tag=tag)
                 label.set_style(**style)
                 label.set_bounds(xys=xys, **bounds)
                 label.draw()
                 labels.append(label)
                 
-                x1, y1, x2, y2 = label.bbox()
+                x1, y1, x2, y2 = label._canvas.bbox(label._id)
                 y = round((y1 + y2) / 2.)
-                xys = (artpadx[0], y, xys[0]-artpadx[1]-1, y)
-                artist = artkw["cls"](self, tag=artkw["tag"], **artkw["style"])
-                artist.set_coords(*xys)
-                artist.draw()
-                artists.append(artist)
+                xys2 = (sym_padx[0], y, sym_padx[0]+sym_width, y)#FIXME
+                symbol = _Line(self, **sym_kw)
+                symbol.set_coords(*xys2)
+                symbol.draw()
+                symbols.append(symbol)
+                print(xys, (x1, y1, x2, y2), xys2)
         
-        self._plot.itemconfigure(self._id, state='normal')
+        if self._req_enabled:
+            self._plot.itemconfigure(self._id, state='normal')
         self._padx = padx
         self._stale = False
     
@@ -2172,8 +2203,8 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
             self._req_bounds["padx"] = padx
             self._stale = True
     
-    def get_padx(self) -> tuple[float, float]:
-        return self._padx
+    def get_size(self) -> dict[str, Any]:
+        return {"width": self.container.winfo_width(), "padx": self._padx}
     
     def set_labels(
             self,
@@ -2205,20 +2236,18 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
     def get_labels(self) -> list[_Text]:
         return self._labels
     
-    def _set_artists_and_labels(
-            self, artists: list[_BaseArtist], labels: list[str]
+    def _set_styles_and_labels(
+            self, symbols: list[_Line], labels: list[str]
     ):
-        assert isinstance(artists, list), artists
+        assert isinstance(symbols, list), symbols
         assert isinstance(labels, list), labels
-        assert len(artists) == len(labels), (len(artists), len(labels))
+        assert len(symbols) == len(labels), (len(symbols), len(labels))
+        assert all( isinstance(s, _Line) for s in symbols ), symbols
         
-        artists_kw = [
-            {"cls": type(art), "tag": art._tag, "style": art._req_style.copy()}
-            for art in artists
-        ]
+        symbols_kw = [ s._get_legend_config() for s in symbols ]
         
-        if artists_kw != self._req_artists:
-            self._req_artists = artists_kw
+        if symbols_kw != self._req_symbols:
+            self._req_symbols = symbols_kw
             self._stale = True
         if labels != self._req_labels:
             self._req_labels = labels
@@ -2419,6 +2448,13 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             artist.draw()
         
         ## Draw legend again after the user-defined artists are drawn
+        symbols, labels = [], []
+        for side in 'bt':
+            for line in getattr(self, f'_{side}artists')["lines"]:
+                if (label := line.get_label()) is not None:
+                    labels.append(label)
+                    symbols.append(line)
+        self._legend._set_styles_and_labels(symbols, labels)
         self._legend.draw()
         
         # Raise artists in order
@@ -2678,9 +2714,9 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             smooth: bool | None = None,
             state: Literal['normal', 'hidden', 'disabled'] = 'normal',
             antialias: bool = True,
-            label: str = ''#TODO: legend
+            label: str | None = None
     ) -> _Line:
-        assert isinstance(label, str), label
+        assert isinstance(label, (str, type(None))), label
         
         if not ((b is None) ^ (t is None)):
             raise ValueError('Either `b` or `t` must be a array-like value.')
@@ -2720,6 +2756,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             x_side=x_side,
             y_side=y_side,
             user=True,
+            label=label,
             tag='line'
         )
         line.set_data(x.ravel(), y.ravel())
@@ -3082,7 +3119,7 @@ if __name__ == '__main__':
     
     suptitle = fig.set_suptitle('<Suptitle>')
     plt = fig.set_plots(1, 1)
-    plt.plot(x, y)
+    plt.plot(x, y, label='<line-label>'*10)
     plt.set_title('<Title>')
     plt.set_tlabel('<top-label>')
     plt.set_blabel('<bottom-label>')

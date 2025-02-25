@@ -155,15 +155,15 @@ common_style = {
     "legend.edgewidth": '1p',
     "legend.width": '200p',
     "legend.padx": ('6p', '0p'),
-    "legend.artists.width": '12p',#???
-    "legend.artists.padx": ('2p', '0p'),
+    "legend.symbols.width": '12p',#???
+    "legend.symbols.padx": ('2p', '0p'),
     "legend.labels.text": {
         "zorder": 1.0,
         "size": 12,
         "weight": 'normal',
         "slant": 'roman',
         "angle": 0,
-        "sticky": 'w',
+        "sticky": 'nw',
         "padx": ('2p', '2p'),
         "pady": ('2p', '0p')
     },
