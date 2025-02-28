@@ -153,10 +153,11 @@ common_style = {
     
     "legend.enabled": True,
     "legend.edgewidth": '1p',
-    "legend.width": '200p',
+    "legend.width": '150p',
     "legend.padx": ('6p', '0p'),
-    "legend.symbols.width": '12p',#???
-    "legend.symbols.padx": ('2p', '0p'),
+    "legend.ipadx": ('9p', '6p'),
+    "legend.ipady": ('6p', '6p'),
+    "legend.symbols.width": '15p',
     "legend.labels.text": {
         "zorder": 1.0,
         "size": 12,
@@ -164,8 +165,8 @@ common_style = {
         "slant": 'roman',
         "angle": 0,
         "sticky": 'nw',
-        "padx": ('2p', '2p'),
-        "pady": ('2p', '0p')
+        "padx": ('3p', '0p'),
+        "pady": ('3p', '0p')
     },
     
     "text": {

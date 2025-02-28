@@ -597,16 +597,16 @@ class _BaseArtist(_BaseElement):
         self.delete()
     
     def coords(self, *args, **kwargs) -> list[float]:
-        return self._canvas.coords(self._id, *args, **kwargs)
+        return tk.Canvas.coords(self._canvas, self._id, *args, **kwargs)
     
-    def configure(self, *args, **kwargs) -> Any:
-        return self._canvas.itemconfigure(self._id, *args, **kwargs)
+    def itemconfigure(self, *args, **kwargs) -> Any:
+        return tk.Canvas.itemconfigure(self._canvas, self._id, *args, **kwargs)
     
     def cget(self, *args, **kwargs) -> Any:
-        return self._canvas.itemcget(self._id, *args, **kwargs)
+        return tk.Canvas.itemcget(self._canvas, self._id, *args, **kwargs)
     
     def bbox(self) -> tuple[int, int, int, int] | None:
-        return self._canvas.bbox(self._id)
+        return tk.Canvas.bbox(self._canvas, self._id)
     
     def delete(self):
         for side in (self._x_side, self._y_side):
@@ -618,7 +618,7 @@ class _BaseArtist(_BaseElement):
                     pass
         self._canvas._zorder_tags.pop(self, None)
         try:
-            self._canvas.delete(self._id)
+            tk.Canvas.delete(self._canvas, self._id)
         except tk.TclError:
             pass
     
@@ -657,12 +657,12 @@ class _BaseArtist(_BaseElement):
     ):
         assert state in ('normal', 'hidden', 'disabled')
         
-        self._canvas.itemconfigure(self._id, state=state)
+        self.itemconfigure(state=state)
         
         if self._antialias_enabled and self._canvas._windowingsystem != 'aqua':
-            self._canvas.itemconfigure(self._id_aa, state=state)
+            tk.Canvas.itemconfigure(self._canvas, self._id_aa, state=state)
         elif hasattr(self, '_id_aa'):
-            self._canvas.itemconfigure(self._id_aa, state='hidden')
+            tk.Canvas.itemconfigure(self._canvas, self._id_aa, state='hidden')
     
     def set_state(
             self,
@@ -700,7 +700,7 @@ class _BaseArtist(_BaseElement):
             except ZorderNotFoundError:
                 pass
             else:
-                self._canvas.dtag(oid, f'zorder={old_zorder}')
+                tk.Canvas.dtag(self._canvas, oid, f'zorder={old_zorder}')
         #> end of _delete_zorder()
         
         zorder = self._default_style["zorder"] if self._req_zorder is None \
@@ -708,12 +708,12 @@ class _BaseArtist(_BaseElement):
         new_tag = f'zorder={zorder}'
         
         _delete_zorder(self._id)
-        self._canvas.addtag_withtag(new_tag, self._id)
+        tk.Canvas.addtag_withtag(self._canvas, new_tag, self._id)
         self._canvas._zorder_tags[self] = new_tag
         
         if hasattr(self, '_id_aa'):
             _delete_zorder(self._id_aa)
-            self._canvas.addtag_withtag(new_tag, self._id_aa)
+            tk.Canvas.addtag_withtag(self._canvas, new_tag, self._id_aa)
     
     def set_style(self, *args, **kwargs):
         raise NotImplementedError
@@ -791,7 +791,7 @@ class _Text(_BaseArtist):
             underline=cf["underline"],
             overstrike=cf["overstrike"]
         )
-        self.configure(text=cf["text"], fill=cf["color"], angle=cf["angle"])
+        self.itemconfigure(text=cf["text"], fill=cf["color"], angle=cf["angle"])
         
         # Update position
         if self._req_coords:
@@ -839,10 +839,11 @@ class _Text(_BaseArtist):
                 anchor = ''.join( mapping[a] for a in anchor )  # rolling
             x, y = self._req_transform(x, y, round_=True)
             if x.size == 0:
-                x = y = -100
+                x = y = -1
+                anchor = 'se'
         
         self.coords(x, y)  # update position
-        self.configure(anchor=anchor)  # update anchor
+        self.itemconfigure(anchor=anchor)  # update anchor
         
         # Update zorder and state
         self._set_state(state)
@@ -851,13 +852,16 @@ class _Text(_BaseArtist):
         self._pady = pady
         self._stale = False
     
-    def bbox(self) -> tuple[int, int, int, int] | None:
+    def bbox(self, padding: bool = True) -> tuple[int, int, int, int] | None:
+        assert isinstance(padding, bool), padding
+        
         if self.cget('text') and (bbox := super().bbox()):
             x1, y1, x2, y2 = bbox
-            x1 -= self._padx[0]
-            x2 += self._padx[1]
-            y1 -= self._pady[0]
-            y2 += self._pady[1]
+            if padding:
+                x1 -= self._padx[0]
+                x2 += self._padx[1]
+                y1 -= self._pady[0]
+                y2 += self._pady[1]
             return (x1, y1, x2, y2)
         return None
     
@@ -1011,7 +1015,7 @@ class _Line(_BaseArtist):
             for k, v in cf.items() if v is None
         })
         cf.update(fill=cf.pop('color'))
-        self.configure(**cf)
+        self.itemconfigure(**cf)
         
         if self._antialias_enabled and self._canvas._windowingsystem != 'aqua':
             self._antialias(xys, **cf)
@@ -1166,7 +1170,7 @@ class _Rectangle(_BaseArtist):
             for k, v in cf.items() if v is None
         })
         cf.update(fill=cf.pop('facecolor'), outline=cf.pop('edgecolor'))
-        self.configure(**cf)
+        self.itemconfigure(**cf)
         
         # Update zorder and state
         self._set_state(state)
@@ -1404,6 +1408,8 @@ class _Ticks(_BaseRegion):
             self,
             dummy: bool = False
     ) -> tuple[int, int, int, int] | None:
+        assert isinstance(dummy, bool), dummy
+        
         if dummy:
             if self._req_labels_enabled:
                 return self._dummy_label.bbox()
@@ -1531,6 +1537,7 @@ class _Ticks(_BaseRegion):
         assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
         assert sum( p is None for p in xys ) == 1, xys
         assert isinstance(growing_p, (Dimension, type(None))), growing_p
+        assert isinstance(dummy, bool), dummy
         
         (dmin, dmax), (cmin, cmax) = sorted(dlimits), climits
         assert cmin <= cmax, climits
@@ -1705,6 +1712,8 @@ class _Ticks(_BaseRegion):
             self,
             dummy: bool = False
     ) -> tuple[list[str], NDArray[Float]]:
+        assert isinstance(dummy, bool), dummy
+        
         if dummy:
             x1, y1, x2, y2 = self._dummy_xys
             transform = self._dummy_transform
@@ -2018,7 +2027,7 @@ class _Suptitle(_BaseSubwidget, tk.Canvas):
         return self._text.get_style()
 
 
-class _Legend(_BaseSubwidget, ScrolledCanvas):#???
+class _Legend(_BaseSubwidget, ScrolledCanvas):#FIXME: scrolling
     _tag: str = 'legend'
     
     def __init__(self, *args, **kwargs):
@@ -2034,8 +2043,10 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
         self._plot: _Plot = self.container.master
         
         self._req_enabled: bool = False
-        self._req_edge: dict[str, Any] = {}
-        self._req_bounds: dict[str, Any] = {}
+        self._req_edge: dict[str, Any] = dict.fromkeys(['color', 'width'])
+        self._req_bounds: dict[str, Any] = dict.fromkeys(['xys', 'width', 'padx'])
+        self._req_ipadding: dict[str, tuple[Dimension, Dimension] | None] \
+            = dict.fromkeys(['ipadx', 'ipady'])
         self._req_symbols: list[dict[str, Any]] = []
         self._req_labels: list[str] = []
         
@@ -2053,41 +2064,50 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
         self.set_edge(**self._req_edge)
     
     def draw(self):
+        defaults = self._default_style
+        cf = self._req_bounds.copy()
+        x1, y1, x2, y2 = self._req_bounds["xys"]
+        cf.update({
+            k: defaults[f"{self._tag}.{k}"]
+            for k, v in cf.items() if v is None
+        })
+        px1, px2 = padx = self._to_px(cf["padx"])
+        width = self._to_px(cf["width"]) if self._req_enabled else 0
+        x1 = x2 - px2 - width
+        if x1 > x2:
+            x1 = x2 = round((x1 + x2) / 2.)
+        
+        self._plot.coords(self._id, x1, y1)
+        self._plot.itemconfigure(self._id, width=width, height=y2-y1+1)
+        
         if not self._stale:
             return
         
         self._plot.itemconfigure(self._id, state='hidden')
         
-        defaults = self._default_style
-        x1, y1, x2, y2 = self._req_bounds["xys"]
-        px1, px2 = padx = self._to_px(
-            self._req_bounds.get(
-                'padx', defaults[f"{self._tag}.padx"]
-            )
-        )
-        if self._req_enabled:
-            width = self._to_px(
-                self._req_bounds.get('width', defaults[f"{self._tag}.width"])
-            )
-        else:
-            width = 0
-        x1 = x2 - px2 - width
-        if x1 > x2: x1 = x2 = round((x1 + x2) / 2.)
-        self._plot.coords(self._id, x1, y1)
-        self._plot.itemconfigure(self._id, width=width, height=y2-y1+1)
-        
-        for symbol in self._symbols:
+        labels, symbols = self._labels, self._symbols
+        for symbol in symbols:
             symbol.delete()
-        self._symbols.clear()
-        for label in self._labels:
+        symbols.clear()
+        for label in labels:
             label.delete()
-        self._labels.clear()
+        labels.clear()
         
         if self._req_enabled and self._req_labels:
+            cf = self._req_ipadding.copy()
+            cf.update({
+                k: defaults[f"{self._tag}.{k}"]
+                for k, v in cf.items() if v is None
+            })
+            ipx1, ipy1 = self._to_px((cf["ipadx"][0], cf["ipady"][0]))
+            
             sym_width = self._to_px(defaults[f"{self._tag}.symbols.width"])
-            sym_padx = self._to_px(defaults[f"{self._tag}.symbols.padx"])
-            req_symbols, req_labels = self._req_symbols, self._req_labels
-            labels, symbols = self._labels, self._symbols
+            sym_width = self._to_px(defaults[f"{self._tag}.symbols.width"])
+            
+            sym_x1 = ipx1
+            sym_x2 = sym_x1 + sym_width
+            lab_x1 = sym_x2 + 1
+            
             tag = f'{self._tag}.labels.text'
             font = self._dummy_label._font
             style = self._dummy_label._req_style.copy()
@@ -2095,35 +2115,33 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
             bounds = self._dummy_label._req_bounds.copy()
             bounds.pop('xys', None)
             
+            req_symbols, req_labels = self._req_symbols, self._req_labels
             for i, (text, sym_kw) in enumerate(zip(req_labels, req_symbols)):
                 if i == 0:
-                    xys = (sym_width + sum(sym_padx), 0, None, None)
+                    xys = (lab_x1, ipy1, None, None)
                 else:
-                    xys = (sym_width + sum(sym_padx), y2 + 1, None, None)
+                    xys = (lab_x1, y2 + 1, None, None)
                 label = _Text(self, text=text, font=font, tag=tag)
                 label.set_style(**style)
                 label.set_bounds(xys=xys, **bounds)
                 label.draw()
                 labels.append(label)
                 
-                x1, y1, x2, y2 = label._canvas.bbox(label._id)
+                x1, y1, x2, y2 = label.bbox(padding=False)
                 y = round((y1 + y2) / 2.)
-                xys2 = (sym_padx[0], y, sym_padx[0]+sym_width, y)#FIXME
+                xys2 = (sym_x1, y, sym_x2, y)
                 symbol = _Line(self, **sym_kw)
                 symbol.set_coords(*xys2)
                 symbol.draw()
                 symbols.append(symbol)
-                print(xys, (x1, y1, x2, y2), xys2)
         
-        if self._req_enabled:
-            self._plot.itemconfigure(self._id, state='normal')
+        state = 'normal' if self._req_enabled else 'hidden'
+        self._plot.itemconfigure(self._id, state=state)
         self._padx = padx
         self._stale = False
     
-    def bbox(self, dummy: bool = False) -> tuple[int, int, int, int] | None:
+    def _bbox(self) -> tuple[int, int, int, int] | None:
         if not self._req_enabled:
-            return None
-        if not dummy and not self._labels:
             return None
         
         bbox = self._plot.bbox(self._id)
@@ -2182,7 +2200,6 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
         
         if xys != self._req_bounds.get('xys', None):
             self._req_bounds["xys"] = xys
-            self._stale = True
     
     def set_size(
             self,
@@ -2197,14 +2214,38 @@ class _Legend(_BaseSubwidget, ScrolledCanvas):#???
         
         if width is not None and width != self._req_bounds.get('width', None):
             self._req_bounds["width"] = width
-            self._stale = True
         if padx is not None and padx != self._req_bounds.get(
                 'padx', None):
             self._req_bounds["padx"] = padx
-            self._stale = True
     
     def get_size(self) -> dict[str, Any]:
         return {"width": self.container.winfo_width(), "padx": self._padx}
+    
+    def set_ipadding(
+            self,
+            padx: Dimension | tuple[Dimension, Dimension] | None = None,
+            pady: Dimension | tuple[Dimension, Dimension] | None = None
+    ):
+        assert isinstance(padx, (Dimension, tuple, type(None))), padx
+        assert isinstance(pady, (Dimension, tuple, type(None))), pady
+        
+        padding = []
+        for pad in [padx, pady]:
+            if isinstance(pad, Dimension):
+                padx = (pad, pad)
+            elif isinstance(pad, tuple):
+                assert len(pad) == 2, [padx, pady]
+                assert all( isinstance(p, Dimension) for p in pad ), [padx, pady]
+            padding.append(pad)
+        padx, pady = padding
+        
+        old = self._req_ipadding
+        new = {"ipadx": padding[0], "ipady": padding[1]}
+        new.update({ k: old.get(k, None) for k, v in new.items() if v is None })
+        
+        if new != old:
+            self._req_ipadding = new
+            self._stale = True
     
     def set_labels(
             self,
@@ -2371,7 +2412,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self._legend._set_bounds((None, cy1, cx2, cy2))
         self._legend.draw()
         ## Update the bounds of the empty space for the frame (left and right)
-        if bbox := self._legend.bbox(dummy=True):
+        if bbox := self._legend._bbox():
             cx2 = bbox[0] - 1
         if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2.)
         cxys_axes[2] = cx2
@@ -3119,6 +3160,7 @@ if __name__ == '__main__':
     
     suptitle = fig.set_suptitle('<Suptitle>')
     plt = fig.set_plots(1, 1)
+    plt.plot(x, y, label='<line-label>'*10)
     plt.plot(x, y, label='<line-label>'*10)
     plt.set_title('<Title>')
     plt.set_tlabel('<top-label>')
