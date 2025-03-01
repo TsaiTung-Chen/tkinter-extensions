@@ -310,12 +310,17 @@ class _Scrolled:
             builtin_method=False,
             propagate_geometry=True,
             container_type: Literal['tk', 'ttk'] = 'ttk',
+            bind_mousewheel_add: bool = True,
             **kwargs
     ):
-        assert container_type in ('tk', 'ttk'), container_type
         valid_orients = ('vertical', 'horizontal', 'both')
         assert scroll_orient in valid_orients, (valid_orients, scroll_orient)
+        assert container_type in ('tk', 'ttk'), container_type
+        assert isinstance(builtin_method, bool), builtin_method
+        assert isinstance(propagate_geometry, bool), propagate_geometry
+        assert isinstance(bind_mousewheel_add, bool), bind_mousewheel_add
         self._builtin_method = builtin_method
+        self._bind_mousewheel_add = bind_mousewheel_add
         self.set_scroll_sensitivities(scroll_sensitivities)
         
         # Outer frame (container)
@@ -373,6 +378,7 @@ class _Scrolled:
         self.bind('<Map>', self._on_map, add=True)
         self.bind('<<MapChild>>', self._on_map_child, add=True)
         self.bind('<Configure>', self._on_configure, add=True)
+        self.bind('<Enter>', lambda e: self.rebind_mousewheel(), add=True)
         self._os = self.tk.call('tk', 'windowingsystem')
         
         redirect_layout_managers(self, container, orig_prefix='content_')
@@ -422,27 +428,31 @@ class _Scrolled:
         return tuple(states)
     
     def show_scrollbars(
-            self, after_ms: int = -1, autohide: bool | None = None):
+            self, after_ms: int = -1, autohide: bool | None = None
+    ):
         if self.hbar:
             self.hbar.show(after_ms, autohide=autohide)
         if self.vbar:
             self.vbar.show(after_ms, autohide=autohide)
     
     def hide_scrollbars(
-            self, after_ms: int = -1, autohide: bool | None = None):
+            self, after_ms: int = -1, autohide: bool | None = None
+    ):
         if self.hbar:
             self.hbar.hide(after_ms, autohide=autohide)
         if self.vbar:
             self.vbar.hide(after_ms, autohide=autohide)
     
-    def rebind_mousewheel(self):
+    def rebind_mousewheel(self, add: bool | None = None):
+        assert isinstance(add, (bool, type(None))), add
+        
         self.unbind_mousewheel()
         
         # Bind mousewheel
         funcs = [self._mousewheel_scroll] * len(MOUSESCROLL)
         bind_recursively(
             self, MOUSESCROLL, funcs,
-            add=True,
+            add=self._bind_mousewheel_add if add is None else add,
             key='scrolled-wheel',
             skip_toplevel=True
         )
@@ -455,8 +465,6 @@ class _Scrolled:
             self._refresh()
     
     def _on_map(self, event=None):
-        self.rebind_mousewheel()
-        
         if not self._builtin_method:
             if not self.hbar:
                 self.cropper.configure(width=self.winfo_reqwidth())
@@ -610,7 +618,10 @@ class ScrolledCanvas(_Scrolled, tk.Canvas):
     
     def _update_scrollregion(self) -> tuple:
         self.update_idletasks()
-        x1, y1, x2, y2 = self.bbox('all')
+        if bbox := self.bbox('all'):
+            x1, y1, x2, y2 = bbox
+        else:
+            x2 = y2 = 0
         x2, y2 = max(x2, 0), max(y2, 0)
         scrollregion = (0, 0, x2, y2)
         self.configure(scrollregion=scrollregion)
@@ -620,9 +631,12 @@ class ScrolledCanvas(_Scrolled, tk.Canvas):
         # Fill the space with content in the non-scrollable direction
         if self._fill:
             self.update_idletasks()
-            x1, y1, x2, y2 = self.bbox('all')
-            xscale = 1.0 if self.hbar else self.winfo_width() / x2
-            yscale = 1.0 if self.vbar else self.winfo_height() / y2
+            if bbox := self.bbox('all'):
+                x1, y1, x2, y2 = bbox
+            else:
+                x2 = y2 = 0.
+            xscale = 1.0 if self.hbar or x2 == 0. else self.winfo_width() / x2
+            yscale = 1.0 if self.vbar or y2 == 0. else self.winfo_height() / y2
             
             ## Scale objects
             self.scale('all', 0, 0, xscale, yscale)
@@ -657,7 +671,10 @@ class ScrolledCanvas(_Scrolled, tk.Canvas):
     def content_size(
             self, hbar: bool = False, vbar: bool = False) -> tuple[int, int]:
         self.update_idletasks()
-        x1, y1, content_width, content_height = self.bbox('all')
+        if bbox := self.bbox('all'):
+            x1, y1, content_width, content_height = bbox
+        else:
+            content_width, content_height = (0, 0, 0, 0)
         
         pad_width = pad_height = sum(self._scrollbar_padding)
         if vbar and self.vbar:

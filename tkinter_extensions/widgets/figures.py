@@ -516,12 +516,12 @@ class _Transform2D:  # 2D transformation
 
 
 class _BaseElement:
-    def __init__(self, canvas: _Plot | _Suptitle, tag: str = ''):
-        assert isinstance(canvas, (_Plot, _Suptitle, _Legend)), canvas
+    def __init__(self, canvas: tk.Canvas, tag: str = ''):
+        assert isinstance(canvas, tk.Canvas), canvas
         assert isinstance(tag, str), tag
         
         self._root = canvas._root
-        self._canvas: _Plot | _Suptitle = canvas
+        self._canvas: tk.Canvas = canvas
         self._figure: Figure = canvas._figure
         self._tag: str = tag
     
@@ -730,7 +730,7 @@ class _Text(_BaseArtist):
     
     def __init__(
             self,
-            canvas: _Plot | _Suptitle,
+            canvas: tk.Canvas,
             text: str,
             color: str | None = None,
             angle: IntFloat | None = None,
@@ -852,7 +852,7 @@ class _Text(_BaseArtist):
         self._pady = pady
         self._stale = False
     
-    def bbox(self, padding: bool = True) -> tuple[int, int, int, int] | None:
+    def bbox(self, *, padding: bool = True) -> tuple[int, int, int, int] | None:
         assert isinstance(padding, bool), padding
         
         if self.cget('text') and (bbox := super().bbox()):
@@ -890,7 +890,7 @@ class _Text(_BaseArtist):
         padding = []
         for pad in [padx, pady]:
             if isinstance(pad, Dimension):
-                padx = (pad, pad)
+                pad = (pad, pad)
             elif isinstance(pad, tuple):
                 assert len(pad) == 2, [padx, pady]
                 assert all( isinstance(p, Dimension) for p in pad ), [padx, pady]
@@ -962,7 +962,7 @@ class _Line(_BaseArtist):
     
     def __init__(
             self,
-            canvas: _Plot | _Suptitle,
+            canvas: tk.Canvas,
             color: str | None = None,
             width: Dimension | None = None,
             smooth: bool | None = None,
@@ -1135,7 +1135,7 @@ class _Rectangle(_BaseArtist):
     
     def __init__(
             self,
-            canvas: _Plot | _Suptitle,
+            canvas: tk.Canvas,
             facecolor: str | None = None,
             edgecolor: str | None = None,
             width: Dimension | None = None,
@@ -1232,7 +1232,7 @@ class _Axis(_BaseRegion):
         super().__init__(canvas=canvas, *args, **kwargs)
         self._side: Literal['r', 'b', 'l', 't'] = side
         self._label: _Text = _Text(
-            canvas=self._canvas, text='', tag=f'{self._tag}.label.text'
+            self._canvas, text='', tag=f'{self._tag}.label.text'
         )
     
     def draw(self):
@@ -1294,10 +1294,10 @@ class _Ticks(_BaseRegion):
         self._dummy_n_chars: Int = max( len(str(l)) for l in [_PMIN, _MAX] )
         self._dummy_size: IntFloat = 0
         self._dummy_label: _Text = _Text(
-            canvas=self._canvas, text='', tag=f'{self._tag}.labels.text'
+            self._canvas, text='', tag=f'{self._tag}.labels.text'
         )
         self._dummy_tick: _Line = _Line(
-            canvas=self._canvas, tag=f'{self._tag}.ticks.line'
+            self._canvas, tag=f'{self._tag}.ticks.line'
         )
         
         self._stale: bool = True
@@ -1406,6 +1406,7 @@ class _Ticks(_BaseRegion):
     
     def bbox(
             self,
+            *,
             dummy: bool = False
     ) -> tuple[int, int, int, int] | None:
         assert isinstance(dummy, bool), dummy
@@ -1803,10 +1804,10 @@ class _Frame(_BaseRegion):
         self._grid: dict[str, list[_Line]] = {"r": [], "b": [], "l": [], "t": []}
         
         self._dummy_grid: dict[str, _Line] = {
-            "r": _Line(canvas=self._canvas, tag=f'{self._tag}.grid.line'),
-            "b": _Line(canvas=self._canvas, tag=f'{self._tag}.grid.line'),
-            "l": _Line(canvas=self._canvas, tag=f'{self._tag}.grid.line'),
-            "t": _Line(canvas=self._canvas, tag=f'{self._tag}.grid.line')
+            "r": _Line(self._canvas, tag=f'{self._tag}.grid.line'),
+            "b": _Line(self._canvas, tag=f'{self._tag}.grid.line'),
+            "l": _Line(self._canvas, tag=f'{self._tag}.grid.line'),
+            "t": _Line(self._canvas, tag=f'{self._tag}.grid.line')
         }
         self._rect: _Rectangle = _Rectangle(
             self._canvas, tag=f'{self._tag}.rect'
@@ -1903,6 +1904,288 @@ class _Frame(_BaseRegion):
         ):
             self._req_grid_cdata = cdata
             self._stale_grid = True
+
+
+class _Legend(_BaseRegion):
+    def __init__(self, *args, **kwargs):
+        tag = kwargs.pop('tag')
+        canvas = ScrolledCanvas(
+            *args,
+            container_type='tk',
+            propagate_geometry=False,
+            scroll_orient='both',
+            bind_mousewheel_add=False,
+            **kwargs
+        )
+        assert isinstance(canvas.container.master, _Plot), canvas.container.master
+        plot = canvas.container.master
+        canvas._figure = plot._figure
+        canvas._zorder_tags: dict[_BaseArtist, str] = {}
+        super().__init__(canvas=canvas, tag=tag)
+        
+        self._plot: _Plot = plot
+        self._id: int = self._plot.create_window(
+            0, 0, anchor='nw', window=canvas.container, state='hidden'
+        )
+        
+        self._req_enabled: bool = False
+        self._req_facecolor: str | None = None
+        self._req_edge: dict[str, Any] = dict.fromkeys(['edgecolor', 'edgewidth'])
+        self._req_bounds: dict[str, Any] = dict.fromkeys(['xys', 'width', 'padx'])
+        self._req_ipadding: dict[str, tuple[Dimension, Dimension] | None] \
+            = dict.fromkeys(['ipadx', 'ipady'])
+        self._req_symbols: list[dict[str, Any]] = []
+        self._req_labels: list[str] = []
+        
+        self._padx: tuple[Dimension, Dimension] = (0., 0.)
+        self._dummy_label: _Text = _Text(canvas, text='', tag=f'{self._tag}.text')
+        self._symbols: list[_Line] = []
+        self._labels: list[_Text] = []
+    
+    def update_theme(self):
+        self._stale = True
+        for artist in self._canvas._zorder_tags:
+            artist._stale = True
+    
+    def draw(self):
+        defaults = self._default_style
+        cf = self._req_bounds.copy()
+        x1, y1, x2, y2 = self._req_bounds["xys"]
+        cf.update({
+            k: defaults[f"{self._tag}.{k}"]
+            for k, v in cf.items() if v is None
+        })
+        px1, px2 = padx = self._to_px(cf["padx"])
+        width = self._to_px(cf["width"]) if self._req_enabled else 0
+        x1 = x2 - px2 - width
+        if x1 > x2:
+            x1 = x2 = round((x1 + x2) / 2.)
+        
+        self._plot.coords(self._id, x1, y1)
+        self._plot.itemconfigure(self._id, width=width, height=y2-y1+1)
+        
+        if not self._stale:
+            return
+        
+        self._plot.itemconfigure(self._id, state='hidden')
+        
+        canvas = self._canvas
+        if (bg := self._req_facecolor) is None:
+            bg = defaults[f"{self._tag}.facecolor"]
+        canvas.configure(background=bg)
+        
+        cf = self._req_edge.copy()
+        cf.update({
+            k: defaults[f"{self._tag}.{k}"]
+            for k, v in cf.items() if v is None
+        })
+        canvas.container.configure(
+            background=cf["edgecolor"], padx=cf["edgewidth"], pady=cf["edgewidth"]
+        )
+        
+        labels, symbols = self._labels, self._symbols
+        for symbol in symbols:
+            symbol.delete()
+        symbols.clear()
+        for label in labels:
+            label.delete()
+        labels.clear()
+        
+        if self._req_enabled and self._req_labels:
+            cf = self._req_ipadding.copy()
+            cf.update({
+                k: defaults[f"{self._tag}.{k}"]
+                for k, v in cf.items() if v is None
+            })
+            ipx1, ipy1 = self._to_px((cf["ipadx"][0], cf["ipady"][0]))
+            
+            sym_width = self._to_px(defaults[f"{self._tag}.symbols.width"])
+            sym_width = self._to_px(defaults[f"{self._tag}.symbols.width"])
+            
+            sym_x1 = ipx1
+            sym_x2 = sym_x1 + sym_width
+            lab_x1 = sym_x2 + 1
+            
+            tag = f'{self._tag}.labels.text'
+            font = self._dummy_label._font
+            style = self._dummy_label._req_style.copy()
+            style.pop('text', None)
+            bounds = self._dummy_label._req_bounds.copy()
+            bounds.pop('xys', None)
+            
+            req_symbols, req_labels = self._req_symbols, self._req_labels
+            for i, (text, sym_kw) in enumerate(zip(req_labels, req_symbols)):
+                if i == 0:
+                    xys = (lab_x1, ipy1, None, None)
+                else:
+                    xys = (lab_x1, y2 + 1, None, None)
+                label = _Text(canvas, text=text, font=font, tag=tag)
+                label.set_style(**style)
+                label.set_bounds(xys=xys, **bounds)
+                label.draw()
+                labels.append(label)
+                
+                x1, y1, x2, y2 = label.bbox(padding=False)
+                y = round((y1 + y2) / 2.)
+                xys2 = (sym_x1, y, sym_x2, y)
+                symbol = _Line(canvas, **sym_kw)
+                symbol.set_coords(*xys2)
+                symbol.draw()
+                symbols.append(symbol)
+        
+        state = 'normal' if self._req_enabled else 'hidden'
+        self._plot.itemconfigure(self._id, state=state)
+        self._padx = padx
+        self._stale = False
+    
+    def bbox(self) -> tuple[int, int, int, int] | None:
+        if not self._req_enabled:
+            return None
+        
+        bbox = self._plot.bbox(self._id)
+        if bbox is None:
+            return None
+        
+        x1, y1, x2, y2 = bbox
+        p1, p2 = self._padx
+        return (x1-p1, y1, x2+p2, y2)
+    
+    def set_facecolor(self, color: str | None = None) -> str:
+        assert isinstance(color, (str, type(None))), color
+        
+        if color is not None and color != self._req_facecolor:
+            self._req_facecolor = color
+            self._stale = True
+    
+    def get_facecolor(self) -> str:
+        return self._canvas["background"]
+    
+    def set_edge(
+            self, color: str | None = None, width: Dimension | None = None
+    ):
+        assert isinstance(color, (str, type(None))), color
+        assert isinstance(width, (Dimension, type(None))), width
+        
+        if color is not None and color != self._req_edge["edgecolor"]:
+            self._req_edge["edgecolor"] = color
+            self._stale = True
+        if width is not None and width != self._req_edge["edgewidth"]:
+            self._req_edge["edgewidth"] = width
+            self._stale = True
+    
+    def get_edge(self) -> dict[str, Any]:
+        return {
+            "color": self._canvas.container["background"],
+            "width": self._canvas.container["padding"]
+        }
+    
+    def set_enabled(self, enable: bool = True):
+        if enable != self._req_enabled:
+            self._req_enabled = enable
+            self._stale = True
+    
+    def _set_bounds(
+            self,
+            xys: tuple[Dimension, Dimension, Dimension, Dimension]
+    ):
+        assert isinstance(xys, (tuple, type(None))), xys
+        assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
+        
+        if xys != self._req_bounds.get('xys', None):
+            self._req_bounds["xys"] = xys
+    
+    def set_size(
+            self,
+            width: Dimension | None = None,
+            padx: tuple[Dimension, Dimension] | None = None
+    ):
+        assert isinstance(width, (Dimension, type(None))), width
+        assert isinstance(padx, (tuple, type(None))), padx
+        if padx is not None:
+            assert len(padx) == 2, padx
+            assert all( isinstance(p, Dimension) for p in padx ), padx
+        
+        if width is not None and width != self._req_bounds.get('width', None):
+            self._req_bounds["width"] = width
+        if padx is not None and padx != self._req_bounds.get(
+                'padx', None):
+            self._req_bounds["padx"] = padx
+    
+    def get_size(self) -> dict[str, Any]:
+        return {"width": self._canvas.container.winfo_width(), "padx": self._padx}
+    
+    def set_ipadding(
+            self,
+            padx: Dimension | tuple[Dimension, Dimension] | None = None,
+            pady: Dimension | tuple[Dimension, Dimension] | None = None
+    ):
+        assert isinstance(padx, (Dimension, tuple, type(None))), padx
+        assert isinstance(pady, (Dimension, tuple, type(None))), pady
+        
+        padding = []
+        for pad in [padx, pady]:
+            if isinstance(pad, Dimension):
+                pad = (pad, pad)
+            elif isinstance(pad, tuple):
+                assert len(pad) == 2, [padx, pady]
+                assert all( isinstance(p, Dimension) for p in pad ), [padx, pady]
+            padding.append(pad)
+        padx, pady = padding
+        
+        old = self._req_ipadding
+        new = {"ipadx": padding[0], "ipady": padding[1]}
+        new.update({ k: old.get(k, None) for k, v in new.items() if v is None })
+        
+        if new != old:
+            self._req_ipadding = new
+            self._stale = True
+    
+    def set_labels(
+            self,
+            color: str | None = None,
+            angle: IntFloat | None = None,
+            family: str | None = None,
+            size: Int | None = None,
+            weight: str | None = None,
+            slant: str | None = None,
+            underline: bool | None = None,
+            overstrike: bool | None = None,
+            padx: Dimension | tuple[Dimension, Dimension] | None = None,
+            pady: Dimension | tuple[Dimension, Dimension] | None = None,
+            scientific: Int | None = None
+    ):
+        self._dummy_label.set_style(
+            color=color,
+            angle=angle,
+            family=family,
+            size=size,
+            weight=weight,
+            slant=slant,
+            underline=underline,
+            overstrike=overstrike
+        )
+        self._dummy_label.set_bounds(padx=padx, pady=pady)
+        self._stale = True
+    
+    def get_labels(self) -> list[_Text]:
+        return self._labels
+    
+    def _set_styles_and_labels(
+            self, symbols: list[_Line], labels: list[str]
+    ):
+        assert isinstance(symbols, list), symbols
+        assert isinstance(labels, list), labels
+        assert len(symbols) == len(labels), (len(symbols), len(labels))
+        assert all( isinstance(s, _Line) for s in symbols ), symbols
+        
+        symbols_kw = [ s._get_legend_config() for s in symbols ]
+        
+        if symbols_kw != self._req_symbols:
+            self._req_symbols = symbols_kw
+            self._stale = True
+        if labels != self._req_labels:
+            self._req_labels = labels
+            self._stale = True
 
 
 # =============================================================================
@@ -2027,274 +2310,6 @@ class _Suptitle(_BaseSubwidget, tk.Canvas):
         return self._text.get_style()
 
 
-class _Legend(_BaseSubwidget, ScrolledCanvas):#FIXME: scrolling
-    _tag: str = 'legend'
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(
-            *args,
-            container_type='tk',
-            propagate_geometry=False,
-            scroll_orient='both',
-            **kwargs
-        )
-        assert isinstance(self.container.master, _Plot), self.container.master
-        
-        self._plot: _Plot = self.container.master
-        
-        self._req_enabled: bool = False
-        self._req_edge: dict[str, Any] = dict.fromkeys(['color', 'width'])
-        self._req_bounds: dict[str, Any] = dict.fromkeys(['xys', 'width', 'padx'])
-        self._req_ipadding: dict[str, tuple[Dimension, Dimension] | None] \
-            = dict.fromkeys(['ipadx', 'ipady'])
-        self._req_symbols: list[dict[str, Any]] = []
-        self._req_labels: list[str] = []
-        
-        self._id: int
-        self._padx: tuple[Dimension, Dimension] = (0., 0.)
-        self._dummy_label: _Text = _Text(self, text='', tag=f'{self._tag}.text')
-        self._symbols: list[_Line] = []
-        self._labels: list[_Text] = []
-        
-        self.set_facecolor()
-        self.set_edge()
-    
-    def update_theme(self):
-        super().update_theme()
-        self.set_edge(**self._req_edge)
-    
-    def draw(self):
-        defaults = self._default_style
-        cf = self._req_bounds.copy()
-        x1, y1, x2, y2 = self._req_bounds["xys"]
-        cf.update({
-            k: defaults[f"{self._tag}.{k}"]
-            for k, v in cf.items() if v is None
-        })
-        px1, px2 = padx = self._to_px(cf["padx"])
-        width = self._to_px(cf["width"]) if self._req_enabled else 0
-        x1 = x2 - px2 - width
-        if x1 > x2:
-            x1 = x2 = round((x1 + x2) / 2.)
-        
-        self._plot.coords(self._id, x1, y1)
-        self._plot.itemconfigure(self._id, width=width, height=y2-y1+1)
-        
-        if not self._stale:
-            return
-        
-        self._plot.itemconfigure(self._id, state='hidden')
-        
-        labels, symbols = self._labels, self._symbols
-        for symbol in symbols:
-            symbol.delete()
-        symbols.clear()
-        for label in labels:
-            label.delete()
-        labels.clear()
-        
-        if self._req_enabled and self._req_labels:
-            cf = self._req_ipadding.copy()
-            cf.update({
-                k: defaults[f"{self._tag}.{k}"]
-                for k, v in cf.items() if v is None
-            })
-            ipx1, ipy1 = self._to_px((cf["ipadx"][0], cf["ipady"][0]))
-            
-            sym_width = self._to_px(defaults[f"{self._tag}.symbols.width"])
-            sym_width = self._to_px(defaults[f"{self._tag}.symbols.width"])
-            
-            sym_x1 = ipx1
-            sym_x2 = sym_x1 + sym_width
-            lab_x1 = sym_x2 + 1
-            
-            tag = f'{self._tag}.labels.text'
-            font = self._dummy_label._font
-            style = self._dummy_label._req_style.copy()
-            style.pop('text', None)
-            bounds = self._dummy_label._req_bounds.copy()
-            bounds.pop('xys', None)
-            
-            req_symbols, req_labels = self._req_symbols, self._req_labels
-            for i, (text, sym_kw) in enumerate(zip(req_labels, req_symbols)):
-                if i == 0:
-                    xys = (lab_x1, ipy1, None, None)
-                else:
-                    xys = (lab_x1, y2 + 1, None, None)
-                label = _Text(self, text=text, font=font, tag=tag)
-                label.set_style(**style)
-                label.set_bounds(xys=xys, **bounds)
-                label.draw()
-                labels.append(label)
-                
-                x1, y1, x2, y2 = label.bbox(padding=False)
-                y = round((y1 + y2) / 2.)
-                xys2 = (sym_x1, y, sym_x2, y)
-                symbol = _Line(self, **sym_kw)
-                symbol.set_coords(*xys2)
-                symbol.draw()
-                symbols.append(symbol)
-        
-        state = 'normal' if self._req_enabled else 'hidden'
-        self._plot.itemconfigure(self._id, state=state)
-        self._padx = padx
-        self._stale = False
-    
-    def _bbox(self) -> tuple[int, int, int, int] | None:
-        if not self._req_enabled:
-            return None
-        
-        bbox = self._plot.bbox(self._id)
-        if bbox is None:
-            return None
-        x1, y1, x2, y2 = bbox
-        p1, p2 = self._padx
-        return (x1-p1, y1, x2+p2, y2)
-    
-    def _set_facecolor(self, color: str | None = None) -> str:
-        assert isinstance(color, (str, type(None))), color
-        
-        default_color = self._default_style[f"{self._tag}.facecolor"]
-        new_color = default_color if color is None else color
-        self.configure(background=new_color)
-        self._req_facecolor = color
-        
-        return new_color
-    
-    def set_edge(
-            self, color: str | None = None, width: Dimension | None = None
-    ):
-        assert isinstance(color, (str, type(None))), color
-        assert isinstance(width, (Dimension, type(None))), width
-        
-        default_color = self._default_style[f"{self._tag}.edgecolor"]
-        default_width = self._default_style[f"{self._tag}.edgewidth"]
-        new_color = default_color if color is None else color
-        new_width = default_width if width is None else width
-        self.container.configure(
-            background=new_color, padx=new_width, pady=new_width
-        )
-        
-        if color is not None and color != self._req_edge.get('color', None):
-            self._req_edge["color"] = color
-        if width is not None and width != self._req_edge.get('width', None):
-            self._req_edge["width"] = width
-    
-    def get_edge(self) -> dict[str, Any]:
-        return {
-            "color": self.container["background"],
-            "width": self.container["padding"]
-        }
-    
-    def set_enabled(self, enable: bool = True):
-        if enable != self._req_enabled:
-            self._req_enabled = enable
-            self._stale = True
-    
-    def _set_bounds(
-            self,
-            xys: tuple[Dimension, Dimension, Dimension, Dimension]
-    ):
-        assert isinstance(xys, (tuple, type(None))), xys
-        assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
-        
-        if xys != self._req_bounds.get('xys', None):
-            self._req_bounds["xys"] = xys
-    
-    def set_size(
-            self,
-            width: Dimension | None = None,
-            padx: tuple[Dimension, Dimension] | None = None
-    ):
-        assert isinstance(width, (Dimension, type(None))), width
-        assert isinstance(padx, (tuple, type(None))), padx
-        if padx is not None:
-            assert len(padx) == 4, padx
-            assert all( isinstance(p, Dimension) for p in padx ), padx
-        
-        if width is not None and width != self._req_bounds.get('width', None):
-            self._req_bounds["width"] = width
-        if padx is not None and padx != self._req_bounds.get(
-                'padx', None):
-            self._req_bounds["padx"] = padx
-    
-    def get_size(self) -> dict[str, Any]:
-        return {"width": self.container.winfo_width(), "padx": self._padx}
-    
-    def set_ipadding(
-            self,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None
-    ):
-        assert isinstance(padx, (Dimension, tuple, type(None))), padx
-        assert isinstance(pady, (Dimension, tuple, type(None))), pady
-        
-        padding = []
-        for pad in [padx, pady]:
-            if isinstance(pad, Dimension):
-                padx = (pad, pad)
-            elif isinstance(pad, tuple):
-                assert len(pad) == 2, [padx, pady]
-                assert all( isinstance(p, Dimension) for p in pad ), [padx, pady]
-            padding.append(pad)
-        padx, pady = padding
-        
-        old = self._req_ipadding
-        new = {"ipadx": padding[0], "ipady": padding[1]}
-        new.update({ k: old.get(k, None) for k, v in new.items() if v is None })
-        
-        if new != old:
-            self._req_ipadding = new
-            self._stale = True
-    
-    def set_labels(
-            self,
-            color: str | None = None,
-            angle: IntFloat | None = None,
-            family: str | None = None,
-            size: Int | None = None,
-            weight: str | None = None,
-            slant: str | None = None,
-            underline: bool | None = None,
-            overstrike: bool | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None,
-            scientific: Int | None = None
-    ):
-        self._dummy_label.set_style(
-            color=color,
-            angle=angle,
-            family=family,
-            size=size,
-            weight=weight,
-            slant=slant,
-            underline=underline,
-            overstrike=overstrike
-        )
-        self._dummy_label.set_bounds(padx=padx, pady=pady)
-        self._stale = True
-    
-    def get_labels(self) -> list[_Text]:
-        return self._labels
-    
-    def _set_styles_and_labels(
-            self, symbols: list[_Line], labels: list[str]
-    ):
-        assert isinstance(symbols, list), symbols
-        assert isinstance(labels, list), labels
-        assert len(symbols) == len(labels), (len(symbols), len(labels))
-        assert all( isinstance(s, _Line) for s in symbols ), symbols
-        
-        symbols_kw = [ s._get_legend_config() for s in symbols ]
-        
-        if symbols_kw != self._req_symbols:
-            self._req_symbols = symbols_kw
-            self._stale = True
-        if labels != self._req_labels:
-            self._req_labels = labels
-            self._stale = True
-
-
 class _Plot(_BaseSubwidget, tk.Canvas):
     _tag: str = 'plot'
     
@@ -2318,10 +2333,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self._lticks: _Ticks = _Ticks(self, side='l', tag='lticks')
         self._rticks: _Ticks = _Ticks(self, side='r', tag='rticks')
         self._frame: _Frame = _Frame(self, tag='frame')
-        self._legend: _Legend = _Legend(self)
-        self._legend._id = self.create_window(
-            0, 0, anchor='nw', window=self._legend.container, state='hidden'
-        )
+        self._legend: _Legend = _Legend(self, tag='legend')
         
         self.set_facecolor()
         self.set_btickslabels(True)
@@ -2412,7 +2424,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self._legend._set_bounds((None, cy1, cx2, cy2))
         self._legend.draw()
         ## Update the bounds of the empty space for the frame (left and right)
-        if bbox := self._legend._bbox():
+        if bbox := self._legend.bbox():
             cx2 = bbox[0] - 1
         if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2.)
         cxys_axes[2] = cx2
@@ -2737,12 +2749,35 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     def get_grid(self) -> dict[str, list[_Line]]:
         return self._frame.get_grid()
     
-    def set_legend(self, enable: bool = True, **kwargs):
+    def set_legend(self, enable: bool = True):
         self._legend.set_enabled(enable)
-        self._legend.set_labels(**kwargs)
     
     def get_legend(self) -> _Legend:
         return self._legend
+    
+    def set_legend_size(self, *args, **kwargs):
+        self._legend.set_size(*args, **kwargs)
+    
+    def get_legend_size(self) -> dict[str, Any]:
+        return self._legend.get_size()
+    
+    def set_legend_facecolor(self, *args, **kwargs):
+        self._legend.set_facecolor(*args, **kwargs)
+    
+    def get_legend_facecolor(self) -> str:
+        return self._legend.get_facecolor()
+    
+    def set_legend_edge(self, *args, **kwargs):
+        self._legend.set_edge(*args, **kwargs)
+    
+    def get_legend_edge(self) -> dict[str, Any]:
+        return self._legend.get_edge()
+    
+    def set_legend_labels(self, *args, **kwargs):
+        self._legend.set_labels(*args, **kwargs)
+    
+    def get_legend_labels(self) -> list[_Text]:
+        return self._legend.get_labels()
     
     def plot(
             self,
@@ -3160,8 +3195,8 @@ if __name__ == '__main__':
     
     suptitle = fig.set_suptitle('<Suptitle>')
     plt = fig.set_plots(1, 1)
-    plt.plot(x, y, label='<line-label>'*10)
-    plt.plot(x, y, label='<line-label>'*10)
+    plt.plot(x, y, label='line 1 with the 1st color in the color cycle')
+    plt.plot(x, y*2., label='line 2 with the 2nd color in the color cycle')
     plt.set_title('<Title>')
     plt.set_tlabel('<top-label>')
     plt.set_blabel('<bottom-label>')
@@ -3169,7 +3204,7 @@ if __name__ == '__main__':
     plt.set_rlabel('<right-label>')
     #plt.set_ttickslabels(True)
     #plt.set_rtickslabels(True)
-    plt.set_lscale('log')
+    #plt.set_lscale('log')
     #plt.set_llimits(10, 150)
     plt.set_legend(True)
     
