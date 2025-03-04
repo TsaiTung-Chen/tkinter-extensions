@@ -1214,6 +1214,9 @@ class _BaseRegion(_BaseElement):
     def _default_style(self) -> dict[str, Any]:
         return self._figure._default_style
     
+    def update_theme(self):
+        raise NotImplementedError
+    
     def _delete(self):
         raise NotImplementedError
     
@@ -1234,6 +1237,9 @@ class _Axis(_BaseRegion):
         self._label: _Text = _Text(
             self._canvas, text='', tag=f'{self._tag}.label.text'
         )
+    
+    def update_theme(self):
+        self._label._stale = True
     
     def draw(self):
         self._label.draw()
@@ -1308,6 +1314,14 @@ class _Ticks(_BaseRegion):
         self._ticks_cdata: NDArray[float] = np.array([], dtype=float)
         self._labels: list[_Text] = []
         self._ticks: list[_Line] = []
+    
+    def update_theme(self):
+        self._stale = True
+        
+        for label in self._labels:
+            label._stale = True
+        for tick in self._ticks:
+            tick._stale = True
     
     def draw(
             self
@@ -1636,7 +1650,7 @@ class _Ticks(_BaseRegion):
             if max_n_labels <= 1:
                 self._fitted_labels = {
                     "case": 0,
-                    "dmin": dmin, "dmax": dmax, "n": max_n_labels
+                    "start": dmin, "stop": dmax, "num": max_n_labels
                 }
             else:
                 ## Find the nearest a*10^b, where a is an integer
@@ -1737,7 +1751,7 @@ class _Ticks(_BaseRegion):
             case = fitted["case"]
             if case == 0:
                 data = np.linspace(
-                    fitted["dmin"], fitted["dmax"], fitted["n"], dtype=float
+                    fitted["start"], fitted["stop"], fitted["num"], dtype=float
                 )
             elif case == 1:
                 data = (
@@ -1801,7 +1815,6 @@ class _Frame(_BaseRegion):
         self._req_grid_cdata: dict[str, NDArray[float]] = {}
         
         self._stale_grid: bool = True
-        self._grid: dict[str, list[_Line]] = {"r": [], "b": [], "l": [], "t": []}
         
         self._dummy_grid: dict[str, _Line] = {
             "r": _Line(self._canvas, tag=f'{self._tag}.grid.line'),
@@ -1812,6 +1825,15 @@ class _Frame(_BaseRegion):
         self._rect: _Rectangle = _Rectangle(
             self._canvas, tag=f'{self._tag}.rect'
         )
+        self._grid: dict[str, list[_Line]] = {"r": [], "b": [], "l": [], "t": []}
+    
+    def update_theme(self):
+        self._stale_grid = True
+        
+        self._rect._stale = True
+        for lines in self._grid.values():
+            for line in lines:
+                line._stale = True
     
     def draw(self):
         self._rect.draw()
@@ -1823,13 +1845,13 @@ class _Frame(_BaseRegion):
         canvas = self._canvas
         tag = f'{self._tag}.grid.line'
         x1, y1, x2, y2 = self._rect.get_coords()
-        for side, grid in self._grid.items():
+        for side, lines in self._grid.items():
             if (enabled := self._req_grid_enabled[side]) is None:
                 enabled = side in default_enabled
             if not enabled:
-                for line in grid:
+                for line in lines:
                     line.delete()
-                grid.clear()
+                lines.clear()
                 continue
             
             style = self._dummy_grid[side]._req_style
@@ -1839,19 +1861,19 @@ class _Frame(_BaseRegion):
             else:
                 positions = [ (x1+1, p, x2-1, p) for p in positions ]
             
-            number_increase = len(positions) - len(grid)
+            number_increase = len(positions) - len(lines)
             if number_increase < 0:  # delete lines
                 for i in range(-number_increase):
-                    grid.pop().delete()
+                    lines.pop().delete()
             elif number_increase > 0:  # create lines
-                grid.extend(
+                lines.extend(
                     _Line(canvas, tag=tag) for i in range(number_increase)
                 )
             
-            for tick, xys in zip(grid, positions):
-                tick.set_style(**style)
-                tick.set_coords(*xys)
-                tick.draw()
+            for line, xys in zip(lines, positions):
+                line.set_style(**style)
+                line.set_coords(*xys)
+                line.draw()
         
         self._stale_grid = False
     
@@ -1944,6 +1966,7 @@ class _Legend(_BaseRegion):
     
     def update_theme(self):
         self._stale = True
+        
         for artist in self._canvas._zorder_tags:
             artist._stale = True
     
@@ -2355,7 +2378,11 @@ class _Plot(_BaseSubwidget, tk.Canvas):
     
     def update_theme(self):
         super().update_theme()
+        self._frame.update_theme()
         self._legend.update_theme()
+        for side in 'rblt':
+            self._get_axis(side).update_theme()
+            self._get_ticks(side).update_theme()
     
     def draw(self):
         self._figure.event_generate('<<DrawStarted>>')
@@ -2486,9 +2513,13 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             axis.draw()
         
         # Draw user defined artists
-        transforms = {}
-        dbounds = dict(zip('rblt', dbounds))
+        cx1, cx2, cy1, cy2 = cx1+1, cx2-1, cy1+1, cy2-1
+        if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2.)
+        if cy1 > cy2: cy1 = cy2 = round((cy1 + cy2) / 2.)
+        cbounds = np.asarray([[cy1, cy2], [cx1, cx2]] * 2)  # shape: (4, 2)
         cbounds = dict(zip('rblt', cbounds))
+        dbounds = dict(zip('rblt', dbounds))
+        transforms = {}
         for artist in self.artists:
             x_side, y_side = artist._x_side, artist._y_side
             if (sides := x_side + y_side) not in transforms:
@@ -3182,7 +3213,7 @@ class Figure(UndockedFrame):
 if __name__ == '__main__':
     from ._others import Window
     
-    root = Window(title='Figure Demo')
+    root = Window(title='Figure Demo', themename='morph')
     
     x = np.arange(0, 10, 1/48000, dtype=float)
     y = np.sin(2*np.pi*1*x)
@@ -3194,19 +3225,22 @@ if __name__ == '__main__':
     fig.pack(fill='both', expand=True)
     
     suptitle = fig.set_suptitle('<Suptitle>')
-    plt = fig.set_plots(1, 1)
-    plt.plot(x, y, label='line 1 with the 1st color in the color cycle')
-    plt.plot(x, y*2., label='line 2 with the 2nd color in the color cycle')
-    plt.set_title('<Title>')
-    plt.set_tlabel('<top-label>')
-    plt.set_blabel('<bottom-label>')
-    plt.set_llabel('<left-label>')
-    plt.set_rlabel('<right-label>')
-    #plt.set_ttickslabels(True)
-    #plt.set_rtickslabels(True)
-    #plt.set_lscale('log')
-    #plt.set_llimits(10, 150)
-    plt.set_legend(True)
+    plts = fig.set_plots(2, 2)
+    for r in range(plts.shape[0]):
+        for c in range(plts.shape[1]):
+            plt = plts[r, c]
+            for i in range(10):
+                plt.plot(x, y*i, label=f'line {i} in plot {(r, c)}')
+            plt.set_title('<Title>')
+            plt.set_tlabel('<top-label>')
+            plt.set_blabel('<bottom-label>')
+            plt.set_llabel('<left-label>')
+            plt.set_rlabel('<right-label>')
+            #plt.set_ttickslabels(True)
+            #plt.set_rtickslabels(True)
+            #plt.set_lscale('log')
+            #plt.set_llimits(10, 150)
+            plt.set_legend(True)
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
     

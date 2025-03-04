@@ -11,6 +11,10 @@ from copy import deepcopy
 # =============================================================================
 common_style = {
     "size": ('960p', '540p'),
+    "colors": [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+    ],
     
     "suptitle.text": {
         "zorder": 10.0,
@@ -156,7 +160,7 @@ common_style = {
     "legend.width": '150p',
     "legend.padx": ('6p', '0p'),
     "legend.ipadx": ('9p', '6p'),
-    "legend.ipady": ('6p', '6p'),
+    "legend.ipady": ('0p', '0p'),
     "legend.symbols.width": '15p',
     "legend.labels.text": {
         "zorder": 1.0,
@@ -186,20 +190,13 @@ common_style = {
     "line": {
         "zorder": 5.0,
         "width": '2p',
-        "smooth": False,
-        "color": ''
-    },
-    
-    "marker": {
-        "zorder": 5.0,
-        "size": '2p',
-        "edgecolor": ''
+        "smooth": False
     },
     
     "rect": {
         "zorder": 5.0,
         "width": '2p',
-        "edgecolor": ''
+        "facecolor": ''
     }
 }
 
@@ -209,21 +206,7 @@ common_style = {
 # =============================================================================
 light_style = deepcopy(common_style)
 light_style.update({
-    "colors": [
-        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
-    ],
     "facecolor": '#D9E3F1',
-    
-    "suptitle.text": {
-        **common_style["suptitle.text"],
-        "color": 'black'
-    },
-    
-    "title.text": {
-        **common_style["title.text"],
-        "color": 'black'
-    },
     
     "taxis.label.text": {
         **common_style["taxis.label.text"],
@@ -249,36 +232,20 @@ light_style.update({
         **common_style["tticks.labels.text"],
         "color": '#1A1A1A'
     },
-    "tticks.ticks.line": {
-        **common_style["tticks.ticks.line"],
-        "color": 'black'
-    },
     
     "bticks.labels.text": {
         **common_style["bticks.labels.text"],
         "color": '#1A1A1A'
-    },
-    "bticks.ticks.line": {
-        **common_style["bticks.ticks.line"],
-        "color": 'black'
     },
     
     "lticks.labels.text": {
         **common_style["lticks.labels.text"],
         "color": '#1A1A1A'
     },
-    "lticks.ticks.line": {
-        **common_style["lticks.ticks.line"],
-        "color": 'black'
-    },
     
     "rticks.labels.text": {
         **common_style["rticks.labels.text"],
         "color": '#1A1A1A'
-    },
-    "rticks.ticks.line": {
-        **common_style["rticks.ticks.line"],
-        "color": 'black'
     },
     
     "frame.rect": {
@@ -291,21 +258,21 @@ light_style.update({
         "color": 'white'
     },
     
-    "legend.facecolor": '#CFD9E8',
-    "legend.edgecolor": '#666666',
-    "legend.labels.text": {
-        **common_style["legend.labels.text"],
-        "color": 'black'
-    },
+    "legend.facecolor": '#D9E3F1',
+    "legend.edgecolor": '#D9E3F1',
     
     "text": {
         **common_style["text"],
         "color": 'black'
     },
     
+    "line": {
+        **common_style["line"],
+        "color": 'black'
+    },
+    
     "rect": {
         **common_style["rect"],
-        "facecolor": '',
         "edgecolor": 'black'
     }
 })
@@ -314,7 +281,78 @@ light_style.update({
 # =============================================================================
 # ---- Dark Style
 # =============================================================================
-dark_style = deepcopy(light_style)#TODO: update colors
+dark_style = deepcopy(common_style)
+dark_style.update({
+    "facecolor": 'black',
+    
+    "taxis.label.text": {
+        **common_style["taxis.label.text"],
+        "color": '#F2F2F2'
+    },
+    
+    "baxis.label.text": {
+        **common_style["baxis.label.text"],
+        "color": '#F2F2F2'
+    },
+    
+    "laxis.label.text": {
+        **common_style["laxis.label.text"],
+        "color": '#F2F2F2'
+    },
+    
+    "raxis.label.text": {
+        **common_style["raxis.label.text"],
+        "color": '#F2F2F2'
+    },
+    
+    "tticks.labels.text": {
+        **common_style["tticks.labels.text"],
+        "color": '#F2F2F2'
+    },
+    
+    "bticks.labels.text": {
+        **common_style["bticks.labels.text"],
+        "color": '#F2F2F2'
+    },
+    
+    "lticks.labels.text": {
+        **common_style["lticks.labels.text"],
+        "color": '#F2F2F2'
+    },
+    
+    "rticks.labels.text": {
+        **common_style["rticks.labels.text"],
+        "color": '#F2F2F2'
+    },
+    
+    "frame.rect": {
+        **common_style["frame.rect"],
+        "facecolor": 'black',
+        "edgecolor": '#808080'
+    },
+    "frame.grid.line": {
+        **common_style["frame.grid.line"],
+        "color": '#404040'
+    },
+    
+    "legend.facecolor": 'black',
+    "legend.edgecolor": 'black',
+    
+    "text": {
+        **common_style["text"],
+        "color": 'white'
+    },
+    
+    "line": {
+        **common_style["line"],
+        "color": 'white'
+    },
+    
+    "rect": {
+        **common_style["rect"],
+        "edgecolor": 'white'
+    }
+})
 
 
 # =============================================================================
