@@ -969,9 +969,14 @@ class _Line(_BaseArtist):
             dash: str | tuple[Int] | None = None,
             smooth: bool | None = None,
             antialias: bool = False,
+            hover: bool = False,
             **kwargs
     ):
+        assert isinstance(hover, bool), hover
+        
         super().__init__(canvas=canvas, antialias=antialias, **kwargs)
+        
+        self._hover: bool = hover
         self._xlims: NDArray[Float] = np.array([0., 1.], float)
         self._ylims: NDArray[Float] = np.array([0., 1.], float)
         self._req_xy: NDArray[Float] = np.array([[]], dtype=float)
@@ -1017,6 +1022,8 @@ class _Line(_BaseArtist):
             for k, v in cf.items() if v is None
         })
         cf.update(fill=cf.pop('color'))
+        if self._hover:
+            cf.update(activewidth=self._to_px(cf["width"])+2.)
         self.itemconfigure(**cf)
         
         if self._antialias_enabled and self._canvas._windowingsystem != 'aqua':
@@ -1033,7 +1040,8 @@ class _Line(_BaseArtist):
             fill: str,
             width: Dimension,
             dash: str | tuple[Int],
-            smooth: bool
+            smooth: bool,
+            activewidth: Dimension | None = None
     ):
         width = self._to_px(width) + 1.
         
@@ -1055,7 +1063,12 @@ class _Line(_BaseArtist):
         id_og = self._id
         id_aa = self._id_aa
         canvas.itemconfigure(
-            id_aa, fill=fill, width=width, dash=dash, smooth=smooth
+            id_aa,
+            fill=fill,
+            width=width,
+            dash=dash,
+            smooth=smooth,
+            activewidth=activewidth
         )
         canvas.coords(id_aa, *xys)
         canvas.tag_lower(id_aa, id_og)
@@ -2071,7 +2084,7 @@ class _Legend(_BaseRegion):
                 x1, y1, x2, y2 = label.bbox(padding=False)
                 y = round((y1 + y2) / 2.)
                 xys2 = (sym_x1, y, sym_x2, y)
-                symbol = _Line(canvas, **sym_kw)
+                symbol = _Line(canvas, hover=True, **sym_kw)
                 symbol.set_coords(*xys2)
                 symbol.draw()
                 symbols.append(symbol)
@@ -2194,8 +2207,7 @@ class _Legend(_BaseRegion):
             underline: bool | None = None,
             overstrike: bool | None = None,
             padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None,
-            scientific: Int | None = None
+            pady: Dimension | tuple[Dimension, Dimension] | None = None
     ):
         self._dummy_label.set_style(
             color=color,
@@ -2887,6 +2899,7 @@ class _Plot(_BaseSubwidget):
             width=width,
             dash=dash,
             smooth=smooth,
+            hover=True,
             state=state,
             antialias=antialias,
             antialias_bg=lambda: self._frame.get_rect().get_style()["facecolor"],
