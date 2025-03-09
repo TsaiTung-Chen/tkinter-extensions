@@ -10,8 +10,8 @@ import tkinter as tk
 
 import ttkbootstrap as ttk
 
-from .. import variables as vrb
-from ..utils import redirect_layout_managers
+from tkinter_extensions import variables as vrb
+from tkinter_extensions.utils import redirect_layout_managers
 # =============================================================================
 # ---- Widgets
 # =============================================================================

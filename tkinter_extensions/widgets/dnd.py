@@ -13,8 +13,9 @@ import tkinter as tk
 
 import ttkbootstrap as ttk
 
-from tkinter_extensions.utils import unbind
 from tkinter_extensions import variables as vrb
+from tkinter_extensions.utils import unbind
+from tkinter_extensions.constants import MLEFTPRESS
 # =============================================================================
 # ---- Drag and Drop
 # =============================================================================
@@ -784,7 +785,7 @@ class DnDContainer(tk.Canvas):
         """
         Overwrites this method to customize the trigger widget.
         """
-        self._rebind_dnd_start('<ButtonPress-1>', trigger=moved, moved=moved)
+        self._rebind_dnd_start(MLEFTPRESS, trigger=moved, moved=moved)
     
     def _rebind_dnd_start(
             self,
@@ -1118,7 +1119,7 @@ class RearrangedDnDContainer(DnDContainer):
         """
         if moved._drag_bt:
             self._rebind_dnd_start(
-                '<ButtonPress-1>', trigger=moved._drag_bt, moved=moved
+                MLEFTPRESS, trigger=moved._drag_bt, moved=moved
             )
     
     def set_rearrangement(self, enable: bool):

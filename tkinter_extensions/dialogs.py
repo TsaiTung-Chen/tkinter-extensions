@@ -16,9 +16,9 @@ from ttkbootstrap.dialogs import dialogs, colorchooser
 from ttkbootstrap.validation import validator, add_validation
 from ttkbootstrap.localization import MessageCatalog as MessageCatalog
 
-from . import utils
-from . import variables as vrb
-from .widgets import Combobox, WrapLabel
+from tkinter_extensions import utils
+from tkinter_extensions import variables as vrb
+from tkinter_extensions.widgets import Combobox, WrapLabel
 # =============================================================================
 # ---- Classes
 # =============================================================================

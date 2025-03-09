@@ -11,10 +11,22 @@ import numpy as np
 
 
 PLATFORM = sys.platform
-LEFTCLICK = '<ButtonPress-1>'
-RIGHTCLICK = '<ButtonPress-2>' if PLATFORM == 'darwin' else '<ButtonPress-3>'
-MOUSESCROLL = ['<ButtonPress-4>', '<ButtonPress-5>'] if PLATFORM == 'linux' else [
-    '<MouseWheel>']
+MLEFTPRESS = '<ButtonPress-1>'
+MLEFTRELEASE = '<ButtonRelease-1>'
+MDLEFTPRESS = '<Double-ButtonPress-1>'
+MLEFTMOTION = '<B1-Motion>'
+if PLATFORM == 'darwin':
+    MRIGHTPRESS = '<ButtonPress-2>'
+    MRIGHTRELEASE = '<ButtonRelease-2>'
+    MDRIGHTPRESS = '<Double-ButtonPress-2>'
+    MRIGHTMOTION = '<B2-Motion>'
+else:
+    MRIGHTPRESS = '<ButtonPress-3>'
+    MRIGHTRELEASE = '<ButtonRelease-3>'
+    MDRIGHTPRESS = '<Double-ButtonPress-3>'
+    MRIGHTMOTION = '<B3-Motion>'
+MSCROLL = ['<ButtonPress-4>', '<ButtonPress-5>'] if PLATFORM == 'linux' \
+    else ['<MouseWheel>']
 
 if PLATFORM == 'darwin':
     COMMAND = 'Mod1'

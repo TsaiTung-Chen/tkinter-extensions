@@ -13,8 +13,8 @@ from typing import Literal
 
 import ttkbootstrap as ttk
 
-from ..constants import MODIFIER_MASKS, COMMAND, MOUSESCROLL
-from ..utils import (
+from tkinter_extensions.constants import MODIFIER_MASKS, COMMAND, MSCROLL
+from tkinter_extensions.utils import (
     defer,
     bind_recursively,
     unbind_recursively,
@@ -449,9 +449,9 @@ class _Scrolled:
         self.unbind_mousewheel()
         
         # Bind mousewheel
-        funcs = [self._mousewheel_scroll] * len(MOUSESCROLL)
+        funcs = [self._mousewheel_scroll] * len(MSCROLL)
         bind_recursively(
-            self, MOUSESCROLL, funcs,
+            self, MSCROLL, funcs,
             add=self._bind_mousewheel_add if add is None else add,
             key='scrolled-wheel',
             skip_toplevel=True

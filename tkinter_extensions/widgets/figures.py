@@ -18,12 +18,16 @@ import numpy as np
 from numpy.typing import NDArray, ArrayLike
 import ttkbootstrap as ttk
 
-from .. import variables as vrb
-from ..constants import Int, IntFloat, Float, Dimension
-from ..utils import defer
-from .scrolled import ScrolledCanvas
-from ._others import UndockedFrame
-from ._figure_config import STYLES
+from tkinter_extensions import variables as vrb
+from tkinter_extensions.constants import (
+    Int, IntFloat, Float, Dimension,
+    MLEFTPRESS, MLEFTMOTION, MLEFTRELEASE,
+    MRIGHTPRESS, MRIGHTMOTION, MRIGHTRELEASE
+)
+from tkinter_extensions.utils import defer
+from tkinter_extensions.widgets.scrolled import ScrolledCanvas
+from tkinter_extensions.widgets._others import UndockedFrame
+from tkinter_extensions.widgets._figure_config import STYLES
 
 _ANCHORS = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
 _NP_FLOAT = np.float64
@@ -546,13 +550,14 @@ class _BaseArtist(_BaseElement):
             self,
             *args,
             state: Literal['normal', 'hidden', 'disabled'] = 'normal',
-            transform: _Transform2D = _Transform2D(),
-            x_side: Literal['b', 't'] | None = None,
-            y_side: Literal['l', 'r'] | None = None,
-            user: bool = False,
             label: str | None = None,
             antialias: bool = False,
             antialias_bg: Callable[[], str] | None = None,
+            transform: _Transform2D = _Transform2D(),
+            user: bool = False,
+            group: set = set(),
+            x_side: Literal['b', 't'] | None = None,
+            y_side: Literal['l', 'r'] | None = None,
             **kwargs
     ):
         assert x_side in ('b', 't', None), x_side
@@ -568,9 +573,12 @@ class _BaseArtist(_BaseElement):
             '.'.join(subtags[:i]) for i in range(1, len(subtags)+1)
         ]
         tags.append(f'user={user}')
-        tags = tuple(dict.fromkeys(tags))  # unique elements
+        tags = tuple(dict.fromkeys(tags))  # ordered and unique elements
+        
+        group.add(self)
         
         self._tags: tuple[str, ...] = tags
+        self._group: set = group
         self._x_side: Literal['b', 't'] | None = x_side
         self._y_side: Literal['l', 'r'] | None = y_side
         self._antialias_enabled: bool = bool(antialias)
@@ -610,6 +618,8 @@ class _BaseArtist(_BaseElement):
         return tk.Canvas.bbox(self._canvas, self._id)
     
     def delete(self):
+        self._group.discard(self)
+        
         for side in (self._x_side, self._y_side):
             if side is not None:
                 artists = getattr(self._canvas, f'_{side}artists')
@@ -617,7 +627,9 @@ class _BaseArtist(_BaseElement):
                     artists[f'{self._name}s'].remove(self)
                 except ValueError:
                     pass
+        
         self._canvas._zorder_tags.pop(self, None)
+        
         try:
             tk.Canvas.delete(self._canvas, self._id)
         except tk.TclError:
@@ -715,6 +727,63 @@ class _BaseArtist(_BaseElement):
         if hasattr(self, '_id_aa'):
             _delete_zorder(self._id_aa)
             tk.Canvas.addtag_withtag(self._canvas, new_tag, self._id_aa)
+    
+    def _bind(self, sequence: str, callback: Callable[[tk.Event], Any]):
+        assert isinstance(sequence, str), sequence
+        assert isinstance(callback, (Callable, type(None))), callback
+        
+        self._canvas.tag_bind(self._id, sequence, callback)
+        if hasattr(self, '_id_aa'):
+            self._canvas.tag_bind(self._id_aa, sequence, callback)
+    
+    def bind_on_enter(self, callback: Callable[[tk.Event], Any]):
+        self._bind('<Enter>', callback)
+    
+    def bind_on_leave(self, callback: Callable[[tk.Event], Any]):
+        self._bind('<Leave>', callback)
+    
+    def bind_on_leftpress(self, callback: Callable[[tk.Event], Any]):
+        self._bind(MLEFTPRESS, callback)
+    
+    def bind_on_leftmotion(self, callback: Callable[[tk.Event], Any]):
+        self._bind(MLEFTMOTION, callback)
+    
+    def bind_on_leftrelease(self, callback: Callable[[tk.Event], Any]):
+        self._bind(MLEFTRELEASE, callback)
+    
+    def bind_on_rightpress(self, callback: Callable[[tk.Event], Any]):
+        self._bind(MRIGHTPRESS, callback)
+    
+    def bind_on_rightmotion(self, callback: Callable[[tk.Event], Any]):
+        self._bind(MRIGHTMOTION, callback)
+    
+    def bind_on_rightrelease(self, callback: Callable[[tk.Event], Any]):
+        self._bind(MRIGHTRELEASE, callback)
+    
+    def _unbind(self, sequence: str):
+        assert isinstance(sequence, str), sequence
+        
+        self._canvas.tag_unbind(self._id, sequence)
+        if hasattr(self, '_id_aa'):
+            self._canvas.tag_unbind(self._id_aa, sequence)
+    
+    def unbind_on_leftpress(self):
+        self._unbind(MLEFTPRESS)
+    
+    def unbind_on_leftmotion(self):
+        self._unbind(MLEFTMOTION)
+    
+    def unbind_on_leftrelease(self):
+        self._unbind(MLEFTRELEASE)
+    
+    def unbind_on_rightpress(self):
+        self._unbind(MRIGHTPRESS)
+    
+    def unbind_on_rightmotion(self):
+        self._unbind(MRIGHTMOTION)
+    
+    def unbind_on_rightrelease(self):
+        self._unbind(MRIGHTRELEASE)
     
     def set_style(self, *args, **kwargs):
         raise NotImplementedError
@@ -968,13 +1037,12 @@ class _Line(_BaseArtist):
             width: Dimension | None = None,
             dash: str | tuple[Int] | None = None,
             smooth: bool | None = None,
-            antialias: bool = False,
             hover: bool = False,
             **kwargs
     ):
         assert isinstance(hover, bool), hover
         
-        super().__init__(canvas=canvas, antialias=antialias, **kwargs)
+        super().__init__(canvas=canvas, **kwargs)
         
         self._hover: bool = hover
         self._xlims: NDArray[Float] = np.array([0., 1.], float)
@@ -2861,8 +2929,8 @@ class _Plot(_BaseSubwidget):
             dash: str | tuple[Int] | None = None,
             smooth: bool | None = None,
             state: Literal['normal', 'hidden', 'disabled'] = 'normal',
-            antialias: bool = True,
-            label: str | None = None
+            label: str | None = None,
+            antialias: bool = True
     ) -> _Line:
         assert isinstance(label, (str, type(None))), label
         
@@ -2901,12 +2969,12 @@ class _Plot(_BaseSubwidget):
             smooth=smooth,
             hover=True,
             state=state,
+            label=label,
             antialias=antialias,
             antialias_bg=lambda: self._frame.get_rect().get_style()["facecolor"],
+            user=True,
             x_side=x_side,
             y_side=y_side,
-            user=True,
-            label=label,
             tag='line'
         )
         line.set_data(x.ravel(), y.ravel())

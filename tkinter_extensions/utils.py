@@ -18,7 +18,9 @@ import numpy as np
 import ttkbootstrap as ttk
 from ttkbootstrap import colorutils
 
-from .constants import BUILTIN_WIDGETS, MODIFIERS, MODIFIER_MASKS, DEFAULT_PPD
+from tkinter_extensions.constants import (
+    BUILTIN_WIDGETS, MODIFIERS, MODIFIER_MASKS, DEFAULT_PPD
+)
 # =============================================================================
 # ---- Functions
 # =============================================================================

@@ -19,10 +19,10 @@ from matplotlib.backend_bases import _Mode, NavigationToolbar2
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends._backend_tk import NavigationToolbar2Tk, ToolTip
 
-from .. import variables as vrb
-from ..utils import create_image_pair, quit_if_all_closed, defer
-from ._others import UndockedFrame
-from ._matplotlib_config import RC
+from tkinter_extensions import variables as vrb
+from tkinter_extensions.utils import create_image_pair, quit_if_all_closed, defer
+from tkinter_extensions.widgets._others import UndockedFrame
+from tkinter_extensions.widgets._matplotlib_config import RC
 # =============================================================================
 # ---- Functions
 # =============================================================================

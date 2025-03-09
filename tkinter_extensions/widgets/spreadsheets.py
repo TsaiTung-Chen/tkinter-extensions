@@ -20,15 +20,16 @@ import ttkbootstrap as ttk
 from ttkbootstrap.icons import Icon
 from ttkbootstrap.colorutils import color_to_hsl
 
-from ..constants import (
-    RIGHTCLICK, MOUSESCROLL, MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK,
+from tkinter_extensions.constants import (
+    MLEFTPRESS, MRIGHTPRESS, MLEFTMOTION, MLEFTRELEASE, MDLEFTPRESS, MSCROLL,
+    MODIFIERS, MODIFIER_MASKS, COMMAND, SHIFT, LOCK,
 )
-from ..utils import get_modifiers, center_window, modify_hsl
-from .. import dialogs
-from .. import variables as vrb
-from .dnd import OrderlyDnDItem, RearrangedDnDContainer
-from .scrolled import AutoHiddenScrollbar, ScrolledFrame
-from ._others import OptionMenu
+from tkinter_extensions.utils import get_modifiers, center_window, modify_hsl
+from tkinter_extensions import dialogs
+from tkinter_extensions import variables as vrb
+from tkinter_extensions.widgets.dnd import OrderlyDnDItem, RearrangedDnDContainer
+from tkinter_extensions.widgets.scrolled import AutoHiddenScrollbar, ScrolledFrame
+from tkinter_extensions.widgets._others import OptionMenu
 
 stringDType = np.dtypes.StringDType(coerce=False)
 stringArray = NDArray[stringDType]
@@ -304,7 +305,7 @@ class Sheet(ttk.Frame):
                 0, 0, 0, 0, width=0, tags='invisible-bg'
             )
             _canvas.addtag_withtag(self._make_tag("oid", oid=oid), oid)
-            _canvas.tag_bind('invisible-bg', '<Button-1>', self._focus)
+            _canvas.tag_bind('invisible-bg', MLEFTPRESS, self._focus)
         
         # Create the selection frame
         oid = canvas.create_rectangle(0, 0, 0, 0, fill='', tags='selection-frame')
@@ -350,14 +351,14 @@ class Sheet(ttk.Frame):
         canvas.bind('<Configure>', self._on_canvas_configured)
         for widget in [canvas, rowcanvas, colcanvas, entry]:
             widget.configure(takefocus=False)
-            for scrollseq in MOUSESCROLL:
+            for scrollseq in MSCROLL:
                 widget.bind(scrollseq, self._on_mousewheel_scroll)
         
         for _canvas in [canvas, cornercanvas, rowcanvas, colcanvas]:
-            _canvas.bind('<ButtonPress-1>', self._on_leftbutton_press)
-            _canvas.bind('<B1-Motion>', self._on_leftbutton_motion)
-            _canvas.bind('<ButtonRelease-1>', self._on_leftbutton_release)
-        canvas.bind('<Double-ButtonPress-1>', self._on_double_leftclick)
+            _canvas.bind(MLEFTPRESS, self._on_leftbutton_press)
+            _canvas.bind(MLEFTMOTION, self._on_leftbutton_motion)
+            _canvas.bind(MLEFTRELEASE, self._on_leftbutton_release)
+        canvas.bind(MDLEFTPRESS, self._on_double_leftclick)
         
         # Update values
         if data is not None:
@@ -1453,14 +1454,14 @@ class Sheet(ttk.Frame):
         canvas.tag_bind(tag_cornerheader, '<Enter>', self._on_header_enter)
         canvas.tag_bind(tag_cornerheader, '<Leave>', self._on_header_leave)
         canvas.tag_bind(
-            tag_cornerheader, RIGHTCLICK, self._on_header_rightbutton_press)
+            tag_cornerheader, MRIGHTPRESS, self._on_header_rightbutton_press)
         
         for handle in ['hhandle', 'vhandle']:
             tag_cornerhandle = self._make_tag(
                 "type:subtype", type_=type_, subtype=handle)
             canvas.tag_bind(
                 tag_cornerhandle,
-                '<ButtonPress-1>',
+                MLEFTPRESS,
                 getattr(self, f'_on_{handle}_leftbutton_press')
             )
     
@@ -1621,10 +1622,10 @@ class Sheet(ttk.Frame):
         tag_header = self._make_tag("type", type_=type_)
         canvas.tag_bind(tag_header, '<Enter>', self._on_header_enter)
         canvas.tag_bind(tag_header, '<Leave>', self._on_header_leave)
-        canvas.tag_bind(tag_header, RIGHTCLICK, self._on_header_rightbutton_press)
+        canvas.tag_bind(tag_header, MRIGHTPRESS, self._on_header_rightbutton_press)
         canvas.tag_bind(
             tag_handle,
-            '<ButtonPress-1>',
+            MLEFTPRESS,
             getattr(self, f'_on_{handle}_leftbutton_press')
         )
     
@@ -1812,18 +1813,18 @@ class Sheet(ttk.Frame):
         
         # Bind (overwrite) the event functions with the handle callbacks
         canvas = event.widget
-        old_b1motion = canvas.bind('<B1-Motion>')
-        old_b1release = canvas.bind('<ButtonRelease-1>')
+        old_leftmotion = canvas.bind(MLEFTMOTION)
+        old_leftrelease = canvas.bind(MLEFTRELEASE)
         if axis == 0:
             i = r
             rcs = (r, None, r, None)
-            canvas.bind('<B1-Motion>', self._on_hhandle_leftbutton_motion)
-            canvas.bind('<ButtonRelease-1>', self._on_handle_leftbutton_release)
+            canvas.bind(MLEFTMOTION, self._on_hhandle_leftbutton_motion)
+            canvas.bind(MLEFTRELEASE, self._on_handle_leftbutton_release)
         else:
             i = c
             rcs = (None, c, None, c)
-            canvas.bind('<B1-Motion>', self._on_vhandle_leftbutton_motion)
-            canvas.bind('<ButtonRelease-1>', self._on_handle_leftbutton_release)
+            canvas.bind(MLEFTMOTION, self._on_vhandle_leftbutton_motion)
+            canvas.bind(MLEFTRELEASE, self._on_handle_leftbutton_release)
         self.after_idle(self.select_cells, *rcs)
         
         _i = i + 1
@@ -1834,8 +1835,8 @@ class Sheet(ttk.Frame):
             "size": self._cell_sizes[axis][_i],  # scaled size
             "scale": self._scale.get(),
             "step": self._history.step,
-            "b1motion": old_b1motion,
-            "b1release": old_b1release
+            "leftmotion": old_leftmotion,
+            "leftrelease": old_leftrelease
         }
     
     _on_hhandle_leftbutton_press = lambda self, event: (
@@ -1874,8 +1875,8 @@ class Sheet(ttk.Frame):
     def _on_handle_leftbutton_release(self, event):  # resize ends
         # Overwrite the handle callbacks with the originals
         start = self._resize_start
-        event.widget.bind('<B1-Motion>', start["b1motion"])
-        event.widget.bind('<ButtonRelease-1>', start["b1release"])
+        event.widget.bind(MLEFTMOTION, start["leftmotion"])
+        event.widget.bind(MLEFTRELEASE, start["leftrelease"])
         self._resize_start = None
     
     def draw_cells(
@@ -2023,7 +2024,7 @@ class Sheet(ttk.Frame):
         
         # Bindings
         tag_cell = self._make_tag("type", type_=type_)
-        canvas.tag_bind(tag_cell, RIGHTCLICK, self._on_cell_rightbutton_press)
+        canvas.tag_bind(tag_cell, MRIGHTPRESS, self._on_cell_rightbutton_press)
         
         # Keep the selection frame on the top
         canvas.tag_raise('selection-frame')
@@ -3426,7 +3427,7 @@ class Book(ttk.Frame):
                 self._sidebar_fm.canvas, self._sidebar
         ]:
             widget.configure(takefocus=False)
-            widget.bind('<ButtonPress-1>', self._focus_on_sheet)
+            widget.bind(MLEFTPRESS, self._focus_on_sheet)
         
         self.bind('<<ThemeChanged>>', self._create_styles)
     
@@ -3731,7 +3732,7 @@ class Book(ttk.Frame):
             takefocus=False
         )
         switch.pack(fill='x', expand=True)
-        switch.bind(RIGHTCLICK, lambda e: self._post_switch_menu(e, key))
+        switch.bind(MRIGHTPRESS, lambda e: self._post_switch_menu(e, key))
         
         # Modify the sheet dict
         keys, props = (list(sheets_props.keys()), list(sheets_props.values()))

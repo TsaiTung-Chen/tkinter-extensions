@@ -13,8 +13,8 @@ from traceback import format_exc
 import ttkbootstrap as ttk
 from ttkbootstrap import Colors
 
-from .. import utils
-from .. import variables as vrb
+from tkinter_extensions import utils
+from tkinter_extensions import variables as vrb
 # =============================================================================
 # ---- Helpers
 # =============================================================================

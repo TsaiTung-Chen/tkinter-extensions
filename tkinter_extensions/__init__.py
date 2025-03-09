@@ -9,7 +9,7 @@ Created on Mon May 22 22:35:24 2023
 
 from importlib.metadata import version, PackageNotFoundError
 
-from . import constants, dialogs, widgets
+from tkinter_extensions import constants, dialogs, widgets
 
 
 try:
