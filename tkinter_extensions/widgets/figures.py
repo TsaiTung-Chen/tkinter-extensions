@@ -966,6 +966,7 @@ class _Line(_BaseArtist):
             canvas: tk.Canvas,
             color: str | None = None,
             width: Dimension | None = None,
+            dash: str | tuple[Int] | None = None,
             smooth: bool | None = None,
             antialias: bool = False,
             **kwargs
@@ -982,7 +983,7 @@ class _Line(_BaseArtist):
             0, 0, 0, 0,
             fill='', width='0p', state='hidden', tags=self._tags
         )
-        self.set_style(color=color, width=width, smooth=smooth)
+        self.set_style(color=color, width=width, dash=dash, smooth=smooth)
     
     def draw(self):
         state = self._req_state
@@ -1027,7 +1028,12 @@ class _Line(_BaseArtist):
         self._stale = False
     
     def _antialias(
-            self, xys: ArrayLike, fill: str, width: Dimension, smooth: bool
+            self,
+            xys: ArrayLike,
+            fill: str,
+            width: Dimension,
+            dash: str | tuple[Int],
+            smooth: bool
     ):
         width = self._to_px(width) + 1.
         
@@ -1048,7 +1054,9 @@ class _Line(_BaseArtist):
         # Update the transparent line
         id_og = self._id
         id_aa = self._id_aa
-        canvas.itemconfigure(id_aa, fill=fill, width=width, smooth=smooth)
+        canvas.itemconfigure(
+            id_aa, fill=fill, width=width, dash=dash, smooth=smooth
+        )
         canvas.coords(id_aa, *xys)
         canvas.tag_lower(id_aa, id_og)
     
@@ -1056,15 +1064,17 @@ class _Line(_BaseArtist):
             self,
             color: str | None = None,
             width: Dimension | None = None,
+            dash: str | tuple[Int] | None = None,
             smooth: bool | None = None
     ):
         assert isinstance(color, (str, type(None))), color
         assert isinstance(width, (Dimension, type(None))), width
+        assert isinstance(dash, (str, tuple, type(None))), dash
         assert isinstance(smooth, (bool, type(None))), smooth
         
         old = self._req_style
         new = {
-            "color": color, "width": width, "smooth": smooth
+            "color": color, "width": width, "dash": dash, "smooth": smooth
         }
         new.update({ k: old.get(k, None) for k, v in new.items() if v is None })
         if new != old:
@@ -1075,6 +1085,7 @@ class _Line(_BaseArtist):
         return {
             "color": self.cget('fill'),
             "width": self.cget('width'),
+            "dash": self.cget('dash'),
             "smooth": self.cget('smooth')
         }
     
@@ -1082,7 +1093,8 @@ class _Line(_BaseArtist):
         return {
             "tag": self._tag,
             "color": self.cget('fill'),
-            "width": self.cget('width')
+            "width": self.cget('width'),
+            "dash": self.cget('dash')
         }
     
     def set_data(
@@ -2834,6 +2846,7 @@ class _Plot(_BaseSubwidget):
             r: ArrayLike | None = None,
             color: str | None = None,
             width: Dimension | None = None,
+            dash: str | tuple[Int] | None = None,
             smooth: bool | None = None,
             state: Literal['normal', 'hidden', 'disabled'] = 'normal',
             antialias: bool = True,
@@ -2872,6 +2885,7 @@ class _Plot(_BaseSubwidget):
             self._tkwidget,
             color=next(color_cycle),
             width=width,
+            dash=dash,
             smooth=smooth,
             state=state,
             antialias=antialias,

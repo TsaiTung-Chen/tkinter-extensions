@@ -190,7 +190,8 @@ common_style = {
     "line": {
         "zorder": 5.0,
         "width": '2p',
-        "smooth": False
+        "smooth": False,
+        "dash": ''
     },
     
     "rect": {
