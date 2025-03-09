@@ -518,6 +518,7 @@ class _Transform2D:  # 2D transformation
 class _BaseElement:
     def __init__(self, canvas: tk.Canvas, tag: str = ''):
         assert isinstance(canvas, tk.Canvas), canvas
+        assert isinstance(canvas._figure, Figure), canvas._figure
         assert isinstance(tag, str), tag
         
         self._root = canvas._root
@@ -1210,6 +1211,15 @@ class _Rectangle(_BaseArtist):
 # ---- Figure Regions
 # =============================================================================
 class _BaseRegion(_BaseElement):
+    def __init__(self, plot: _Plot, canvas: tk.Canvas | None = None, **kwargs):
+        assert isinstance(plot, _Plot), plot
+        assert isinstance(plot._figure, Figure), plot._figure
+        canvas = plot._tkwidget if canvas is None else canvas
+        super().__init__(canvas, **kwargs)
+        self._plot: _Plot = plot
+        self._plot_tk: tk.Canvas = plot._tkwidget
+        self._figure: Figure = plot._figure
+    
     @property
     def _default_style(self) -> dict[str, Any]:
         return self._figure._default_style
@@ -1227,12 +1237,12 @@ class _BaseRegion(_BaseElement):
 class _Axis(_BaseRegion):
     def __init__(
             self,
-            canvas: _Plot | _Suptitle,
+            plot: _Plot,
             side: Literal['r', 'b', 'l', 't'],
             *args, 
             **kwargs
     ):
-        super().__init__(canvas=canvas, *args, **kwargs)
+        super().__init__(plot, *args, **kwargs)
         self._side: Literal['r', 'b', 'l', 't'] = side
         self._label: _Text = _Text(
             self._canvas, text='', tag=f'{self._tag}.label.text'
@@ -1271,12 +1281,12 @@ class _Axis(_BaseRegion):
 class _Ticks(_BaseRegion):
     def __init__(
             self,
-            canvas: _Plot | _Suptitle,
+            plot: _Plot,
             side: Literal['r', 'b', 'l', 't'],
             *args, 
             **kwargs
     ):
-        super().__init__(canvas=canvas, *args, **kwargs)
+        super().__init__(plot, *args, **kwargs)
         self._side: Literal['r', 'b', 'l', 't'] = side
         self._growing_side: int = {"r": 0, "b": 1, "l": 2, "t": 3}[side]
         
@@ -1809,8 +1819,8 @@ class _Ticks(_BaseRegion):
 
 
 class _Frame(_BaseRegion):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, plot: _Plot, *args, **kwargs):
+        super().__init__(plot, *args, **kwargs)
         self._req_grid_enabled: dict[str, bool | None] = dict.fromkeys('rblt')
         self._req_grid_cdata: dict[str, NDArray[float]] = {}
         
@@ -1929,9 +1939,10 @@ class _Frame(_BaseRegion):
 
 
 class _Legend(_BaseRegion):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, plot: _Plot, *args, **kwargs):
         tag = kwargs.pop('tag')
         canvas = ScrolledCanvas(
+            plot._tkwidget,
             *args,
             container_type='tk',
             propagate_geometry=False,
@@ -1939,14 +1950,11 @@ class _Legend(_BaseRegion):
             bind_mousewheel_add=False,
             **kwargs
         )
-        assert isinstance(canvas.container.master, _Plot), canvas.container.master
-        plot = canvas.container.master
-        canvas._figure = plot._figure
         canvas._zorder_tags: dict[_BaseArtist, str] = {}
-        super().__init__(canvas=canvas, tag=tag)
+        canvas._figure = plot._figure
+        super().__init__(plot, canvas=canvas, tag=tag)
         
-        self._plot: _Plot = plot
-        self._id: int = self._plot.create_window(
+        self._id: int = self._plot_tk.create_window(
             0, 0, anchor='nw', window=canvas.container, state='hidden'
         )
         
@@ -1984,13 +1992,13 @@ class _Legend(_BaseRegion):
         if x1 > x2:
             x1 = x2 = round((x1 + x2) / 2.)
         
-        self._plot.coords(self._id, x1, y1)
-        self._plot.itemconfigure(self._id, width=width, height=y2-y1+1)
+        self._plot_tk.coords(self._id, x1, y1)
+        self._plot_tk.itemconfigure(self._id, width=width, height=y2-y1+1)
         
         if not self._stale:
             return
         
-        self._plot.itemconfigure(self._id, state='hidden')
+        self._plot_tk.itemconfigure(self._id, state='hidden')
         
         canvas = self._canvas
         if (bg := self._req_facecolor) is None:
@@ -2057,7 +2065,7 @@ class _Legend(_BaseRegion):
                 symbols.append(symbol)
         
         state = 'normal' if self._req_enabled else 'hidden'
-        self._plot.itemconfigure(self._id, state=state)
+        self._plot_tk.itemconfigure(self._id, state=state)
         self._padx = padx
         self._stale = False
     
@@ -2065,7 +2073,7 @@ class _Legend(_BaseRegion):
         if not self._req_enabled:
             return None
         
-        bbox = self._plot.bbox(self._id)
+        bbox = self._plot_tk.bbox(self._id)
         if bbox is None:
             return None
         
@@ -2215,30 +2223,32 @@ class _Legend(_BaseRegion):
 # ---- Figure Subwidgets
 # =============================================================================
 class _BaseSubwidget:
-    def __init__(self, master: tk.Canvas, **kwargs):
-        assert isinstance(master, (Figure, _BaseSubwidget)), master
-        assert isinstance(master, Figure) or isinstance(master.master, Figure)
+    def __init__(self, tkwidget: tk.BaseWidget):
+        assert isinstance(tkwidget, tk.BaseWidget), tkwidget
+        assert isinstance(tkwidget.master, Figure), tkwidget.master
+        tkwidget._figure = figure = tkwidget.master
+        tkwidget._wrapper = self
         
-        super().__init__(master=master, **kwargs)
         self._resize = defer(100)(self._resize)
-        self._figure = master if isinstance(master, Figure) else master.master
+        self._tkwidget = tkwidget
+        self._figure = figure
         self._resizing: bool = False
         self._draw_idle_id: str = 'after#'
-        self._zorder_tags: dict[_BaseArtist, str] = {}
         self._size: tuple[int, int] = (
-            self.winfo_reqwidth(), self.winfo_reqheight()
+            tkwidget.winfo_reqwidth(), tkwidget.winfo_reqheight()
         )
         self._req_facecolor: str | None = None
         
-        if isinstance(self, tk.Canvas):
-            self.bind('<Configure>', self._on_configure, add=True)
+        if isinstance(tkwidget, tk.Canvas):
+            tkwidget._zorder_tags: dict[_BaseArtist, str] = {}
+            tkwidget.bind('<Configure>', self._on_configure, add=True)
     
     @property
     def _default_style(self) -> dict[str, Any]:
         return self._figure._default_style
     
     def _to_px(self, dimension: Dimension) -> float | tuple[float, ...]:
-        return _to_px(self._root(), dimension)
+        return _to_px(self._tkwidget._root(), dimension)
     
     def _on_configure(self, event: tk.Event):
         def _resize():
@@ -2248,9 +2258,9 @@ class _BaseSubwidget:
         
         if not self._resizing:
             self._resizing = True
-            self.itemconfigure('user=True', state='hidden')
-        self.after_cancel(self._draw_idle_id)
-        self._draw_idle_id = self.after_idle(_resize)
+            self._tkwidget.itemconfigure('user=True', state='hidden')
+        self._tkwidget.after_cancel(self._draw_idle_id)
+        self._draw_idle_id = self._tkwidget.after_idle(_resize)
     
     def _resize(self, event: tk.Event):
         self._size = (event.width, event.height)
@@ -2258,22 +2268,23 @@ class _BaseSubwidget:
     def update_theme(self):
         self.set_facecolor(self._req_facecolor)
         
-        for artist in self._zorder_tags:
-            artist._stale = True
+        if isinstance(self._tkwidget, tk.Canvas):
+            for artist in self._tkwidget._zorder_tags:
+                artist._stale = True
     
     def draw(self):
         raise NotImplementedError
     
     def draw_idle(self):
-        self.after_cancel(self._draw_idle_id)
-        self._draw_idle_id = self.after_idle(self.draw)
+        self._tkwidget.after_cancel(self._draw_idle_id)
+        self._draw_idle_id = self._tkwidget.after_idle(self.draw)
     
     def _set_facecolor(self, color: str | None = None) -> str:
         assert isinstance(color, (str, type(None))), color
         
         default_color = self._default_style["facecolor"]
         new_color = default_color if color is None else color
-        self.configure(background=new_color)
+        self._tkwidget.configure(background=new_color)
         self._req_facecolor = color
         
         return new_color
@@ -2282,15 +2293,17 @@ class _BaseSubwidget:
         self._set_facecolor(color=color)
     
     def get_facecolor(self) -> str:
-        return self["background"]
+        return self._tkwidget["background"]
 
 
-class _Suptitle(_BaseSubwidget, tk.Canvas):
+class _Suptitle(_BaseSubwidget):
     _tag: str = 'suptitle'
     
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._text: _Text = _Text(self, text='', tag=f'{self._tag}.text')
+    def __init__(self, master: Figure, *args, **kwargs):
+        assert isinstance(master, Figure), master
+        canvas = tk.Canvas(master, *args, **kwargs)
+        super().__init__(canvas)
+        self._text: _Text = _Text(canvas, text='', tag=f'{self._tag}.text')
         self.set_facecolor()
     
     def _resize(self, event: tk.Event):
@@ -2303,8 +2316,8 @@ class _Suptitle(_BaseSubwidget, tk.Canvas):
         xys = self._text.bbox()
         if xys is not None:
             x1, y1, x2, y2 = xys
-            self.configure(width=x2-x1+1, height=y2-y1+1)
-            self.update_idletasks()  # triggers `self._on_configure`
+            self._tkwidget.configure(width=x2-x1+1, height=y2-y1+1)
+            self._tkwidget.update_idletasks()  # triggers `self._on_configure`
     
     def get_title(self) -> _Text:
         return self._text
@@ -2333,11 +2346,13 @@ class _Suptitle(_BaseSubwidget, tk.Canvas):
         return self._text.get_style()
 
 
-class _Plot(_BaseSubwidget, tk.Canvas):
+class _Plot(_BaseSubwidget):
     _tag: str = 'plot'
     
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, master: Figure, *args, **kwargs):
+        assert isinstance(master, Figure), master
+        canvas = tk.Canvas(master, *args, **kwargs)
+        super().__init__(canvas)
         
         artists = {"lines": []}
         self._colors: dict[str, Cycle] = {"lines": self._create_color_cycle()}
@@ -2346,7 +2361,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         self._lartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._rartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         
-        self._title: _Text = _Text(self, text='', tag='title.text')
+        self._title: _Text = _Text(canvas, text='', tag='title.text')
         self._taxis: _Axis = _Axis(self, side='t', tag='taxis')
         self._baxis: _Axis = _Axis(self, side='b', tag='baxis')
         self._laxis: _Axis = _Axis(self, side='l', tag='laxis')
@@ -2385,7 +2400,8 @@ class _Plot(_BaseSubwidget, tk.Canvas):
             self._get_ticks(side).update_theme()
     
     def draw(self):
-        self._figure.event_generate('<<DrawStarted>>')
+        canvas = self._tkwidget
+        canvas.event_generate('<<DrawStarted>>')
         
         # Get data limits
         _dlimits = [
@@ -2543,12 +2559,12 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         
         # Raise artists in order
         for tag in sorted(
-                set(self._zorder_tags.values()),
+                set(self._tkwidget._zorder_tags.values()),
                 key=lambda t: float(t.split('zorder=', 1)[1])
         ):
-            self.tag_raise(tag)
+            canvas.tag_raise(tag)
         
-        self._figure.event_generate('<<DrawEnded>>')
+        canvas.event_generate('<<DrawEnded>>')
     
     def delete_all(self, draw: bool = False):
         for artist in self.artists:
@@ -2853,7 +2869,7 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         y_lines = y_artists["lines"]
         
         line = _Line(
-            self,
+            self._tkwidget,
             color=next(color_cycle),
             width=width,
             smooth=smooth,
@@ -2873,28 +2889,30 @@ class _Plot(_BaseSubwidget, tk.Canvas):
         return line
 
 
-class _Toolbar(_BaseSubwidget, tk.Frame):
+class _Toolbar(_BaseSubwidget):
     _tag: str = 'toolbar'
     
     def __init__(
             self,
-            figure: Figure,
+            master: Figure,
             var_coord: tk.Variable,
             **kwargs
     ):
-        super().__init__(master=figure, **kwargs)
+        assert isinstance(master, Figure), master
+        frame = tk.Frame(master, **kwargs)
+        super().__init__(frame)
         
-        self._home_bt = ttk.Button(self, text='Home', command=self._home_view)
+        self._home_bt = ttk.Button(frame, text='Home', command=self._home_view)
         self._home_bt.pack(side='left')
-        self._prev_bt = ttk.Button(self, text='Prev', command=self._prev_view)
+        self._prev_bt = ttk.Button(frame, text='Prev', command=self._prev_view)
         self._prev_bt.pack(side='left', padx=('3p', '0p'))
-        self._next_bt = ttk.Button(self, text='Next', command=self._next_view)
+        self._next_bt = ttk.Button(frame, text='Next', command=self._next_view)
         self._next_bt.pack(side='left', padx=('3p', '0p'))
-        self._pan_bt = ttk.Button(self, text='Pan', command=self._pan_view)
+        self._pan_bt = ttk.Button(frame, text='Pan', command=self._pan_view)
         self._pan_bt.pack(side='left', padx=('6p', '0p'))
-        self._zoom_bt = ttk.Button(self, text='Zoom', command=self._zoom_view)
+        self._zoom_bt = ttk.Button(frame, text='Zoom', command=self._zoom_view)
         self._zoom_bt.pack(side='left', padx=('3p', '0p'))
-        self._xyz_lb = tk.Label(self, textvariable=var_coord)
+        self._xyz_lb = tk.Label(frame, textvariable=var_coord)
         self._xyz_lb.pack(side='left', padx=('6p', '0p'))
         
         self.set_facecolor()
@@ -3078,10 +3096,10 @@ class Figure(UndockedFrame):
         if text is not None:  # enable suptitle
             if not hasattr(self, '_suptitle'):
                 self._suptitle = _Suptitle(self)
-                self._suptitle.grid(row=0, column=0, sticky='we')
+                self._suptitle._tkwidget.grid(row=0, column=0, sticky='we')
                 if hasattr(self, '_plots'):
                     n_rows, n_cols = self._plots.shape
-                    self._suptitle.grid(columnspan=n_cols)
+                    self._suptitle._tkwidget.grid(columnspan=n_cols)
             self._suptitle.set_facecolor(color=facecolor)
             self._suptitle.set_style(
                 text=text,
@@ -3137,28 +3155,29 @@ class Figure(UndockedFrame):
         if hasattr(self, '_plots'):
             for r, row in enumerate(self._plots):
                 for c, plot in enumerate(row):
-                    plot.grid_forget()
+                    plot._tkwidget.grid_forget()
                     self.grid_columnconfigure(c, weight=0)
                 self.grid_rowconfigure(r, weight=0)
         
         # Update suptitle's position
         if hasattr(self, '_suptitle'):
-            self._suptitle.grid(columnspan=n_cols)
+            self._suptitle._tkwidget.grid(columnspan=n_cols)
         
         # Update toolbar's position
         if hasattr(self, '_toolbar'):
-            self._toolbar.grid(row=n_rows+1, columnspan=n_cols)
+            self._toolbar._tkwidget.grid(row=n_rows+1, columnspan=n_cols)
         
         # Create plots
         self._plots: NDArray[_Plot] = np.array([
             [ _Plot(self) for c in range(n_cols) ] for r in range(n_rows)
         ])
+        grid_kw = {"sticky": 'nesw', "padx": padx, "pady": pady}
         for r, row in enumerate(self._plots, 1):  # plots start from 2nd row
             for c, plot in enumerate(row):
-                plot.grid(row=r, column=c, sticky='nesw', padx=padx, pady=pady)
-                plot.configure(width=0, height=0)  # this makes all space as
-                 # extra space which will be distributed to each row and column
-                 # with each weight specified in `grid_rowconfigure` and
+                plot._tkwidget.grid(row=r, column=c, **grid_kw)
+                plot._tkwidget.configure(width=0, height=0)  # this makes all space
+                 # become extra space which will be distributed to each row and
+                 # column with each weight specified in `grid_rowconfigure` and
                  # `grid_columnconfigure` respectively.
         
         # Set the size ratios
@@ -3184,20 +3203,17 @@ class Figure(UndockedFrame):
     
     def set_toolbar(self, enable: bool = True) -> _Toolbar | None:
         if enable and not hasattr(self, '_toolbar'):
-            self._toolbar = _Toolbar(
-                self,
-                var_coord=self._var_coord
-            )
+            self._toolbar = _Toolbar(self, var_coord=self._var_coord)
             kw = {"column": 0, "sticky": 'we', "padx": 9, "pady": (9, 0)}
             if hasattr(self, '_plots'):
                 n_rows, n_cols = self._plots.shape
-                self._toolbar.grid(row=n_rows+1, columnspan=n_cols, **kw)
+                self._toolbar._tkwidget.grid(row=n_rows+1, columnspan=n_cols, **kw)
             else:
-                self._toolbar.grid(row=1, **kw)
+                self._toolbar._tkwidget.grid(row=1, **kw)
                  # the toolbar will be `grid` again when `set_plots` is called
                 self.grid_columnconfigure(0, weight=1)
         elif not enable and hasattr(self, '_toolbar'):
-            self._toolbar.destroy()
+            self._toolbar._tkwidget.destroy()
             delattr(self, '_toolbar')
         
         if enable:
