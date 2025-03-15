@@ -2293,15 +2293,15 @@ class _Legend(_BaseRegion):
     def get_labels(self) -> list[_Text]:
         return self._labels
     
-    def _set_styles_and_labels(
-            self, symbols: list[_Line], labels: list[str]
+    def _set_contents(
+            self, lines: list[_Line], labels: list[str]
     ):
-        assert isinstance(symbols, list), symbols
+        assert isinstance(lines, list), lines
         assert isinstance(labels, list), labels
-        assert len(symbols) == len(labels), (len(symbols), len(labels))
-        assert all( isinstance(s, _Line) for s in symbols ), symbols
+        assert len(lines) == len(labels), (len(lines), len(labels))
+        assert all( isinstance(line, _Line) for line in lines ), lines
         
-        symbols_kw = [ s._get_legend_config() for s in symbols ]
+        symbols_kw = [ line._get_legend_config() for line in lines ]
         
         if symbols_kw != self._req_symbols:
             self._req_symbols = symbols_kw
@@ -2640,13 +2640,13 @@ class _Plot(_BaseSubwidget):
             artist.draw()
         
         ## Draw legend again after the user-defined artists are drawn
-        symbols, labels = [], []
+        lines, labels = [], []
         for side in 'bt':
             for line in getattr(self, f'_{side}artists')["lines"]:
                 if (label := line.get_label()) is not None:
                     labels.append(label)
-                    symbols.append(line)
-        self._legend._set_styles_and_labels(symbols, labels)
+                    lines.append(line)
+        self._legend._set_contents(lines, labels)
         self._legend.draw()
         
         # Raise artists in order
