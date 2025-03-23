@@ -16,6 +16,8 @@ common_style = {
         '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
     ],
     
+    #TODO: margin
+    
     "suptitle.text": {
         "zorder": 10.0,
         "size": 20,
@@ -144,7 +146,7 @@ common_style = {
         "width": '1p'
     },
     
-    "frame.rect": {
+    "frame.rectangle": {
         "zorder": 0.0,
         "width": '1p'
     },
@@ -173,6 +175,31 @@ common_style = {
         "pady": ('3p', '0p')
     },
     
+    "datalabel.offset": ('0p', '-36p'),
+    "datalabel.scientific": 4,
+    "datalabel.point.oval": {
+        "zorder": float('inf'),
+        "width": '1p'
+    },
+    "datalabel.arrow.polygon": {
+        "zorder": float('inf'),
+        "width": '1p'
+    },
+    "datalabel.box.rectangle": {
+        "zorder": float('inf'),
+        "width": '1p'
+    },
+    "datalabel.text": {
+        "zorder": float('inf'),
+        "size": 12,
+        "weight": 'normal',
+        "slant": 'roman',
+        "angle": 0,
+        "sticky": 'center',
+        "padx": ('6p', '6p'),
+        "pady": ('6p', '6p')
+    },
+    
     "text": {
         "zorder": 5.0,
         "family": None,
@@ -194,9 +221,22 @@ common_style = {
         "dash": ''
     },
     
-    "rect": {
+    "rectangle": {
         "zorder": 5.0,
         "width": '2p',
+        "facecolor": ''
+    },
+    
+    "oval": {
+        "zorder": 5.0,
+        "width": '2p',
+        "facecolor": ''
+    },
+    
+    "polygon": {
+        "zorder": 5.0,
+        "width": '2p',
+        "smooth": False,
         "facecolor": ''
     }
 }
@@ -249,8 +289,8 @@ light_style.update({
         "color": '#1A1A1A'
     },
     
-    "frame.rect": {
-        **common_style["frame.rect"],
+    "frame.rectangle": {
+        **common_style["frame.rectangle"],
         "facecolor": '#CFD9E8',
         "edgecolor": '#666666'
     },
@@ -262,6 +302,19 @@ light_style.update({
     "legend.facecolor": '#D9E3F1',
     "legend.edgecolor": '#D9E3F1',
     
+    "datalabel.point.oval": {
+        **common_style["datalabel.point.oval"],
+        "edgecolor": '#1A1A1A'
+    },
+    "datalabel.arrow.polygon": {
+        **common_style["datalabel.arrow.polygon"],
+        "edgecolor": '#1A1A1A'
+    },
+    "datalabel.box.recgangle": {
+        **common_style["datalabel.box.rectangle"],
+        "edgecolor": '#1A1A1A'
+    },
+    
     "text": {
         **common_style["text"],
         "color": 'black'
@@ -272,8 +325,18 @@ light_style.update({
         "color": 'black'
     },
     
-    "rect": {
-        **common_style["rect"],
+    "rectangle": {
+        **common_style["rectangle"],
+        "edgecolor": 'black'
+    },
+    
+    "oval": {
+        **common_style["oval"],
+        "edgecolor": 'black'
+    },
+    
+    "polygon": {
+        **common_style["polygon"],
         "edgecolor": 'black'
     }
 })
@@ -326,8 +389,8 @@ dark_style.update({
         "color": '#F2F2F2'
     },
     
-    "frame.rect": {
-        **common_style["frame.rect"],
+    "frame.rectangle": {
+        **common_style["frame.rectangle"],
         "facecolor": 'black',
         "edgecolor": '#808080'
     },
@@ -339,6 +402,19 @@ dark_style.update({
     "legend.facecolor": 'black',
     "legend.edgecolor": 'black',
     
+    "datalabel.point.oval": {
+        **common_style["datalabel.point.oval"],
+        "edgecolor": '#F2F2F2'
+    },
+    "datalabel.arrow.polygon": {
+        **common_style["datalabel.arrow.polygon"],
+        "edgecolor": '#F2F2F2'
+    },
+    "datalabel.box.recgangle": {
+        **common_style["datalabel.box.rectangle"],
+        "edgecolor": '#F2F2F2'
+    },
+    
     "text": {
         **common_style["text"],
         "color": 'white'
@@ -349,8 +425,18 @@ dark_style.update({
         "color": 'white'
     },
     
-    "rect": {
-        **common_style["rect"],
+    "rectangle": {
+        **common_style["rectangle"],
+        "edgecolor": 'white'
+    },
+    
+    "oval": {
+        **common_style["oval"],
+        "edgecolor": 'white'
+    },
+    
+    "polygon": {
+        **common_style["polygon"],
         "edgecolor": 'white'
     }
 })

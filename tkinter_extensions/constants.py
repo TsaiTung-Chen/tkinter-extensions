@@ -11,6 +11,23 @@ import numpy as np
 
 
 PLATFORM = sys.platform
+BUILTIN_WIDGETS = [
+    'TButton', 'TCheckbutton', 'TCombobox', 'TEntry', 'TFrame', 'TLabel',
+    'TLabelFrame', 'TMenubutton', 'TNotebook', 'TPandedwindow',
+    'TProgressbar', 'TRadiobutton', 'TScale', 'TScrollbar', 'TSeparator',
+    'TSizegrip', 'Treeview'
+]
+
+
+TK_DPI = 72.  # Tk default points (physical dots) per inch
+if PLATFORM == 'darwin':  # macOS has a default PPI value of 72
+    SYSTEM_PPI = 72.
+    DEFAULT_PPD = SYSTEM_PPI / TK_DPI  # pixels per point => this is about 1.00
+else:  # Windows and Linux have a default PPI value of 96
+    SYSTEM_PPI = 96.
+    DEFAULT_PPD = SYSTEM_PPI / TK_DPI  # pixels per point => this is about 1.33
+
+
 MLEFTPRESS = '<ButtonPress-1>'
 MLEFTRELEASE = '<ButtonRelease-1>'
 MDLEFTPRESS = '<Double-ButtonPress-1>'
@@ -25,6 +42,7 @@ else:
     MRIGHTRELEASE = '<ButtonRelease-3>'
     MDRIGHTPRESS = '<Double-ButtonPress-3>'
     MRIGHTMOTION = '<B3-Motion>'
+MMOTION = '<Motion>'
 MSCROLL = ['<ButtonPress-4>', '<ButtonPress-5>'] if PLATFORM == 'linux' \
     else ['<MouseWheel>']
 
@@ -55,23 +73,8 @@ MODIFIER_MASKS = {
     "Alt": int('0b100_000_000_000_000_000', base=2)
 }
 
-
-BUILTIN_WIDGETS = [
-    'TButton', 'TCheckbutton', 'TCombobox', 'TEntry', 'TFrame', 'TLabel',
-    'TLabelFrame', 'TMenubutton', 'TNotebook', 'TPandedwindow',
-    'TProgressbar', 'TRadiobutton', 'TScale', 'TScrollbar', 'TSeparator',
-    'TSizegrip', 'Treeview'
-]
-
-
-TK_DPI = 72.  # Tk default points (physical dots) per inch
-if PLATFORM == 'darwin':  # macOS has a default PPI value of 72
-    SYSTEM_PPI = 72.
-    DEFAULT_PPD = SYSTEM_PPI / TK_DPI  # pixels per point => this is about 1.00
-else:  # Windows and Linux have a default PPI value of 96
-    SYSTEM_PPI = 96.
-    DEFAULT_PPD = SYSTEM_PPI / TK_DPI  # pixels per point => this is about 1.33
-
+DRAWSTARTED = '<<DrawStarted>>'
+DRAWENDED = '<<DrawEnded>>'
 
 Int = int | np.integer
 Float = float | np.floating

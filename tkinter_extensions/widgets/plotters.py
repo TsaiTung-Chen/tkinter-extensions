@@ -20,6 +20,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends._backend_tk import NavigationToolbar2Tk, ToolTip
 
 from tkinter_extensions import variables as vrb
+from tkinter_extensions.constants import DRAWSTARTED, DRAWENDED
 from tkinter_extensions.utils import create_image_pair, quit_if_all_closed, defer
 from tkinter_extensions.widgets._others import UndockedFrame
 from tkinter_extensions.widgets._matplotlib_config import RC
@@ -144,9 +145,9 @@ class PlotterFigureCanvasTkAgg(FigureCanvasTkAgg):
         super().__init__(*args, **kwargs)
     
     def draw(self):
-        self.get_tk_widget().event_generate('<<DrawStarted>>')
+        self.get_tk_widget().event_generate(DRAWSTARTED)
         super().draw()
-        self.get_tk_widget().event_generate('<<DrawEnded>>')
+        self.get_tk_widget().event_generate(DRAWENDED)
 
 
 class ToolTipTtk(ToolTip):
@@ -449,8 +450,8 @@ class Plotter(UndockedFrame):
         self._delete_on_destroy.append(self._figurecanvas)
         canvas = self._figurecanvas.get_tk_widget()
         canvas.grid(row=0, column=0, sticky='nesw')
-        canvas.bind('<<DrawStarted>>', self._on_draw_started, add=True)
-        canvas.bind('<<DrawEnded>>', self._on_draw_ended, add=True)
+        canvas.bind(DRAWSTARTED, self._on_draw_started, add=True)
+        canvas.bind(DRAWENDED, self._on_draw_ended, add=True)
         
         self._toolbar = NavigationToolbar2Ttk(
             self._figurecanvas, self, pack_toolbar=False)
