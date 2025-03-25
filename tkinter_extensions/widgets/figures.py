@@ -2625,12 +2625,12 @@ class _DataLabel(_BaseComponent):
         self._point.set_coords(point_x1, point_y1, point_x2, point_y2)
         self._point.draw()
         
-        # Draw arrow
-        d = min(box_x2-box_x1+1, box_y2-box_y1+1)  # shortest side dimension
+        # Draw arrow (pratically, it's a triangle)
+        s = min(box_x2-box_x1+1, box_y2-box_y1+1) / 2.  # shortest side / 2
         tan_dx, tan_dy = (x1 - x0), (y1 - y0)  # tangent vector
         dist = np.sqrt(tan_dx**2 + tan_dy**2)
         tan_dx, tan_dy = (tan_dx / dist), (tan_dy / dist)  # unit tangent vector
-        r = d*0.35 if dist == d else min(max(dist/abs(dist-d)*d*0.15, 1.), d*0.35)
+        r = s if dist == s else min(max(dist/abs(dist-s)*s/2.*0.7, 1.), s)
         ppd_dx, ppd_dy = int(tan_dy * r), int(-tan_dx * r)  # perpendicular vector
         x2, y2 = (x1 - ppd_dx), (y1 - ppd_dy)
         x1, y1 = (x1 + ppd_dx), (y1 + ppd_dy)
@@ -2713,7 +2713,7 @@ class _DataLabel(_BaseComponent):
             return normal_w
         #> end of _set_active_width()
         
-        # Restore the normal width if they haven't been restored
+        # Restore the normal widths if they haven't been restored
         if self._line_width is not None:
             self._on_leave(event)
         
@@ -2723,7 +2723,7 @@ class _DataLabel(_BaseComponent):
         self._line_width = _set_active_width(self._line)
     
     def _on_leave(self, event: tk.Event | None = None):
-        # Restore the normal width
+        # Restore the normal widths
         self._box.itemconfigure(width=self._box_edgewidth)
         self._point.itemconfigure(width=self._point_edgewidth)
         self._arrow.itemconfigure(width=self._arrow_edgewidth)
