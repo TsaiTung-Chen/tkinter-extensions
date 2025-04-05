@@ -492,11 +492,11 @@ class _Transform2D:  # 2D transformation
         
         scalar = xs.ndim == 0
         
-        if clip:
+        if clip and not scalar:
             xs, ys = self._clip(xs, ys, limits='input')
         xs = self._x_tf(xs, round_=round_)
         ys = self._y_tf(ys, round_=round_)
-        if clip:
+        if clip and not scalar:
             xs, ys = self._clip(xs, ys, limits='output')
         
         xy = np.asarray([xs, ys])
@@ -509,66 +509,65 @@ class _Transform2D:  # 2D transformation
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
             limits: Literal['input', 'output']
-    ) -> tuple[NDArray[IntFloat], NDArray[IntFloat]]:#TODO: revamp this
-        def _interpolate(index1: Int, index2: Int) -> tuple[IntFloat, IntFloat]:
-            if xmin_retain[index1] ^ xmin_retain[index2]:
-                direction = 'x'
-                x = xmin
-            elif xmax_retain[index1] ^ xmax_retain[index2]:
-                direction = 'x'
-                x = xmax
-            elif ymin_retain[index1] ^ ymin_retain[index2]:
-                direction = 'y'
-                y = ymin
-            else:  # ymax_retain[index1] ^ ymax_retain[index2]
-                direction = 'y'
-                y = ymax
+    ) -> tuple[NDArray[IntFloat], NDArray[IntFloat]]:
+        def _interpolate(u: str) -> tuple[IntFloat, IntFloat]:
+            assert u in ('x', 'y'), u
             
-            if direction == 'x':
-                ## The input argument `xp` must be increasing
-                x1, x2 = xs[[index1, index2]]
-                if x1 < x2:
-                    y = np.interp(x, xp=[x1, x2], fp=ys[[index1, index2]])
-                else:
-                    y = np.interp(x, xp=[x2, x1], fp=ys[[index2, index1]])
-            else:
-                ## The input argument `xp` must be increasing
-                y1, y2 = ys[[index1, index2]]
-                if y1 < y2:
-                    x = np.interp(y, xp=[y1, y2], fp=xs[[index1, index2]])
-                else:
-                    x = np.interp(y, xp=[y2, y1], fp=xs[[index2, index1]])
+            if u == 'x':
+                us, vs = (xs.copy(), ys.copy())
+                umin, umax = (xmin, xmax)
+                _interp = lambda i, x: (ys[i+1]-ys[i])/(xs[i+1]-xs[i]) \
+                    * (x-xs[i]) + ys[i]
+            else:  # u == 'y'
+                us, vs = (ys.copy(), xs.copy())
+                umin, umax = (ymin, ymax)
+                _interp = lambda i, y: (xs[i+1]-xs[i])/(ys[i+1]-ys[i]) \
+                    * (y-ys[i]) + xs[i]
             
-            return x, y
+            left = umin <= us
+            right = us <= umax
+            cross_min = np.diff(left.astype(int))
+            cross_max = np.diff(right.astype(int))
+            
+            for i in (cross_min == +1).nonzero()[0]:  # +1: us[i] < umin <= us[i+1]
+                vs[i] = _interp(i, umin)
+                us[i] = umin
+                left[i] = True
+            for i in (cross_min == -1).nonzero()[0]:  # -1: us[i] >= umin > us[i+1]
+                vs[i+1] = _interp(i, umin)
+                us[i+1] = umin
+                left[i+1] = True
+            for i in (cross_max == +1).nonzero()[0]:  # +1: us[i] > umax >= us[i+1]
+                vs[i] = _interp(i, umax)
+                us[i] = umax
+                right[i] = True
+            for i in (cross_max == -1).nonzero()[0]:  # -1: us[i] <= umax < us[i+1]
+                vs[i+1] = _interp(i, umax)
+                us[i+1] = umax
+                right[i+1] = True
+            
+            retain = left & right
+            
+            if u == 'x':
+                return us[retain], vs[retain]
+            # u == 'y'
+            return vs[retain], us[retain]
         #> end of _interpolate()
         
         assert limits in ('input', 'output'), limits
+        assert xs.shape == ys.shape, [xs.shape, ys.shape]
         
         if limits == 'input':
             xmin, xmax = self._inp_xlimits
             ymin, ymax = self._inp_ylimits
-        else:
+        else:  # limits == 'input'
             xmin, xmax = self._out_xlimits
             ymin, ymax = self._out_ylimits
         
-        xmin_retain = xs >= xmin
-        xmax_retain = xs <= xmax
-        ymin_retain = ys >= ymin
-        ymax_retain = ys <= ymax
-        retain = xmin_retain & xmax_retain & ymin_retain & ymax_retain
+        xs, ys = _interpolate('x')
+        xs, ys = _interpolate('y')
         
-        nonzeros, = np.atleast_1d(retain).nonzero()
-        if nonzeros.size:
-            i2, j1 = nonzeros[0], nonzeros[-1]
-            i1, j2 = (i2 - 1), (j1 + 1)
-            if i1 >= 0:
-                xs[i1], ys[i1] = _interpolate(i1, i2)
-                retain[i1] = True
-            if j2 <= retain.size - 1:
-                xs[j2], ys[j2] = _interpolate(j1, j2)
-                retain[j2] = True
-        
-        return xs[retain], ys[retain]
+        return xs, ys
     
     def get_inverse(self) -> _Transform2D:
         return _Transform2D(
@@ -3788,7 +3787,7 @@ if __name__ == '__main__':
     y = np.sin(2*np.pi*1*x)
     #x = np.array([3, 6, 6, 3, 3], dtype=float)
     #y = np.array([-0.5, -0.5, 0.5, 0.5, -0.5], dtype=float)
-    y = 10**x
+    #y = 10**x
     
     fig = Figure(root, toolbar=True)
     fig.pack(fill='both', expand=True)
@@ -3810,6 +3809,7 @@ if __name__ == '__main__':
             #plt.set_rtickslabels(True)
             #plt.set_lscale('log')
             #plt.set_llimits(10, 150)
+            plt.set_llimits(-1.5, 1.5)
             plt.set_legend(True)
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
