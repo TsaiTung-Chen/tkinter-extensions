@@ -47,16 +47,17 @@ def _cleanup_tk_attributes(obj):
 def _to_px(
         root: tk.Tk,
         dimension: Dimension | ArrayLike | None
-) -> float | tuple[float, ...]:
+) -> float | None | tuple[float | None, ...]:
     assert isinstance(root, tk.Tk), root
     
-    to_pixels = lambda d: round(root.winfo_fpixels(d))
+    _winfo_fpixels = root.winfo_fpixels
+    _to_pixels = lambda d: round(_winfo_fpixels(d))
     
     if dimension is None:
         return None
-    if isinstance(dimension, (str, IntFloat)):
-        return None if dimension is None else to_pixels(dimension)
-    return tuple( None if d is None else to_pixels(d) for d in dimension )
+    elif isinstance(dimension, (str, IntFloat)):
+        return _to_pixels(dimension)
+    return tuple( None if d is None else _to_pixels(d) for d in dimension )
 
 
 def _get_sticky_p(
