@@ -256,14 +256,15 @@ class _BaseTransform1D:  # 1D transformation
     def __call__(
             self,
             xs: IntFloat | NDArray[IntFloat]
-    ) -> NDArray[IntFloat] | tuple[
-        NDArray[IntFloat], np.bool | NDArray[bool]
-    ]:
+    ) -> NDArray[Float]:
         assert isinstance(xs, (IntFloat, np.ndarray)), xs
         
         xs = np.asarray(xs)
         dt = xs.dtype
         assert any( np.issubdtype(dt, d) for d in IntFloat.__args__ ), xs.dtype
+        
+        if not np.issubdtype(dt, np.floating):
+            xs = xs.astype(float)
         
         return xs
     
@@ -294,9 +295,7 @@ class _FirstOrderPolynomial(_BaseTransform1D):
             self,
             xs: IntFloat | NDArray[IntFloat],
             round_: bool = False
-    ) -> IntFloat | NDArray[IntFloat] | tuple[
-        IntFloat | NDArray[IntFloat], np.bool | NDArray[bool]
-    ]:
+    ) -> Float | NDArray[Float]:
         xs = super().__call__(xs)
         ys = self._c0 + self._c1 * xs  # y(x) = c0 + c1 * x (0D or 1D array)
         
@@ -352,7 +351,7 @@ class _Logarithm(_BaseTransform1D):
             self,
             xs: IntFloat | NDArray[IntFloat],
             round_: bool = False
-    ) -> NDArray[IntFloat]:
+    ) -> NDArray[Float]:
         xs = super().__call__(xs)
         
         if self._base == 2.:
@@ -423,7 +422,7 @@ class _InverseLogarithm(_BaseTransform1D):
             self,
             xs: IntFloat | NDArray[IntFloat],
             round_: bool = False
-    ) -> NDArray[IntFloat]:
+    ) -> NDArray[Float]:
         xs = super().__call__(xs)
         ys = self._base ** ((xs - self._c0) / self._c1)
         
@@ -484,7 +483,7 @@ class _Transform2D:  # 2D transformation
             ys: IntFloat | NDArray[IntFloat],
             round_: bool = False,
             clip: bool = True
-    ) -> NDArray[IntFloat]:
+    ) -> NDArray[Float]:
         xs, ys = np.array(xs), np.array(ys)  # copy
         assert isinstance(xs, np.ndarray), xs
         assert isinstance(xs, np.ndarray), xs
@@ -510,50 +509,74 @@ class _Transform2D:  # 2D transformation
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
             limits: Literal['input', 'output']
-    ) -> tuple[NDArray[IntFloat], NDArray[IntFloat]]:
-        def _interpolate(u: str) -> tuple[IntFloat, IntFloat]:
+    ) -> tuple[NDArray[Float], NDArray[Float]]:
+        def _clip(
+                xs: NDArray[Float], ys: NDArray[Float], u: Literal['x', 'y']
+        ) -> tuple[NDArray[Float], NDArray[Float]]:
             assert u in ('x', 'y'), u
             
             if u == 'x':
-                us, vs = (xs.copy(), ys.copy())
+                us, vs = xs.copy(), ys.copy()
                 umin, umax = (xmin, xmax)
                 _interp = lambda i, x: (ys[i+1]-ys[i])/(xs[i+1]-xs[i]) \
                     * (x-xs[i]) + ys[i]
             else:  # u == 'y'
-                us, vs = (ys.copy(), xs.copy())
+                us, vs = ys.copy(), xs.copy()
                 umin, umax = (ymin, ymax)
                 _interp = lambda i, y: (xs[i+1]-xs[i])/(ys[i+1]-ys[i]) \
                     * (y-ys[i]) + xs[i]
             
-            left = umin <= us
-            right = us <= umax
-            cross_min = np.diff(left.astype(int))
-            cross_max = np.diff(right.astype(int))
-            
-            for i in (cross_min == +1).nonzero()[0]:  # +1: us[i] < umin <= us[i+1]
-                vs[i] = _interp(i, umin)
-                us[i] = umin
-                left[i] = True
-            for i in (cross_min == -1).nonzero()[0]:  # -1: us[i] >= umin > us[i+1]
-                vs[i+1] = _interp(i, umin)
-                us[i+1] = umin
-                left[i+1] = True
-            for i in (cross_max == +1).nonzero()[0]:  # +1: us[i] > umax >= us[i+1]
-                vs[i] = _interp(i, umax)
-                us[i] = umax
-                right[i] = True
-            for i in (cross_max == -1).nonzero()[0]:  # -1: us[i] <= umax < us[i+1]
-                vs[i+1] = _interp(i, umax)
-                us[i+1] = umax
-                right[i+1] = True
-            
-            retain = left & right
+            us, vs = _clip2(
+                us, vs, retain=umin <= us, ulimit=umin, interp=_interp
+            )
             
             if u == 'x':
-                return us[retain], vs[retain]
+                xs, ys = us.copy(), vs.copy()
+            else:  # u == 'y'
+                xs, ys = vs.copy(), us.copy()
+            
+            us, vs = _clip2(
+                us, vs, retain=us <= umax, ulimit=umax, interp=_interp
+            )
+            
+            if u == 'x':
+                return us, vs
             # u == 'y'
-            return vs[retain], us[retain]
-        #> end of _interpolate()
+            return vs, us
+        #> end of _clip()
+        
+        def _clip2(
+                us: NDArray[Float],
+                vs: NDArray[Float],
+                retain: NDArray[bool],
+                ulimit: Float,
+                interp: Callable
+        ) -> tuple[NDArray[Float], NDArray[Float]]:
+            cross = np.diff(retain.astype(int))
+            
+            us_inserts, vs_inserts = [], []
+            for i in (cross == +1).nonzero()[0]:
+                us[i] = ulimit
+                vs[i] = interp(i, ulimit)
+                retain[i] = True
+            for i in (cross == -1).nonzero()[0]:
+                j = i + 1
+                if retain[j]:
+                    k = retain[:j].sum()
+                    us_inserts.append([k, ulimit])
+                    vs_inserts.append([k, interp(i, ulimit)])
+                else:
+                    us[j] = ulimit
+                    vs[j] = interp(i, ulimit)
+                    retain[j] = True
+            
+            us, vs = us[retain], vs[retain]
+            if us_inserts:
+                us = np.insert(us, *zip(*us_inserts))
+                vs = np.insert(vs, *zip(*vs_inserts))
+            
+            return us, vs
+        #> end of _clip2()
         
         assert limits in ('input', 'output'), limits
         assert xs.shape == ys.shape, [xs.shape, ys.shape]
@@ -565,8 +588,8 @@ class _Transform2D:  # 2D transformation
             xmin, xmax = self._out_xlimits
             ymin, ymax = self._out_ylimits
         
-        xs, ys = _interpolate('x')
-        xs, ys = _interpolate('y')
+        xs, ys = _clip(xs, ys, 'x')
+        xs, ys = _clip(xs, ys, 'y')
         
         return xs, ys
     
@@ -770,7 +793,13 @@ class _BaseArtist(_BaseElement):
         return self.cget('state')
     
     def set_zorder(self, zorder: IntFloat | None = None):
-        assert isinstance(zorder, IntFloat), zorder
+        assert isinstance(zorder, (IntFloat, type(None))), zorder
+        if (self._x_side or self._y_side) and zorder is not None and not (
+                1 <= zorder <= 100):
+            raise ValueError(
+                'The `zorder` for a user-defined artist must satisfy '
+                f'1.0 <= `zorder` <= 100.0 but got `zorder` = {zorder}.'
+            )
         
         if zorder is not None and zorder != self._req_zorder:
             self._req_zorder = float(zorder)
@@ -3384,6 +3413,7 @@ class _Plot(_BaseWidgetWrapper):
             dash: str | tuple[Int] | None = None,
             smooth: bool | None = None,
             state: Literal['normal', 'hidden', 'disabled'] = 'normal',
+            zorder: IntFloat | None = None,
             label: str | None = None,
             datalabel: bool = True,
             antialias: bool = True
@@ -3436,6 +3466,7 @@ class _Plot(_BaseWidgetWrapper):
             tag='line'
         )
         line.set_data(x.ravel(), y.ravel())
+        line.set_zorder(zorder)
         x_lines.append(line)
         y_lines.append(line)
         
@@ -3784,7 +3815,7 @@ if __name__ == '__main__':
     
     root = Window(title='Figure Demo', themename='morph')
     
-    x = np.arange(0, 10, 1/48000, dtype=float)
+    x = np.arange(0, 10, 1/9, dtype=float)
     y = np.sin(2*np.pi*1*x)
     #x = np.array([3, 6, 6, 3, 3], dtype=float)
     #y = np.array([-0.5, -0.5, 0.5, 0.5, -0.5], dtype=float)
@@ -3810,7 +3841,7 @@ if __name__ == '__main__':
             #plt.set_rtickslabels(True)
             #plt.set_lscale('log')
             #plt.set_llimits(10, 150)
-            plt.set_llimits(-1.5, 1.5)
+            plt.set_llimits(-1.7, 1.7)
             plt.set_legend(True)
     
     fig.after(3000, lambda: root.style.theme_use('cyborg'))
