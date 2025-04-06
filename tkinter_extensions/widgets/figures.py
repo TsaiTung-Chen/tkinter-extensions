@@ -774,7 +774,7 @@ class _BaseArtist(_BaseElement):
         
         self.itemconfigure(state=state)
         
-        if self._antialias_enabled and self._canvas._windowingsystem != 'aqua':
+        if self._antialias_enabled:
             tk.Canvas.itemconfigure(self._canvas, self._id_aa, state=state)
         elif hasattr(self, '_id_aa'):
             tk.Canvas.itemconfigure(self._canvas, self._id_aa, state='hidden')
@@ -1220,7 +1220,7 @@ class _Line(_BaseArtist):
             cf.update(activewidth=cf["width"] + 2.)
         self.itemconfigure(**cf)
         
-        if self._antialias_enabled and self._canvas._windowingsystem != 'aqua':
+        if self._antialias_enabled:
             self._antialias(xys, **cf)
         
         # Update zorder and state
@@ -3815,7 +3815,7 @@ if __name__ == '__main__':
     
     root = Window(title='Figure Demo', themename='morph')
     
-    x = np.arange(0, 10, 1/9, dtype=float)
+    x = np.arange(0, 10, 1/48000, dtype=float)
     y = np.sin(2*np.pi*1*x)
     #x = np.array([3, 6, 6, 3, 3], dtype=float)
     #y = np.array([-0.5, -0.5, 0.5, 0.5, -0.5], dtype=float)
