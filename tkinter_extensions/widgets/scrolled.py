@@ -13,7 +13,7 @@ from typing import Literal
 
 import ttkbootstrap as ttk
 
-from tkinter_extensions.constants import MODIFIER_MASKS, COMMAND, MSCROLL
+from tkinter_extensions.constants import OS, MODIFIER_MASKS, COMMAND, MSCROLL
 from tkinter_extensions.utils import (
     defer,
     bind_recursively,
@@ -379,7 +379,6 @@ class _Scrolled:
         self.bind('<<MapChild>>', self._on_map_child, add=True)
         self.bind('<Configure>', self._on_configure, add=True)
         self.bind('<Enter>', lambda e: self.rebind_mousewheel(), add=True)
-        self._os = self.tk.call('tk', 'windowingsystem')
         
         redirect_layout_managers(self, container, orig_prefix='content_')
     
@@ -495,7 +494,7 @@ class _Scrolled:
             delta = 10.
         elif event.num == 5:  # Linux
             delta = -10.
-        elif self._os == "win32":  # Windows
+        elif OS == "Windows":  # Windows
             delta = event.delta / 120.
         else:  # Mac
             delta = event.delta
