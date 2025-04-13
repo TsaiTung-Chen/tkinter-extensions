@@ -510,7 +510,7 @@ class _Transform2D:  # 2D transformation
             ys: IntFloat | NDArray[IntFloat],
             limits: Literal['input', 'output']
     ) -> tuple[NDArray[Float], NDArray[Float]]:
-        def _clip(
+        def _restrict(
                 xs: NDArray[Float], ys: NDArray[Float], u: Literal['x', 'y']
         ) -> tuple[NDArray[Float], NDArray[Float]]:
             assert u in ('x', 'y'), u
@@ -526,7 +526,7 @@ class _Transform2D:  # 2D transformation
                 _interp = lambda i, y: (xs[i+1]-xs[i])/(ys[i+1]-ys[i]) \
                     * (y-ys[i]) + xs[i]
             
-            us, vs = _clip2(
+            us, vs = _interpolate(
                 us, vs, retain=umin <= us, ulimit=umin, interp=_interp
             )
             
@@ -535,7 +535,7 @@ class _Transform2D:  # 2D transformation
             else:  # u == 'y'
                 xs, ys = vs.copy(), us.copy()
             
-            us, vs = _clip2(
+            us, vs = _interpolate(
                 us, vs, retain=us <= umax, ulimit=umax, interp=_interp
             )
             
@@ -543,29 +543,35 @@ class _Transform2D:  # 2D transformation
                 return us, vs
             # u == 'y'
             return vs, us
-        #> end of _clip()
+        #> end of _restrict()
         
-        def _clip2(
+        def _interpolate(
                 us: NDArray[Float],
                 vs: NDArray[Float],
                 retain: NDArray[bool],
                 ulimit: Float,
                 interp: Callable
         ) -> tuple[NDArray[Float], NDArray[Float]]:
-            cross = np.diff(retain.astype(int))
+            crossing = np.diff(retain.astype(int))
             
             us_inserts, vs_inserts = [], []
-            for i in (cross == +1).nonzero()[0]:
-                us[i] = ulimit
-                vs[i] = interp(i, ulimit)
-                retain[i] = True
-            for i in (cross == -1).nonzero()[0]:
+            for j in (crossing == +1).nonzero()[0]:
+                # index: j        k = j+1
+                # valid: False    True
+                us[j] = ulimit
+                vs[j] = interp(j, ulimit)
+                retain[j] = True
+            for i in (crossing == -1).nonzero()[0]:
                 j = i + 1
                 if retain[j]:
-                    k = retain[:j].sum()
-                    us_inserts.append([k, ulimit])
-                    vs_inserts.append([k, interp(i, ulimit)])
+                    # index: i       j = i+1            k = i+2
+                    # valid: True    (False =>) True    True
+                    j2 = retain[:j].sum()
+                    us_inserts.append([j2, ulimit])
+                    vs_inserts.append([j2, interp(i, ulimit)])
                 else:
+                    # index: i       j = i+1            k = i+2
+                    # valid: True    False (=> True)    False
                     us[j] = ulimit
                     vs[j] = interp(i, ulimit)
                     retain[j] = True
@@ -576,7 +582,7 @@ class _Transform2D:  # 2D transformation
                 vs = np.insert(vs, *zip(*vs_inserts))
             
             return us, vs
-        #> end of _clip2()
+        #> end of _interpolate()
         
         assert limits in ('input', 'output'), limits
         assert xs.shape == ys.shape, [xs.shape, ys.shape]
@@ -588,8 +594,8 @@ class _Transform2D:  # 2D transformation
             xmin, xmax = self._out_xlimits
             ymin, ymax = self._out_ylimits
         
-        xs, ys = _clip(xs, ys, 'x')
-        xs, ys = _clip(xs, ys, 'y')
+        xs, ys = _restrict(xs, ys, 'x')
+        xs, ys = _restrict(xs, ys, 'y')
         
         return xs, ys
     
