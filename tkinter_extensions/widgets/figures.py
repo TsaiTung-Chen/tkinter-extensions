@@ -7,7 +7,7 @@ Created on Sat Dec 28 21:39:51 2024
 """
 
 from __future__ import annotations
-from typing import Any, Literal, Callable
+from typing import Any, Literal, Callable, Iterable, Iterator
 import tkinter as tk
 from tkinter.font import Font
 from copy import deepcopy
@@ -245,6 +245,51 @@ def _cutoff_z_patterns(xy: NDArray[IntFloat]) -> NDArray[IntFloat]:
 
 class ZorderNotFoundError(RuntimeError):
     pass
+
+
+class _History:
+    @property
+    def step(self) -> int:
+        return self._step
+    
+    @property
+    def backable(self) -> bool:
+        return self._step > 0
+    
+    @property
+    def forwardable(self) -> bool:
+        return 0 <= self._step < len(self._stack) - 1
+    
+    def __init__(self):
+        self._step: int = -1
+        self._stack: list[Any] = []
+    
+    def __iter__(self) -> Iterator:
+        return iter(self._stack)
+    
+    def replace_by(self, iterable: Iterable):
+        self._stack[:] = iterable
+        self._step = len(self._stack) - 1
+    
+    def add(self, item: Any):
+        self._stack[:] = self._stack[:self._step+1] + [item]
+        self._step += 1
+    
+    def clear(self):
+        self.__init__()
+    
+    def drop(self):
+        self._stack[:] = self._stack[:self._step+1]
+    
+    def forward(self) -> Any:
+        assert self.forwardable, (self._step, self._stack)
+        self._step += 1
+        return self._stack[self._step]
+    
+    def back(self) -> Any:
+        assert self.backable, (self._step, self._stack)
+        self._step -= 1
+        return self._stack[self._step]
 
 
 class _BaseTransform1D:  # 1D transformation
@@ -1869,6 +1914,16 @@ class _Ticks(_BaseComponent):
     def get_labels(self) -> list[_Text]:
         return self._labels
     
+    def _set_limits(
+            self,
+            min_: IntFloat | None = None,
+            max_: IntFloat | None = None
+    ):
+        assert isinstance(min_, (IntFloat, type(None))), min_
+        assert isinstance(max_, (IntFloat, type(None))), max_
+        
+        self._req_limits[:] = (min_, max_)
+    
     def set_limits(
             self,
             min_: IntFloat | None = None,
@@ -1890,13 +1945,12 @@ class _Ticks(_BaseComponent):
         if max_ is not None:
             self._req_limits[1] = max_
         if all( l is not None for l in self._req_limits ) \
-            and self._req_limits[0] > self._req_limits[1]:
-            self._req_limits[:] = old_limits
-            raise ValueError(
-                'the value of `min_` must be smaller than or equal to the value '
-                f'of `max_` but got {self._req_limits[0]} and '
+                and self._req_limits[0] > self._req_limits[1]:
+            msg = 'the value of `min_` must be smaller than or equal to ' \
+                f'the value of `max_` but got {self._req_limits[0]} and ' \
                 f'{self._req_limits[1]}.'
-            )
+            self._req_limits[:] = old_limits
+            raise ValueError(msg)
         
         for i, margin in enumerate(margins):
             if margin is not None:
@@ -2984,7 +3038,7 @@ class _Plot(_BaseWidgetWrapper):
             self._get_ticks(side).update_theme()
     
     @_with_draw_events
-    def draw(self):
+    def draw(self, _clear_history: bool = True):
         canvas = self._tkwidget
         
         # Get data limits
@@ -3147,6 +3201,18 @@ class _Plot(_BaseWidgetWrapper):
                 key=lambda t: float(t.split('zorder=', 1)[1])
         ):
             canvas.tag_raise(tag)
+        
+        # Remove the history items of `self` and append current limits
+        history = self._figure._history
+        if _clear_history:
+            history.drop()
+            history.replace_by( item for item in history if item[0] is self )
+        history.add((
+            self,
+            {
+                s: self._get_ticks(s).get_limits()[0] for s in 'rblt'
+            }
+        ))
     
     def delete_all(self, draw: bool = False):
         for artist in self.artists:
@@ -3408,7 +3474,7 @@ class _Plot(_BaseWidgetWrapper):
     def get_legend_labels(self) -> list[_Text]:
         return self._legend.get_labels()
     
-    def plot(
+    def plot(#TODO: rename: line
             self,
             b: ArrayLike | None = None,
             l: ArrayLike | None = None,
@@ -3492,18 +3558,45 @@ class _Toolbar(_BaseWidgetWrapper):
         frame = tk.Frame(master, **kwargs)
         super().__init__(frame)
         
-        self._home_bt = ttk.Button(frame, text='Home', command=self._home_view)
+        self._home_bt = ttk.Button(
+            frame, text='Home', command=self._home_view, takefocus=False
+        )
         self._home_bt.pack(side='left')
-        self._prev_bt = ttk.Button(frame, text='Prev', command=self._prev_view)
-        self._prev_bt.pack(side='left', padx=('3p', '0p'))
-        self._next_bt = ttk.Button(frame, text='Next', command=self._next_view)
+        
+        self._prev_bt = ttk.Button(
+            frame, text='Prev', command=self._prev_view, takefocus=False
+        )
+        self._prev_bt.pack(side='left', padx=('6p', '0p'))
+        
+        self._next_bt = ttk.Button(
+            frame, text='Next', command=self._next_view, takefocus=False
+        )
         self._next_bt.pack(side='left', padx=('3p', '0p'))
-        self._pan_bt = ttk.Button(frame, text='Pan', command=self._pan_view)
+        
+        self._pan_bt = ttk.Checkbutton(
+            frame,
+            text='Pan',
+            command=self._pan_view,
+            bootstyle='toolbutton',
+            takefocus=False
+        )
         self._pan_bt.pack(side='left', padx=('6p', '0p'))
-        self._zoom_bt = ttk.Button(frame, text='Zoom', command=self._zoom_view)
+        
+        self._zoom_bt = ttk.Checkbutton(
+            frame,
+            text='Zoom',
+            command=self._zoom_view,
+            bootstyle='toolbutton',
+            takefocus=False
+        )
         self._zoom_bt.pack(side='left', padx=('3p', '0p'))
+        
         self._xyz_lb = tk.Label(frame, textvariable=var_coord)
         self._xyz_lb.pack(side='left', padx=('6p', '0p'))
+        
+        self._keypress = dict.fromkeys('axy', False)
+        self._figure.bind('<KeyPress>', self._key, add=True)
+        self._figure.bind('<KeyRelease>', self._key, add=True)
         
         self.set_facecolor()
     
@@ -3516,8 +3609,36 @@ class _Toolbar(_BaseWidgetWrapper):
         new_color = super()._set_facecolor(color=color)
         self._xyz_lb.configure(background=new_color)
     
-    def _home_view(self):
-        raise NotImplementedError
+    def _key(self, event: tk.Event):
+        event_type = getattr(event.type, 'name', event.type)
+        assert event_type in ('KeyPress', 'KeyRelease'), event
+        
+        if (key := event.keysym.lower()) in self._keypress:
+            self._keypress[key] = event_type == 'KeyPress'
+    
+    def _home_view(self):#TODO
+        fig = self._figure
+        autoscale = self._keypress["a"]
+        
+        for plot in fig._plots.flat:
+            if autoscale:
+                for side in 'rblt':
+                    plot._get_ticks(side)._set_limits(None, None)
+                continue
+            
+            # Restore the first pair of limits
+            for _plot, rblt_limits in fig._history:
+                if _plot is plot:
+                    break
+            else:
+                raise ValueError(
+                    f'`_Plot` ({plot}) was not found in the `_History` '
+                    f'({fig._history._stack}).'
+                )
+            for side, limits in rblt_limits.items():
+                plot._get_ticks(side)._set_limits(*limits)
+        
+        fig.draw(_clear_history=False)
     
     def _prev_view(self):
         raise NotImplementedError
@@ -3556,6 +3677,7 @@ class Figure(UndockedFrame):
         self._req_size: tuple[Int | None, Int | None] = (None, None)
         self._plots: NDArray[_Plot]
         self._draw_idle_id: str = 'after#'
+        self._history: _History = _History()
         self._var_coord: vrb.StringVar = vrb.StringVar(self, value='()')
         self._default_style: dict[str, Any]
         
@@ -3573,6 +3695,7 @@ class Figure(UndockedFrame):
         
         self.bind('<Destroy>', self._on_destroy, add=True)
         self.bind('<<ThemeChanged>>', self._on_theme_changed, add=True)
+        self.focus_set()
         
         self.after_idle(self._initialize)
     
@@ -3631,14 +3754,14 @@ class Figure(UndockedFrame):
         if hasattr(self, '_toolbar'):
             self._toolbar.update_theme()
     
-    def draw(self):
+    def draw(self, _clear_history: bool = True):
         if hasattr(self, '_suptitle'):
             self._suptitle.draw()
         
         if hasattr(self, '_plots'):
             for plot in self._plots.flat:
                 if plot:
-                    plot.draw()
+                    plot.draw(_clear_history=_clear_history)
     
     def draw_idle(self):
         self.after_cancel(self._draw_idle_id)
