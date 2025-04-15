@@ -3474,7 +3474,7 @@ class _Plot(_BaseWidgetWrapper):
     def get_legend_labels(self) -> list[_Text]:
         return self._legend.get_labels()
     
-    def plot(#TODO: rename: line
+    def line(
             self,
             b: ArrayLike | None = None,
             l: ArrayLike | None = None,
@@ -3960,7 +3960,7 @@ if __name__ == '__main__':
         for c in range(plts.shape[1]):
             plt = plts[r, c]
             for i in range(10):
-                plt.plot(x, y*i, label=f'line {i} in plot {(r, c)}')
+                plt.line(x, y*i, label=f'line {i} in plot {(r, c)}')
             plt.set_title('<Title>')
             plt.set_tlabel('<top-label>')
             plt.set_blabel('<bottom-label>')
