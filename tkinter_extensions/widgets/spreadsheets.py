@@ -80,18 +80,20 @@ def string_to_array(string: str) -> stringArray:
 class DuplicateNameError(ValueError): pass
 
 
-class History:
+class _History:
     @property
     def step(self) -> int:
         return self._step
     
     @property
     def backable(self) -> bool:
-        return self.step > 0
+        return self._step >= 0
     
     @property
     def forwardable(self) -> bool:
-        return self.step < len(self._stack["forward"])
+        if self._stack["forward"]:
+            return self._step < len(self._stack["forward"]) - 1
+        return False
     
     def __init__(
             self,
@@ -102,9 +104,9 @@ class History:
         
         self._callback: Callable | None = callback
         self._sequence: dict[str, list[Callable]] | None = None
-        self._stack = {"forward": list(), "backward": list()}
+        self._stack: dict[str, list[Callable]] = {"forward": [], "backward": []}
         self._max_height = self.set_max_height(max_height)
-        self._step = 0
+        self._step = -1
     
     def set_max_height(self, height: int):
         assert isinstance(height, int), height
@@ -112,20 +114,18 @@ class History:
         self._max_height = height
         return self._max_height
     
-    def reset(self, callback: Callable | None = None):
+    def clear(self, callback: Callable | None = None):
         self.__init__(callback=callback)
     
     def add(self, forward: Callable, backward: Callable):
         assert callable(forward) and callable(backward), (forward, backward)
         
         if self._sequence is None:
-            forward = self._stack["forward"][:self.step] + [forward]
-            backward = self._stack["backward"][:self.step] + [backward]
-            n = len(forward)
+            forward = self._stack["forward"][:self._step+1] + [forward]
+            backward = self._stack["backward"][:self._step+1] + [backward]
             forward = forward[-self._max_height:]
             backward = backward[-self._max_height:]
-            self._step -= (n - len(forward))
-            self._step += 1
+            self._step = len(forward) - 1
             self._stack.update(forward=forward, backward=backward)
             if self._callback:
                 self._callback()
@@ -154,40 +154,45 @@ class History:
                 backward=lambda: [ func() for func in backward[::-1] ]
             )
     
-    def pop(self) -> dict[str, list[Callable]]:
-        assert self.step > 0, self.step
+    def pop(self) -> dict[str, Callable]:
+        assert self._step >= 0, self._step
         
+        drop = {
+            "forward": self._stack["forward"][self._step],
+            "backward": self._stack["backward"][self._step]
+        }
+        self._stack.update(
+            forward=self._stack["forward"][:self._step],
+            backward=self._stack["backward"][:self._step]
+        )
         self._step -= 1
-        trailing = {"forward": self._stack["forward"][self.step:],
-                    "backward": self._stack["backward"][self.step:]}
-        self._stack.update(forward=self._stack["forward"][:self.step],
-                            backward=self._stack["backward"][:self.step])
         
         if self._callback:
             self._callback()
         
-        return trailing
+        return drop
     
-    def back(self):
-        assert self.step > 0, self.step
+    def back(self) -> int:
+        assert self.backable, (self._step, self._stack)
+        
+        self._stack["backward"][self._step]()
         self._step -= 1
-        self._stack["backward"][self.step]()
         
         if self._callback:
             self._callback()
         
-        return self.step
+        return self._step
     
-    def forward(self):
-        forward_stack = self._stack["forward"]
-        assert self.step < len(forward_stack), (self.step, self._stack)
-        forward_stack[self.step]()
+    def forward(self) -> int:
+        assert self.forwardable, (self._step, self._stack)
+        
         self._step += 1
+        self._stack["forward"][self._step]()
         
         if self._callback:
             self._callback()
         
-        return self.step
+        return self._step
     
     def set_callback(self, func: Callable) -> Callable:
         assert callable(func), func
@@ -402,7 +407,7 @@ class Sheet(ttk.Frame):
         if hasattr(self, '_history'):
             self._history.set_max_height(max_undo)
         else:
-            self._history = History(max_height=max_undo)
+            self._history: _History = _History(max_height=max_undo)
         self._lock_number_of_rows: bool = lock_number_of_rows
         self._lock_number_of_cols: bool = lock_number_of_cols
         
