@@ -7,7 +7,7 @@ Created on Sat Dec 28 21:39:51 2024
 """
 
 from __future__ import annotations
-from typing import Any, Literal, Callable, Iterable, Iterator
+from typing import Any, Literal, Callable, Iterable, NamedTuple
 import tkinter as tk
 from tkinter.font import Font
 from copy import deepcopy
@@ -247,7 +247,37 @@ class ZorderNotFoundError(RuntimeError):
     pass
 
 
-class _History:
+class _PlotView(NamedTuple):
+    plot: _Plot
+    view: dict[str, tuple[Any, Any]]
+    
+    # The `__new__()` of `NamedTuple` can't be overwritten, so we define `make()`
+    # instead. `make()` will be called when a instance is created.
+    @classmethod
+    def make(cls, plot: _Plot, view: dict[str, tuple[Any, Any]]):
+        assert isinstance(plot, _Plot), plot
+        assert isinstance(view, dict), view
+        assert tuple(view) == ('r', 'b', 'l', 't'), (view)
+        
+        for limits, margins in view.values():
+            assert len(limits) == 2, limits
+            assert isinstance(limits[0], (IntFloat, type(None))), limits
+            assert isinstance(limits[1], (IntFloat, type(None))), limits
+            assert len(margins) == 2, margins
+            assert isinstance(margins[0], (Dimension, type(None))), margins
+            assert isinstance(margins[1], (Dimension, type(None))), margins
+        
+        return cls(plot, view)
+
+
+class _ViewSet(tuple):
+    def __new__(cls, iterable: Iterable[_PlotView]):
+        self = super().__new__(cls, iterable)
+        assert all( isinstance(v, _PlotView) for v in self ), iterable
+        return self
+
+
+class _ViewSetHistory:
     @property
     def step(self) -> int:
         return self._step
@@ -260,35 +290,60 @@ class _History:
     def forwardable(self) -> bool:
         return 0 <= self._step < len(self._stack) - 1
     
-    def __init__(self):
+    def __init__(self, figure: Figure):
+        self._figure: Figure = figure
         self._step: int = -1
-        self._stack: list[Any] = []
+        self._stack: list[_ViewSet] = []
+        self._update_toolbar_buttons()
     
-    def __iter__(self) -> Iterator:
-        return iter(self._stack)
+    def __bool__(self) -> bool:
+        return bool(self._stack)
     
-    def replace_by(self, iterable: Iterable):
-        self._stack[:] = iterable
-        self._step = len(self._stack) - 1
+    def __getitem__(self, i: Int) -> _ViewSet:
+        assert isinstance(i, Int), i
+        return self._stack[i]
     
-    def add(self, item: Any):
-        self._stack[:] = self._stack[:self._step+1] + [item]
+    def _update_toolbar_buttons(self):#???
+        if not (tb := getattr(self._figure, '_toolbar', None)):
+            return
+        
+        state = 'normal' if self.backable else 'disabled'
+        tb._prev_bt.configure(state=state)
+        
+        state = 'normal' if self.forwardable else 'disabled'
+        tb._next_bt.configure(state=state)
+    
+    def add(self, v: _ViewSet):
+        assert isinstance(v, _ViewSet), v
+        
+        self._stack[:] = self._stack[:self._step+1] + [v]
         self._step += 1
+        self._update_toolbar_buttons()
+    
+    def replaced_by(self, iterable: Iterable):
+        new = list(iterable)
+        assert all( isinstance(v, _ViewSet) for v in new ), new
+        self._stack[:] = new
+        self._step = len(self._stack) - 1
+        self._update_toolbar_buttons()
     
     def clear(self):
         self.__init__()
     
-    def drop(self):
+    def drop_future(self):
         self._stack[:] = self._stack[:self._step+1]
+        self._update_toolbar_buttons()
     
     def forward(self) -> Any:
         assert self.forwardable, (self._step, self._stack)
         self._step += 1
+        self._update_toolbar_buttons()
         return self._stack[self._step]
     
     def back(self) -> Any:
         assert self.backable, (self._step, self._stack)
         self._step -= 1
+        self._update_toolbar_buttons()
         return self._stack[self._step]
 
 
@@ -1917,12 +1972,17 @@ class _Ticks(_BaseComponent):
     def _set_limits(
             self,
             min_: IntFloat | None = None,
-            max_: IntFloat | None = None
+            max_: IntFloat | None = None,
+            margins: ArrayLike | Dimension | None = [None, None]
     ):
         assert isinstance(min_, (IntFloat, type(None))), min_
         assert isinstance(max_, (IntFloat, type(None))), max_
+        assert len(margins) == 2, margins
+        assert isinstance(margins[0], (Dimension, type(None))), margins
+        assert isinstance(margins[1], (Dimension, type(None))), margins
         
         self._req_limits[:] = (min_, max_)
+        self._req_margins[:] = margins
     
     def set_limits(
             self,
@@ -3038,7 +3098,7 @@ class _Plot(_BaseWidgetWrapper):
             self._get_ticks(side).update_theme()
     
     @_with_draw_events
-    def draw(self, _clear_history: bool = True):
+    def draw(self):
         canvas = self._tkwidget
         
         # Get data limits
@@ -3201,18 +3261,6 @@ class _Plot(_BaseWidgetWrapper):
                 key=lambda t: float(t.split('zorder=', 1)[1])
         ):
             canvas.tag_raise(tag)
-        
-        # Remove the history items of `self` and append current limits
-        history = self._figure._history
-        if _clear_history:
-            history.drop()
-            history.replace_by( item for item in history if item[0] is self )
-        history.add((
-            self,
-            {
-                s: self._get_ticks(s).get_limits()[0] for s in 'rblt'
-            }
-        ))
     
     def delete_all(self, draw: bool = False):
         for artist in self.artists:
@@ -3558,18 +3606,29 @@ class _Toolbar(_BaseWidgetWrapper):
         frame = tk.Frame(master, **kwargs)
         super().__init__(frame)
         
+        self._mode: Literal['pan', 'zoom'] | None = None
+        self._keypress: dict[str, bool] = dict.fromkeys('axy', False)
+        
         self._home_bt = ttk.Button(
             frame, text='Home', command=self._home_view, takefocus=False
         )
         self._home_bt.pack(side='left')
         
         self._prev_bt = ttk.Button(
-            frame, text='Prev', command=self._prev_view, takefocus=False
+            frame,
+            text='Prev',
+            command=self._prev_view,
+            takefocus=False,
+            state='disabled'
         )
         self._prev_bt.pack(side='left', padx=('6p', '0p'))
         
         self._next_bt = ttk.Button(
-            frame, text='Next', command=self._next_view, takefocus=False
+            frame,
+            text='Next',
+            command=self._next_view,
+            takefocus=False,
+            state='disabled'
         )
         self._next_bt.pack(side='left', padx=('3p', '0p'))
         
@@ -3594,7 +3653,6 @@ class _Toolbar(_BaseWidgetWrapper):
         self._xyz_lb = tk.Label(frame, textvariable=var_coord)
         self._xyz_lb.pack(side='left', padx=('6p', '0p'))
         
-        self._keypress = dict.fromkeys('axy', False)
         self._figure.bind('<KeyPress>', self._key, add=True)
         self._figure.bind('<KeyRelease>', self._key, add=True)
         
@@ -3616,41 +3674,88 @@ class _Toolbar(_BaseWidgetWrapper):
         if (key := event.keysym.lower()) in self._keypress:
             self._keypress[key] = event_type == 'KeyPress'
     
-    def _home_view(self):#TODO
+    def _home_view(self):#TODO#???viewset
         fig = self._figure
+        history = fig._history
         autoscale = self._keypress["a"]
+        
+        if not history:
+            self._update_history()
         
         for plot in fig._plots.flat:
             if autoscale:
+                limits, margins = ((None, None), (None, None))
                 for side in 'rblt':
-                    plot._get_ticks(side)._set_limits(None, None)
-                continue
-            
-            # Restore the first pair of limits
-            for _plot, rblt_limits in fig._history:
-                if _plot is plot:
-                    break
+                    plot._get_ticks(side)._set_limits(*limits, margins)
             else:
-                raise ValueError(
-                    f'`_Plot` ({plot}) was not found in the `_History` '
-                    f'({fig._history._stack}).'
-                )
-            for side, limits in rblt_limits.items():
-                plot._get_ticks(side)._set_limits(*limits)
+                # Restore the first pair of limits
+                for pview in history[0]:
+                    if isinstance(pview, _PlotView) and pview.plot is plot:
+                        break
+                else:
+                    raise ValueError(
+                        f'`_Plot` ({plot}) was not found in the `_ViewSetHistory` '
+                        f'({history._stack}).'
+                    )
+                
+                for side, (limits, margins) in pview.view.items():
+                    plot._get_ticks(side)._set_limits(*limits, margins)
+        fig.draw()
         
-        fig.draw(_clear_history=False)
+        self._update_history()
     
     def _prev_view(self):
-        raise NotImplementedError
+        fig = self._figure
+        history = fig._history
+        
+        if not history:
+            self._update_history()
+        viewset = history.back()
+        
+        for pview in viewset:
+            plot, view = pview
+            for side, (limits, margins) in view.items():
+                plot._get_ticks(side)._set_limits(*limits, margins)
+        fig.draw()
     
     def _next_view(self):
-        raise NotImplementedError
+        fig = self._figure
+        history = fig._history
+        
+        if not history:
+            self._update_history()
+        viewset = history.forward()
+        
+        for pview in viewset:
+            plot, view = pview
+            for side, (limits, margins) in view.items():
+                plot._get_ticks(side)._set_limits(*limits, margins)
+        fig.draw()
     
     def _pan_view(self):
+        self._mode = None if self._mode == 'pan' else 'pan'
         raise NotImplementedError
     
     def _zoom_view(self):
+        self._mode = None if self._mode == 'zoom' else 'zoom'
         raise NotImplementedError
+    
+    def _update_history(self):
+        # Append current limits
+        fig = self._figure
+        history = fig._history
+        
+        history.drop_future()
+        viewset = _ViewSet(
+            _PlotView(
+                plot,
+                {s: plot._get_ticks(s).get_limits() for s in 'rblt'}
+            )
+            for plot in fig._plots.flat
+        )
+        
+        if not history or viewset != history[-1]:
+            history.add(viewset)
 
 
 # =============================================================================
@@ -3677,7 +3782,7 @@ class Figure(UndockedFrame):
         self._req_size: tuple[Int | None, Int | None] = (None, None)
         self._plots: NDArray[_Plot]
         self._draw_idle_id: str = 'after#'
-        self._history: _History = _History()
+        self._history: _ViewSetHistory = _ViewSetHistory(self)
         self._var_coord: vrb.StringVar = vrb.StringVar(self, value='()')
         self._default_style: dict[str, Any]
         
@@ -3754,14 +3859,14 @@ class Figure(UndockedFrame):
         if hasattr(self, '_toolbar'):
             self._toolbar.update_theme()
     
-    def draw(self, _clear_history: bool = True):
+    def draw(self):
         if hasattr(self, '_suptitle'):
             self._suptitle.draw()
         
         if hasattr(self, '_plots'):
             for plot in self._plots.flat:
                 if plot:
-                    plot.draw(_clear_history=_clear_history)
+                    plot.draw()
     
     def draw_idle(self):
         self.after_cancel(self._draw_idle_id)
@@ -3871,6 +3976,7 @@ class Figure(UndockedFrame):
                     plot._tkwidget.grid_forget()
                     self.grid_columnconfigure(c, weight=0)
                 self.grid_rowconfigure(r, weight=0)
+            self._history.clear()
         
         # Update suptitle's position
         if hasattr(self, '_suptitle'):
