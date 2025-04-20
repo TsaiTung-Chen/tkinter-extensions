@@ -19,6 +19,7 @@ Zorder:
     104. title
     105. suptitle
     106. datalabel: arrow, point, box, text
+    107. toolbar: rubberband
 """
 
 common_style = {
@@ -211,6 +212,16 @@ common_style = {
         "pady": ('6p', '6p')
     },
     
+    "veil.rectangle": {
+        "zorder": 107.0,
+        "width": '0p'
+    },
+    
+    "toolbar.rubberband.rectangle": {
+        "zorder": 108.0,
+        "width": '1p'
+    },
+    
     "text": {
         "zorder": 1.0,
         "family": None,
@@ -326,6 +337,11 @@ light_style.update({
         "edgecolor": '#1A1A1A'
     },
     
+    "toolbar.rubberband.rectangle": {
+        **common_style["toolbar.rubberband.rectangle"],
+        "edgecolor": 'black'
+    },
+    
     "text": {
         **common_style["text"],
         "color": 'black'
@@ -424,6 +440,11 @@ dark_style.update({
     "datalabel.box.recgangle": {
         **common_style["datalabel.box.rectangle"],
         "edgecolor": '#F2F2F2'
+    },
+    
+    "toolbar.rubberband.rectangle": {
+        **common_style["toolbar.rubberband.rectangle"],
+        "edgecolor": 'white'
     },
     
     "text": {

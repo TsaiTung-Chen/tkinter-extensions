@@ -303,7 +303,7 @@ class _ViewSetHistory:
         assert isinstance(i, Int), i
         return self._stack[i]
     
-    def _update_toolbar_buttons(self):#???
+    def _update_toolbar_buttons(self):
         if not (tb := getattr(self._figure, '_toolbar', None)):
             return
         
@@ -328,7 +328,7 @@ class _ViewSetHistory:
         self._update_toolbar_buttons()
     
     def clear(self):
-        self.__init__()
+        self.__init__(self._figure)
     
     def drop_future(self):
         self._stack[:] = self._stack[:self._step+1]
@@ -2919,14 +2919,14 @@ def _with_draw_events(draw_func: Callable):
 
 
 class _BaseWidgetWrapper:
-    def __init__(self, tkwidget: tk.BaseWidget):
-        assert isinstance(tkwidget, tk.BaseWidget), tkwidget
+    def __init__(self, tkwidget: tk.Misc):
+        assert isinstance(tkwidget, tk.Misc), tkwidget
         assert isinstance(tkwidget.master, Figure), tkwidget.master
         tkwidget._figure = figure = tkwidget.master
         tkwidget._wrapper = self
         
         self._resize = defer(100)(self._resize)
-        self._tkwidget: tk.BaseWidget = tkwidget
+        self._tkwidget: tk.Misc = tkwidget
         self._figure: Figure = figure
         self._resizing: bool = False
         self._draw_idle_id: str = 'after#'
@@ -2998,7 +2998,8 @@ class _Suptitle(_BaseWidgetWrapper):
     
     def __init__(self, master: Figure, *args, **kwargs):
         assert isinstance(master, Figure), master
-        canvas = tk.Canvas(master, *args, **kwargs)
+        figure = master
+        canvas = tk.Canvas(figure, *args, **kwargs)
         super().__init__(canvas)
         self._text: _Text = _Text(canvas, text='', tag=f'{self._tag}.text')
         self.set_facecolor()
@@ -3049,7 +3050,8 @@ class _Plot(_BaseWidgetWrapper):
     
     def __init__(self, master: Figure, *args, **kwargs):
         assert isinstance(master, Figure), master
-        canvas = tk.Canvas(master, *args, **kwargs)
+        figure = master
+        canvas = tk.Canvas(figure, *args, **kwargs)
         super().__init__(canvas)
         
         artists = {"lines": []}
@@ -3058,6 +3060,7 @@ class _Plot(_BaseWidgetWrapper):
         self._bartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._lartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._rartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
+        self._transforms: dict[str, _Transform2D] = {}
         
         self._title: _Text = _Text(canvas, text='', tag='title.text')
         self._taxis: _Axis = _Axis(self, side='t', tag='taxis')
@@ -3070,6 +3073,19 @@ class _Plot(_BaseWidgetWrapper):
         self._rticks: _Ticks = _Ticks(self, side='r', tag='rticks')
         self._frame: _Frame = _Frame(self, tag='frame')
         self._legend: _Legend = _Legend(self, tag='legend')
+        
+        self._veil: _Rectangle = _Rectangle(
+            canvas, state='hidden', tag='veil.rectangle'
+        )
+        self._rubberband: _Rectangle = _Rectangle(
+            canvas, state='hidden', tag='toolbar.rubberband.rectangle'
+        )
+        self._rubberband._bounds: tuple[Int, Int, Int, Int]
+        
+        canvas.bind('<Enter>', lambda e: figure._set_hovered_plot(self), add=True)
+        canvas.bind(
+            '<Leave>', lambda e: figure._unset_hovered_plot(self), add=True
+        )
         
         self.set_facecolor()
         self.set_btickslabels(True)
@@ -3234,16 +3250,18 @@ class _Plot(_BaseWidgetWrapper):
         cbounds = dict(zip('rblt', cbounds))
         dbounds = dict(zip('rblt', dbounds))
         transforms = {}
-        for artist in self.artists:
-            x_side, y_side = artist._x_side, artist._y_side
-            if (sides := x_side + y_side) not in transforms:
-                transforms[sides] = _Transform2D(
+        for x_side in 'bt':
+            for y_side in 'rl':
+                transforms[x_side + y_side] = _Transform2D(
                     tfs[x_side], tfs[y_side],
                     inp_xbounds=dbounds[x_side], inp_ybounds=dbounds[y_side],
                     out_xbounds=cbounds[x_side], out_ybounds=cbounds[y_side]
                 )
+        for artist in self.artists:
+            sides = artist._x_side + artist._y_side
             artist.set_transform(transforms[sides])
             artist.draw()
+        self._transforms.update(tfs)
         
         ## Draw legend again after the user-defined artists are drawn
         lines, labels = [], []
@@ -3254,6 +3272,12 @@ class _Plot(_BaseWidgetWrapper):
                     lines.append(line)
         self._legend._set_contents(lines, labels)
         self._legend.draw()
+        
+        # Draw other artists
+        self._veil.set_coords(0, 0, w-1, h-1)
+        self._veil.draw()
+        self._rubberband._bounds = (cx1, cy1, cx2, cy2)
+        self._rubberband.draw()
         
         # Raise artists in order
         for tag in sorted(
@@ -3595,6 +3619,7 @@ class _Plot(_BaseWidgetWrapper):
 
 class _Toolbar(_BaseWidgetWrapper):
     _tag: str = 'toolbar'
+    _cursors: dict[str, str] = {"pan": 'fleur', "zoom": 'crosshair'}
     
     def __init__(
             self,
@@ -3603,11 +3628,15 @@ class _Toolbar(_BaseWidgetWrapper):
             **kwargs
     ):
         assert isinstance(master, Figure), master
-        frame = tk.Frame(master, **kwargs)
+        figure = master
+        frame = tk.Frame(figure, **kwargs)
         super().__init__(frame)
         
-        self._mode: Literal['pan', 'zoom'] | None = None
         self._keypress: dict[str, bool] = dict.fromkeys('axy', False)
+        self._org_cursors: dict[_Plot, str] = {}
+        self._bindings: dict[_Plot, list[str]] = {}
+        self._active_plot: _Plot | None = None
+        self._motion_start: tuple[Int, Int] = (0, 0)
         
         self._home_bt = ttk.Button(
             frame, text='Home', command=self._home_view, takefocus=False
@@ -3632,10 +3661,16 @@ class _Toolbar(_BaseWidgetWrapper):
         )
         self._next_bt.pack(side='left', padx=('3p', '0p'))
         
+        self._var_mode: vrb.StringVar = vrb.StringVar(  # pan, zoom, or none
+            frame, value='none'
+        )
+        self._var_mode.trace_add('write', self._on_mode_changed, weak=True)
         self._pan_bt = ttk.Checkbutton(
             frame,
             text='Pan',
-            command=self._pan_view,
+            variable=self._var_mode,
+            onvalue='pan',
+            offvalue='none',
             bootstyle='toolbutton',
             takefocus=False
         )
@@ -3644,7 +3679,9 @@ class _Toolbar(_BaseWidgetWrapper):
         self._zoom_bt = ttk.Checkbutton(
             frame,
             text='Zoom',
-            command=self._zoom_view,
+            variable=self._var_mode,
+            onvalue='zoom',
+            offvalue='none',
             bootstyle='toolbutton',
             takefocus=False
         )
@@ -3653,8 +3690,8 @@ class _Toolbar(_BaseWidgetWrapper):
         self._xyz_lb = tk.Label(frame, textvariable=var_coord)
         self._xyz_lb.pack(side='left', padx=('6p', '0p'))
         
-        self._figure.bind('<KeyPress>', self._key, add=True)
-        self._figure.bind('<KeyRelease>', self._key, add=True)
+        figure.bind('<KeyPress>', self._on_key, add=True)
+        figure.bind('<KeyRelease>', self._on_key, add=True)
         
         self.set_facecolor()
     
@@ -3667,14 +3704,76 @@ class _Toolbar(_BaseWidgetWrapper):
         new_color = super()._set_facecolor(color=color)
         self._xyz_lb.configure(background=new_color)
     
-    def _key(self, event: tk.Event):
+    def _on_key(self, event: tk.Event):
         event_type = getattr(event.type, 'name', event.type)
         assert event_type in ('KeyPress', 'KeyRelease'), event
         
         if (key := event.keysym.lower()) in self._keypress:
             self._keypress[key] = event_type == 'KeyPress'
     
-    def _home_view(self):#TODO#???viewset
+    def _on_mode_changed(self, *args):
+        fig = self._figure
+        org_cursors = self._org_cursors
+        bindings = self._bindings
+        mode = self._var_mode
+        prev_mode, new_mode = mode.previous_value, mode.get()
+        mode.value_changed(update=True)
+        
+        if prev_mode == new_mode:
+            return
+        
+        if prev_mode != 'none':  # stop pan or zoom mode
+            for plot in fig._plots.flat:
+                canvas = plot._tkwidget
+                canvas.configure(cursor=org_cursors[plot])
+                
+                press_id, motion_id, release_id = bindings[plot]
+                unbind(canvas, MLEFTPRESS, press_id)
+                unbind(canvas, MLEFTMOTION, motion_id)
+                unbind(canvas, MLEFTRELEASE, release_id)
+                
+                plot._veil.set_state('hidden')
+                plot._veil.draw()
+            
+            org_cursors.clear()
+            bindings.clear()
+        
+        assert not org_cursors, org_cursors
+        assert not bindings, bindings
+        
+        if new_mode == 'none':
+            return
+        
+        # Start pan or zoom mode
+        if new_mode == 'pan':
+            press_cb, motion_cb, release_cb = (
+                self._pan_on_leftpress,
+                self._pan_on_leftmotion,
+                self._pan_on_leftrelease
+            )
+        else:  # zoom mode
+            press_cb, motion_cb, release_cb = (
+                self._zoom_on_leftpress,
+                self._zoom_on_leftmotion,
+                self._zoom_on_leftrelease
+            )
+        new_cursor = self._cursors[new_mode]
+        
+        for plot in fig._plots.flat:
+            canvas = plot._tkwidget
+            org_cursors[plot] = canvas["cursor"]
+            canvas.configure(cursor=new_cursor)
+            
+            bindings[plot] = [
+                canvas.bind(MLEFTPRESS, press_cb, add=True),
+                canvas.bind(MLEFTMOTION, motion_cb, add=True),
+                canvas.bind(MLEFTRELEASE, release_cb, add=True)
+            ]
+            
+            plot._veil.set_state('normal')
+            plot._veil.draw()
+    
+    def _home_view(self):
         fig = self._figure
         history = fig._history
         autoscale = self._keypress["a"]
@@ -3732,14 +3831,6 @@ class _Toolbar(_BaseWidgetWrapper):
                 plot._get_ticks(side)._set_limits(*limits, margins)
         fig.draw()
     
-    def _pan_view(self):
-        self._mode = None if self._mode == 'pan' else 'pan'
-        raise NotImplementedError
-    
-    def _zoom_view(self):
-        self._mode = None if self._mode == 'zoom' else 'zoom'
-        raise NotImplementedError
-    
     def _update_history(self):
         # Append current limits
         fig = self._figure
@@ -3756,6 +3847,65 @@ class _Toolbar(_BaseWidgetWrapper):
         
         if not history or viewset != history[-1]:
             history.add(viewset)
+    
+    def _pan_on_leftpress(self, event: tk.Event):#TODO
+        pass
+    
+    def _pan_on_leftmotion(self, event: tk.Event):
+        pass
+    
+    def _pan_on_leftrelease(self, event: tk.Event):
+        pass
+    
+    def _zoom_on_leftpress(self, event: tk.Event):
+        self._update_history()
+        
+        plot = self._figure._hovered_plot
+        rubberband = plot._rubberband
+        x1, y1, x2, y2 = rubberband._bounds
+        x, y = np.clip(event.x, x1, x2), np.clip(event.y, y1, y2)
+        rubberband.set_coords(x, y, x, y)
+        rubberband.set_state('normal')
+        rubberband.draw()
+        
+        self._active_plot = plot
+        self._motion_start = (x, y)
+    
+    def _zoom_on_leftmotion(self, event: tk.Event):
+        rubberband = self._active_plot._rubberband
+        start_x, start_y = self._motion_start
+        bx1, by1, bx2, by2 = rubberband._bounds
+        x, y = np.clip(event.x, bx1, bx2), np.clip(event.y, by1, by2)
+        bx1, bx2 = sorted([start_x, x])
+        by1, by2 = sorted([start_y, y])
+        rubberband.set_coords(bx1, by1, bx2, by2)
+        rubberband.draw()
+    
+    def _zoom_on_leftrelease(self, event: tk.Event):
+        plot = self._active_plot
+        rubberband = plot._rubberband
+        rubberband.set_state('hidden')
+        rubberband.draw()
+        
+        cx1, cy1, cx2, cy2 = rubberband.get_coords()
+        for side, tf in plot._transforms.items():
+            c12 = np.asarray([cx1, cx2] if side in 'bt' else [cy1, cy2])
+            with np.errstate(
+                    **dict.fromkeys(
+                        ['divide', 'invalid', 'over', 'under'], 'raise'
+                    )
+            ):
+                try:
+                    itf = tf.get_inverse()
+                    d12 = itf(c12)
+                    d12.sort()
+                except FloatingPointError:
+                    continue
+            if np.isfinite(d12).all():
+                plot._get_ticks(side).set_limits(*d12)
+        plot.draw()
+        
+        self._update_history()
 
 
 # =============================================================================
@@ -3780,7 +3930,8 @@ class Figure(UndockedFrame):
         
         self._initialized: bool = False
         self._req_size: tuple[Int | None, Int | None] = (None, None)
-        self._plots: NDArray[_Plot]
+        self._plots: NDArray[_Plot] = np.array([], dtype=object)
+        self._hovered_plot: _Plot | None = None
         self._draw_idle_id: str = 'after#'
         self._history: _ViewSetHistory = _ViewSetHistory(self)
         self._var_coord: vrb.StringVar = vrb.StringVar(self, value='()')
@@ -3811,6 +3962,15 @@ class Figure(UndockedFrame):
         if hasattr(self, '_suptitle'):
             self._suptitle.draw()
         self._initialized = True
+    
+    def _set_hovered_plot(self, plot: _Plot | None = None):
+        assert isinstance(plot, (_Plot, type(None))), plot
+        self._hovered_plot = plot
+    
+    def _unset_hovered_plot(self, plot: _Plot):
+        assert isinstance(plot, _Plot), plot
+        if self._hovered_plot == plot:
+            self._hovered_plot = None
     
     def _on_destroy(self, event: tk.Event | None = None):
         _cleanup_tk_attributes(self)
@@ -3851,9 +4011,8 @@ class Figure(UndockedFrame):
             self._suptitle.update_theme()
         
         # Update plots
-        if hasattr(self, '_plots'):
-            for plot in self._plots.flat:
-                plot.update_theme()
+        for plot in self._plots.flat:
+            plot.update_theme()
         
         # Update toolbar
         if hasattr(self, '_toolbar'):
@@ -3863,10 +4022,9 @@ class Figure(UndockedFrame):
         if hasattr(self, '_suptitle'):
             self._suptitle.draw()
         
-        if hasattr(self, '_plots'):
-            for plot in self._plots.flat:
-                if plot:
-                    plot.draw()
+        for plot in self._plots.flat:
+            if plot:
+                plot.draw()
     
     def draw_idle(self):
         self.after_cancel(self._draw_idle_id)
@@ -3915,7 +4073,7 @@ class Figure(UndockedFrame):
             if not hasattr(self, '_suptitle'):
                 self._suptitle = _Suptitle(self)
                 self._suptitle._tkwidget.grid(row=0, column=0, sticky='we')
-                if hasattr(self, '_plots'):
+                if self._plots.size:
                     n_rows, n_cols = self._plots.shape
                     self._suptitle._tkwidget.grid(columnspan=n_cols)
             self._suptitle.set_facecolor(color=facecolor)
@@ -3970,13 +4128,12 @@ class Figure(UndockedFrame):
         height_ratios = height_ratios or [1] * n_rows
         
         # Clean up old plots
-        if hasattr(self, '_plots'):
-            for r, row in enumerate(self._plots):
-                for c, plot in enumerate(row):
-                    plot._tkwidget.grid_forget()
-                    self.grid_columnconfigure(c, weight=0)
-                self.grid_rowconfigure(r, weight=0)
-            self._history.clear()
+        for r, row in enumerate(self._plots):
+            for c, plot in enumerate(row):
+                plot._tkwidget.grid_forget()
+                self.grid_columnconfigure(c, weight=0)
+            self.grid_rowconfigure(r, weight=0)
+        self._history.clear()
         
         # Update suptitle's position
         if hasattr(self, '_suptitle'):
@@ -4024,7 +4181,7 @@ class Figure(UndockedFrame):
         if enable and not hasattr(self, '_toolbar'):
             self._toolbar = _Toolbar(self, var_coord=self._var_coord)
             kw = {"column": 0, "sticky": 'we', "padx": 9}
-            if hasattr(self, '_plots'):
+            if self._plots.size:
                 n_rows, n_cols = self._plots.shape
                 self._toolbar._tkwidget.grid(row=n_rows+1, columnspan=n_cols, **kw)
             else:
@@ -4072,8 +4229,8 @@ if __name__ == '__main__':
             plt.set_blabel('<bottom-label>')
             plt.set_llabel('<left-label>')
             plt.set_rlabel('<right-label>')
-            #plt.set_ttickslabels(True)
-            #plt.set_rtickslabels(True)
+            plt.set_ttickslabels(True)
+            plt.set_rtickslabels(True)
             #plt.set_lscale('log')
             #plt.set_llimits(10, 150)
             plt.set_llimits(-1.7, 1.7)
