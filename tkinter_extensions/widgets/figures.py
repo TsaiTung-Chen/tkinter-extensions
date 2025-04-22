@@ -35,6 +35,7 @@ _ANCHORS = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
 _NP_FLOAT = np.float64
 _NP_FINFO = np.finfo(_NP_FLOAT)
 _PMIN, _MIN, _MAX = (_NP_FINFO.smallest_normal, _NP_FINFO.min, _NP_FINFO.max)
+_DMIN, _DMAX = (_NP_FLOAT(-1e+10), _NP_FLOAT(+1e+10))
 # =============================================================================
 # ---- Helpers
 # =============================================================================
@@ -2194,6 +2195,7 @@ class _Ticks(_BaseComponent):
             dmin = req_dmin
         if req_dmax is not None:
             dmax = req_dmax
+        
         new_dlimits = [dmin, dmax] if dlimits[0] < dlimits[1] else [dmax, dmin]
         tf = tf_cls.from_points(new_dlimits, new_climits)
         
@@ -3061,6 +3063,8 @@ class _Plot(_BaseWidgetWrapper):
         self._lartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._rartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._transforms: dict[str, _Transform2D] = {}
+        self._dbounds: dict[str, NDArray[Float]] = {}
+        self._cbounds: dict[str, NDArray[Int]] = {}
         
         self._title: _Text = _Text(canvas, text='', tag='title.text')
         self._taxis: _Axis = _Axis(self, side='t', tag='taxis')
@@ -3130,7 +3134,7 @@ class _Plot(_BaseWidgetWrapper):
                 (self._tartists, '_xlims')
             ]
         ]
-        dbounds = np.array([(_PMIN, _MAX)]*4, dtype=float)
+        dbounds = np.array([(_DMIN, _DMAX)]*4, dtype=float)
         for i, lims in enumerate(_dlimits):
             if lims.size:
                 dbounds[i] = [lims[:, 0].min(), lims[:, 1].max()]
@@ -3262,6 +3266,8 @@ class _Plot(_BaseWidgetWrapper):
             artist.set_transform(transforms[sides])
             artist.draw()
         self._transforms.update(tfs)
+        self._dbounds.update(dbounds)
+        self._cbounds.update(cbounds)
         
         ## Draw legend again after the user-defined artists are drawn
         lines, labels = [], []
@@ -3276,7 +3282,6 @@ class _Plot(_BaseWidgetWrapper):
         # Draw other artists
         self._veil.set_coords(0, 0, w-1, h-1)
         self._veil.draw()
-        self._rubberband._bounds = (cx1, cy1, cx2, cy2)
         self._rubberband.draw()
         
         # Raise artists in order
@@ -3636,7 +3641,9 @@ class _Toolbar(_BaseWidgetWrapper):
         self._org_cursors: dict[_Plot, str] = {}
         self._bindings: dict[_Plot, list[str]] = {}
         self._active_plot: _Plot | None = None
-        self._motion_start: tuple[Int, Int] = (0, 0)
+        self._motion_start: tuple[Int, Int] | None = None
+        self._anchor_start: tuple[Int, Int] | None = None
+        self._zoom_box: tuple[Int, Int, Int, Int] | None = None
         
         self._home_bt = ttk.Button(
             frame, text='Home', command=self._home_view, takefocus=False
@@ -3848,22 +3855,55 @@ class _Toolbar(_BaseWidgetWrapper):
         if not history or viewset != history[-1]:
             history.add(viewset)
     
-    def _pan_on_leftpress(self, event: tk.Event):#TODO
-        pass
+    def _pan_on_leftpress(self, event: tk.Event):
+        plot = self._figure._hovered_plot
+        canvas = plot._tkwidget
+        if not (movable_oids := canvas.find_withtag('movable=True')):
+            return
+        
+        oid = movable_oids[0]
+        if (bbox := canvas.bbox(oid)) is None:  #TODO: May not need this after adding canvas cover
+            x1, y1 = canvas.coords(oid)[:2]
+        else:
+            x1, y1, x2, y2 = bbox  # bbox of the lowest item
+        
+        self._update_history()
+        self._active_plot = plot
+        self._motion_start = (event.x, event.y)
+        self._anchor_start = (x1, y1)
     
     def _pan_on_leftmotion(self, event: tk.Event):
-        pass
+        if not (plot := self._active_plot):
+            return
+        
+        start_x, start_y = self._motion_start
+        anchor_x, anchor_y = self._anchor_start
+        x1 = anchor_x + (event.x - start_x)
+        y1 = anchor_y + (event.y - start_y)
+        plot._tkwidget.moveto('movable=True', x1, y1)
     
     def _pan_on_leftrelease(self, event: tk.Event):
-        pass
+        if not (plot := self._active_plot):
+            return
+        
+        start_x, start_y = self._motion_start
+        
+        cx12 = np.sort(plot._cbounds['b'])
+        cy12 = np.sort(plot._cbounds['l'])
+        cx1, cx2 = cx12 - (event.x - start_x)
+        cy1, cy2 = cy12 - (event.y - start_y)
+        
+        self._pan_zoom_on_leftrelease((cx1, cy1, cx2, cy2))
+        self._anchor_start = None
     
     def _zoom_on_leftpress(self, event: tk.Event):
         self._update_history()
-        
         plot = self._figure._hovered_plot
+        
+        xlimits = sorted(plot._cbounds['b'])
+        ylimits = sorted(plot._cbounds['l'])
+        x, y = np.clip(event.x, *xlimits), np.clip(event.y, *ylimits)
         rubberband = plot._rubberband
-        x1, y1, x2, y2 = rubberband._bounds
-        x, y = np.clip(event.x, x1, x2), np.clip(event.y, y1, y2)
         rubberband.set_coords(x, y, x, y)
         rubberband.set_state('normal')
         rubberband.draw()
@@ -3872,29 +3912,40 @@ class _Toolbar(_BaseWidgetWrapper):
         self._motion_start = (x, y)
     
     def _zoom_on_leftmotion(self, event: tk.Event):
-        rubberband = self._active_plot._rubberband
+        plot = self._active_plot
         start_x, start_y = self._motion_start
-        bx1, by1, bx2, by2 = rubberband._bounds
-        x, y = np.clip(event.x, bx1, bx2), np.clip(event.y, by1, by2)
-        bx1, bx2 = sorted([start_x, x])
-        by1, by2 = sorted([start_y, y])
-        rubberband.set_coords(bx1, by1, bx2, by2)
+        
+        xlimits = np.sort(plot._cbounds['b'])
+        ylimits = np.sort(plot._cbounds['l'])
+        x, y = np.clip(event.x, *xlimits), np.clip(event.y, *ylimits)
+        x1, x2 = np.sort([start_x, x])
+        y1, y2 = np.sort([start_y, y])
+        
+        rubberband = plot._rubberband
+        rubberband.set_coords(x1, y1, x2, y2)
         rubberband.draw()
+        
+        self._zoom_box = (x1, y1, x2, y2)
     
     def _zoom_on_leftrelease(self, event: tk.Event):
+        if not (plot := self._active_plot):
+            return
+        
         plot = self._active_plot
         rubberband = plot._rubberband
         rubberband.set_state('hidden')
         rubberband.draw()
         
-        cx1, cy1, cx2, cy2 = rubberband.get_coords()
+        self._pan_zoom_on_leftrelease(self._zoom_box)
+        self._zoom_box = None
+    
+    def _pan_zoom_on_leftrelease(self, cbounds: tuple[Int, Int, Int, Int]):
+        plot = self._active_plot
+        cx1, cy1, cx2, cy2 = cbounds
+        
         for side, tf in plot._transforms.items():
             c12 = np.asarray([cx1, cx2] if side in 'bt' else [cy1, cy2])
-            with np.errstate(
-                    **dict.fromkeys(
-                        ['divide', 'invalid', 'over', 'under'], 'raise'
-                    )
-            ):
+            with np.errstate(all='raise'):
                 try:
                     itf = tf.get_inverse()
                     d12 = itf(c12)
@@ -3905,6 +3956,8 @@ class _Toolbar(_BaseWidgetWrapper):
                 plot._get_ticks(side).set_limits(*d12)
         plot.draw()
         
+        self._active_plot = None
+        self._motion_start = None
         self._update_history()
 
 
