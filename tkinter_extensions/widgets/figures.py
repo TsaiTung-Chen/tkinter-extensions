@@ -1310,8 +1310,8 @@ class _Line(_BaseArtist):
             if self._antialias_enabled:
                 xy = _cutoff_z_patterns(xy)
             xys = xy.ravel(order='F')  # x0, y0, x1, y1, x2, y2, ...
-            if len(xys) < 4:
-                xys = (-1e100, -1e100, -1e100, -1e100)
+            if xy.size < 4:
+                xys = (-1e4, -1e4, -1e4, -1e4)
         self.coords(*xys)
         
         # Update style
