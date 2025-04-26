@@ -384,7 +384,6 @@ class _FirstOrderPolynomial(_BaseTransform1D):
     def __init__(self, c0: IntFloat = 0., c1: IntFloat = 1.):
         assert isinstance(c0, IntFloat), c0
         assert isinstance(c1, IntFloat), c1
-        assert c1 != 0., c1
         
         self._c0: np.float64 = np.float64(c0)
         self._c1: np.float64 = np.float64(c1)
@@ -421,8 +420,11 @@ class _FirstOrderPolynomial(_BaseTransform1D):
         return cls(c0=c0, c1=c1)
     
     def get_inverse(self) -> _FirstOrderPolynomial:
+        assert self._c1 != 0., self._c1
+        
         c1_inv = 1. / self._c1  # c1_inv = 1 / c1
         c0_inv = -self._c0 / self._c1  # c0_inv = -c0 / c1
+        
         return _FirstOrderPolynomial(c0=c0_inv, c1=c1_inv)
 
 
@@ -437,7 +439,6 @@ class _Logarithm(_BaseTransform1D):
         assert isinstance(c0, IntFloat), c0
         assert isinstance(c1, IntFloat), c1
         assert base > 0., base
-        assert c1 != 0., c1
         
         self._c0: np.float64 = np.float64(c0)
         self._c1: np.float64 = np.float64(c1)
@@ -583,7 +584,7 @@ class _Transform2D:  # 2D transformation
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
             round_: bool = False,
-            clip: bool = True
+            clip: bool = False
     ) -> NDArray[Float]:
         xs, ys = np.array(xs), np.array(ys)  # copy
         assert isinstance(xs, np.ndarray), xs
@@ -605,7 +606,7 @@ class _Transform2D:  # 2D transformation
             return xy.ravel()
         return xy
     
-    def _clip(
+    def _clip(  # currently unused
             self,
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
@@ -2306,6 +2307,7 @@ class _Frame(_BaseComponent):
     def __init__(self, plot: _Plot, *args, **kwargs):
         super().__init__(plot, *args, **kwargs)
         
+        self._req_facecolor: str | None = None
         self._req_grid_enabled: dict[str, bool | None] = dict.fromkeys('rblt')
         self._req_grid_cdata: dict[str, NDArray[Float]] = {}
         
@@ -2317,29 +2319,49 @@ class _Frame(_BaseComponent):
             "l": _Line(self._canvas, tag=f'{self._tag}.grid.line'),
             "t": _Line(self._canvas, tag=f'{self._tag}.grid.line')
         }
-        self._rect: _Rectangle = _Rectangle(
-            self._canvas, tag=f'{self._tag}.rectangle'
+        self._cover: _Polygon = _Polygon(
+            self._canvas, tag=f'{self._tag}.cover.polygon'
+        )
+        self._edge: _Rectangle = _Rectangle(
+            self._canvas, tag=f'{self._tag}.edge.rectangle'
         )
         self._grid: dict[str, list[_Line]] = {"r": [], "b": [], "l": [], "t": []}
     
     def update_theme(self):
         self._stale_grid = True
         
-        self._rect._stale = True
+        self._cover._stale = True
+        self._edge._stale = True
         for lines in self._grid.values():
             for line in lines:
                 line._stale = True
     
     def draw(self):
-        self._rect.draw()
+        canvas = self._canvas
+        
+        # Update frame's facecolor
+        default_color = self._default_style["frame"]["facecolor"]
+        bg = default_color if self._req_facecolor is None else self._req_facecolor
+        canvas.configure(background=bg)
+        
+        # Draw frame edge
+        self._edge.draw()
+        
+        # Draw background cover
+        w, h = self._plot._size
+        x1, y1, x2, y2 = self._edge.get_coords()
+        self._cover.set_coords(  # covers whole canvas except the frame
+            -1, -1,   w,  -1,   w,   h,   -1,  h,   -1, y1,
+            x1, y1,   x1, y2,   x2, y2,   x2, y1,   -1, y1
+        )
+        self._cover.draw()
         
         if not self._stale_grid:
             return
         
+        # Draw grid
         default_enabled = self._default_style[f'{self._tag}.grid.enabled']
-        canvas = self._canvas
         tag = f'{self._tag}.grid.line'
-        x1, y1, x2, y2 = self._rect.get_coords()
         for side, lines in self._grid.items():
             if (enabled := self._req_grid_enabled[side]) is None:
                 enabled = side in default_enabled
@@ -2373,16 +2395,27 @@ class _Frame(_BaseComponent):
         self._stale_grid = False
     
     def bbox(self) -> tuple[int, int, int, int] | None:
-        return self._rect.bbox()
+        return self._edge.bbox()
     
     def set_coords(self, *args, **kwargs):
-        self._rect.set_coords(*args, **kwargs)
+        self._edge.set_coords(*args, **kwargs)
+        self._stale_grid |= self._edge._stale
     
-    def set_rect(self, *args, **kwargs):
-        self._rect.set_style(*args, **kwargs)
+    def set_facecolor(self, color: str | None = None):
+        assert isinstance(color, (str, type(None))), color
+        
+        self._req_facecolor = color
     
-    def get_rect(self) -> _Rectangle:
-        return self._rect
+    def get_facecolor(self) -> str:
+        return self._canvas.cget('background')
+    
+    def set_edgecolor(self, color: str | None = None):
+        assert isinstance(color, (str, type(None))), color
+        
+        self._edge.set_style(edgecolor=color)
+    
+    def get_edgecolor(self) -> str:
+        return self._edge.get_style()["edgecolor"]
     
     def set_grid(
             self,
@@ -2536,7 +2569,7 @@ class _Legend(_BaseComponent):
                 x1, y1, x2, y2 = label.bbox(padding=False)
                 y = round((y1 + y2) / 2.)
                 xys2 = (sym_x1, y, sym_x2, y)
-                symbol = _Line(canvas, hover=True, **sym_kw)
+                symbol = _Line(canvas, **sym_kw)
                 symbol.set_coords(*xys2)
                 symbol.draw()
                 symbols.append(symbol)
@@ -2557,14 +2590,14 @@ class _Legend(_BaseComponent):
         p1, p2 = self._padx
         return (x1-p1, y1, x2+p2, y2)
     
-    def set_facecolor(self, color: str | None = None) -> str:
+    def set_facecolor(self, color: str | None = None):
         assert isinstance(color, (str, type(None))), color
         
         if color is not None:
             self._req_facecolor = color
     
     def get_facecolor(self) -> str:
-        return self._canvas["background"]
+        return self._canvas.get('background')
     
     def set_edge(
             self, color: str | None = None, width: Dimension | None = None
@@ -2965,8 +2998,6 @@ class _BaseWidgetWrapper:
         self._size = (event.width, event.height)
     
     def update_theme(self):
-        self.set_facecolor(self._req_facecolor)
-        
         if isinstance(self._tkwidget, tk.Canvas):
             for artist in self._tkwidget._zorder_tags:
                 artist._stale = True
@@ -2978,21 +3009,11 @@ class _BaseWidgetWrapper:
         self._tkwidget.after_cancel(self._draw_idle_id)
         self._draw_idle_id = self._tkwidget.after_idle(self.draw)
     
-    def _set_facecolor(self, color: str | None = None) -> str:
+    def set_facecolor(self, color: str | None = None):
         assert isinstance(color, (str, type(None))), color
         
-        default_color = self._default_style["facecolor"]
-        new_color = default_color if color is None else color
-        self._tkwidget.configure(background=new_color)
-        self._req_facecolor = color
-        
-        return new_color
-    
-    def set_facecolor(self, color: str | None = None) -> str:
-        self._set_facecolor(color=color)
-    
-    def get_facecolor(self) -> str:
-        return self._tkwidget["background"]
+        if color is not None:
+            self._req_facecolor = color
 
 
 class _Suptitle(_BaseWidgetWrapper):
@@ -3004,7 +3025,6 @@ class _Suptitle(_BaseWidgetWrapper):
         canvas = tk.Canvas(figure, *args, **kwargs)
         super().__init__(canvas)
         self._text: _Text = _Text(canvas, text='', tag=f'{self._tag}.text')
-        self.set_facecolor()
     
     def _resize(self, event: tk.Event):
         super()._resize(event)
@@ -3013,12 +3033,21 @@ class _Suptitle(_BaseWidgetWrapper):
     
     @_with_draw_events
     def draw(self):
+        # Update facecolor
+        default_color = self._default_style["frame.cover.polygon"]["facecolor"]
+        bg = default_color if self._req_facecolor is None else self._req_facecolor
+        self._tkwidget.configure(background=bg)
+        
+        # Draw text
         self._text.draw()
         xys = self._text.bbox()
         if xys is not None:
             x1, y1, x2, y2 = xys
             self._tkwidget.configure(width=x2-x1+1, height=y2-y1+1)
             self._tkwidget.update_idletasks()  # triggers `self._on_configure`
+    
+    def get_facecolor(self) -> str:
+        return self._tkwidget.cget('background')
     
     def get_title(self) -> _Text:
         return self._text
@@ -3055,6 +3084,7 @@ class _Plot(_BaseWidgetWrapper):
         figure = master
         canvas = tk.Canvas(figure, *args, **kwargs)
         super().__init__(canvas)
+        del self._req_facecolor
         
         artists = {"lines": []}
         self._colors: dict[str, Cycle] = {"lines": self._create_color_cycle()}
@@ -3091,7 +3121,6 @@ class _Plot(_BaseWidgetWrapper):
             '<Leave>', lambda e: figure._unset_hovered_plot(self), add=True
         )
         
-        self.set_facecolor()
         self.set_btickslabels(True)
         self.set_ltickslabels(True)
         self.set_bticksticks(True)
@@ -3119,6 +3148,9 @@ class _Plot(_BaseWidgetWrapper):
     
     @_with_draw_events
     def draw(self):
+        if not self._figure._initialized:
+            self._figure._initialize()
+        
         canvas = self._tkwidget
         
         # Get data limits
@@ -3164,6 +3196,7 @@ class _Plot(_BaseWidgetWrapper):
         self._taxis.draw()
         if bbox := self._baxis.bbox(): cy2 = bbox[1] - 1
         if bbox := self._taxis.bbox(): cy1 = bbox[3] + 1
+        if cy1 > cy2: cy1 = cy2 = round((cy1 + cy2) / 2.)
         cxys_outer = [cx1, cy1, cx2, cy2]  # empty space for the ticks and frame
         
         ## Draw dummy ticks (top and bottom)
@@ -3300,6 +3333,14 @@ class _Plot(_BaseWidgetWrapper):
     
     def _create_color_cycle(self) -> Cycle:
         return Cycle(self._default_style["colors"])
+    
+    def set_facecolor(self, color: str | None = None):
+        assert isinstance(color, (str, type(None))), color
+        
+        self._frame._cover.set_style(facecolor=color)
+    
+    def get_facecolor(self) -> str:
+        return self._frame._cover.get_style()["facecolor"]
     
     def set_title(
             self,
@@ -3606,7 +3647,7 @@ class _Plot(_BaseWidgetWrapper):
             label=label,
             datalabel=True,
             antialias=antialias,
-            antialias_bg=lambda: self._frame.get_rect().cget('fill'),
+            antialias_bg=lambda: self._frame.get_facecolor(),
             hover=True,
             movable=True,
             resizable=True,
@@ -3699,17 +3740,21 @@ class _Toolbar(_BaseWidgetWrapper):
         
         figure.bind('<KeyPress>', self._on_key, add=True)
         figure.bind('<KeyRelease>', self._on_key, add=True)
-        
-        self.set_facecolor()
     
     def update_theme(self):
         super().update_theme()
         text_color = self._default_style["text"]["color"]
         self._xyz_lb.configure(fg=text_color)
     
-    def set_facecolor(self, color: str | None = None):
-        new_color = super()._set_facecolor(color=color)
-        self._xyz_lb.configure(background=new_color)
+    def draw(self):
+        # Update facecolor
+        default_color = self._default_style["frame.cover.polygon"]["facecolor"]
+        bg = default_color if self._req_facecolor is None else self._req_facecolor
+        self._tkwidget.configure(background=bg)
+        self._xyz_lb.configure(background=bg)
+    
+    def get_facecolor(self) -> str:
+        return self._tkwidget.cget('background')
     
     def _on_key(self, event: tk.Event):
         event_type = getattr(event.type, 'name', event.type)
@@ -3855,17 +3900,13 @@ class _Toolbar(_BaseWidgetWrapper):
         if not history or viewset != history[-1]:
             history.add(viewset)
     
-    def _pan_on_leftpress(self, event: tk.Event):
+    def _pan_on_leftpress(self, event: tk.Event):#TODO: x/y pan
         plot = self._figure._hovered_plot
         canvas = plot._tkwidget
         if not (movable_oids := canvas.find_withtag('movable=True')):
             return
         
-        oid = movable_oids[0]
-        if (bbox := canvas.bbox(oid)) is None:  #TODO: May not need this after adding canvas cover
-            x1, y1 = canvas.coords(oid)[:2]
-        else:
-            x1, y1, x2, y2 = bbox  # bbox of the lowest item
+        x1, y1 = canvas.coords(movable_oids[0])[:2]
         
         self._update_history()
         self._active_plot = plot
@@ -3896,7 +3937,7 @@ class _Toolbar(_BaseWidgetWrapper):
         self._pan_zoom_on_leftrelease((cx1, cy1, cx2, cy2))
         self._anchor_start = None
     
-    def _zoom_on_leftpress(self, event: tk.Event):
+    def _zoom_on_leftpress(self, event: tk.Event):#TODO: x/y zoom
         self._update_history()
         plot = self._figure._hovered_plot
         
@@ -3983,6 +4024,7 @@ class Figure(UndockedFrame):
         
         self._initialized: bool = False
         self._req_size: tuple[Int | None, Int | None] = (None, None)
+        self._req_facecolor: str | None = None
         self._plots: NDArray[_Plot] = np.array([], dtype=object)
         self._hovered_plot: _Plot | None = None
         self._draw_idle_id: str = 'after#'
@@ -4040,7 +4082,8 @@ class Figure(UndockedFrame):
         id_ = str(id(self))
         if not (udbt_style := self.undock_button["style"]).startswith(id_):
             udbt_style = f'{id(self)}.{udbt_style}'
-        udbt_bg = self._default_style["facecolor"]
+        default = self._default_style["frame.cover.polygon"]["facecolor"]
+        udbt_bg = default if self._req_facecolor is None else self._req_facecolor
         self.undock_button.configure(style=udbt_style)
         style = self._root().style
         style._build_configure(
@@ -4057,7 +4100,6 @@ class Figure(UndockedFrame):
                 []
             )
         )
-        self.configure(background=self._default_style["facecolor"])
         
         # Update suptitle
         if hasattr(self, '_suptitle'):
@@ -4072,12 +4114,26 @@ class Figure(UndockedFrame):
             self._toolbar.update_theme()
     
     def draw(self):
+        # Initialization
+        if not self._initialized:
+            self._initialize()
+        
+        # Update facecolor
+        default_color = self._default_style["frame.cover.polygon"]["facecolor"]
+        bg = default_color if self._req_facecolor is None else self._req_facecolor
+        self.configure(background=bg)
+        
+        # Draw suptitle
         if hasattr(self, '_suptitle'):
             self._suptitle.draw()
         
+        # Draw plots
         for plot in self._plots.flat:
-            if plot:
-                plot.draw()
+            plot.draw()
+        
+        # Draw toolbar
+        if hasattr(self, '_toolbar'):
+            self._toolbar.draw()
     
     def draw_idle(self):
         self.after_cancel(self._draw_idle_id)
@@ -4105,6 +4161,24 @@ class Figure(UndockedFrame):
     
     def get_size(self) -> tuple[Int, Int]:
         return (self.winfo_reqwidth(), self.winfo_reqheight())
+    
+    def set_facecolor(self, color: str | None = None):
+        assert isinstance(color, (str, type(None))), color
+        
+        if color is not None:
+            self._req_facecolor = color
+            
+            if hasattr(self, '_suptitle'):
+                self._suptitle.set_facecolor(color)
+            
+            for plot in self._plots.flat:
+                plot.set_facecolor(color)
+            
+            if hasattr(self, '_toolbar'):
+                self._toolbar.set_facecolor(color)
+    
+    def get_facecolor(self) -> str:
+        return self.cget('background')
     
     def set_suptitle(
             self,
@@ -4271,7 +4345,7 @@ if __name__ == '__main__':
     
     suptitle = fig.set_suptitle('<Suptitle>')
     plts = fig.set_plots(1, 1)
-    plts = np.array([[plts]])#???
+    plts = np.atleast_2d(plts)
     for r in range(plts.shape[0]):
         for c in range(plts.shape[1]):
             plt = plts[r, c]

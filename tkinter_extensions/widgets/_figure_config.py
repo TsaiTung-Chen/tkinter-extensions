@@ -11,15 +11,16 @@ from copy import deepcopy
 # =============================================================================
 """
 Zorder:
-    0.   frame: rect, grid
-    1~100.   user
-    101. ticks: ticks, labels
-    102. axis: label
-    103. legend
-    104. title
-    105. suptitle
-    106. datalabel: arrow, point, box, text
-    107. toolbar: rubberband
+    0.     frame: grid
+    1~100. user defined
+    101.   frame: cover, edge
+    102.   ticks: ticks, labels
+    103.   axis: label
+    104.   legend
+    105.   title
+    106.   suptitle
+    107.   datalabel: arrow, point, box, text
+    108.   toolbar: rubberband
 """
 
 common_style = {
@@ -30,6 +31,23 @@ common_style = {
     ],
     
     #TODO: margin
+    
+    "frame": {
+    },
+    "frame.cover.polygon": {
+        "zorder": 101.0,
+        "width": '1p',
+        "edgecolor": ''
+    },
+    "frame.edge.rectangle": {
+        "zorder": 101.1,
+        "width": '1p'
+    },
+    "frame.grid.enabled": ('b', 'l'),
+    "frame.grid.line": {
+        "zorder": 0.0,
+        "width": '1p'
+    },
     
     "suptitle.text": {
         "zorder": 105.0,
@@ -159,16 +177,6 @@ common_style = {
         "padx": ('6p', '0p')
     },
     
-    "frame.rectangle": {
-        "zorder": 0.0,
-        "width": '1p'
-    },
-    "frame.grid.enabled": ('b', 'l'),
-    "frame.grid.line": {
-        "zorder": 0.1,
-        "width": '1p'
-    },
-    
     "legend.enabled": True,
     "legend.edgewidth": '1p',
     "legend.width": '150p',
@@ -267,9 +275,28 @@ common_style = {
 # =============================================================================
 # ---- Light style
 # =============================================================================
+light_facecolor = '#D9E3F1'
+light_frame_facecolor = '#CFD9E8'
+light_frame_edgecolor = '#666666'
+
 light_style = deepcopy(common_style)
 light_style.update({
-    "facecolor": '#D9E3F1',
+    "frame": {
+        **common_style["frame"],
+        "facecolor": light_frame_facecolor
+    },
+    "frame.cover.polygon": {
+        **common_style["frame.cover.polygon"],
+        "facecolor": light_facecolor
+    },
+    "frame.edge.rectangle": {
+        **common_style["frame.edge.rectangle"],
+        "edgecolor": light_frame_edgecolor
+    },
+    "frame.grid.line": {
+        **common_style["frame.grid.line"],
+        "color": 'white'
+    },
     
     "taxis.label.text": {
         **common_style["taxis.label.text"],
@@ -311,18 +338,8 @@ light_style.update({
         "color": '#1A1A1A'
     },
     
-    "frame.rectangle": {
-        **common_style["frame.rectangle"],
-        "facecolor": '#CFD9E8',
-        "edgecolor": '#666666'
-    },
-    "frame.grid.line": {
-        **common_style["frame.grid.line"],
-        "color": 'white'
-    },
-    
-    "legend.facecolor": '#D9E3F1',
-    "legend.edgecolor": '#D9E3F1',
+    "legend.facecolor": light_facecolor,
+    "legend.edgecolor": light_facecolor,
     
     "datalabel.point.oval": {
         **common_style["datalabel.point.oval"],
@@ -372,9 +389,28 @@ light_style.update({
 # =============================================================================
 # ---- Dark Style
 # =============================================================================
+dark_facecolor = 'black'
+dark_frame_facecolor = 'black'
+dark_frame_edgecolor = '#808080'
+
 dark_style = deepcopy(common_style)
 dark_style.update({
-    "facecolor": 'black',
+    "frame": {
+        **common_style["frame"],
+        "facecolor": dark_frame_facecolor
+    },
+    "frame.cover.polygon": {
+        **common_style["frame.cover.polygon"],
+        "facecolor": dark_facecolor
+    },
+    "frame.edge.rectangle": {
+        **common_style["frame.edge.rectangle"],
+        "edgecolor": dark_frame_edgecolor
+    },
+    "frame.grid.line": {
+        **common_style["frame.grid.line"],
+        "color": '#404040'
+    },
     
     "taxis.label.text": {
         **common_style["taxis.label.text"],
@@ -416,18 +452,8 @@ dark_style.update({
         "color": '#F2F2F2'
     },
     
-    "frame.rectangle": {
-        **common_style["frame.rectangle"],
-        "facecolor": 'black',
-        "edgecolor": '#808080'
-    },
-    "frame.grid.line": {
-        **common_style["frame.grid.line"],
-        "color": '#404040'
-    },
-    
-    "legend.facecolor": 'black',
-    "legend.edgecolor": 'black',
+    "legend.facecolor": dark_facecolor,
+    "legend.edgecolor": dark_facecolor,
     
     "datalabel.point.oval": {
         **common_style["datalabel.point.oval"],
