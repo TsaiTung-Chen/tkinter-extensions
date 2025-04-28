@@ -20,7 +20,8 @@ Zorder:
     105.   title
     106.   suptitle
     107.   datalabel: arrow, point, box, text
-    108.   toolbar: rubberband
+    108.   veil: rectangle
+    109.   toolbar: rubberband
 """
 
 common_style = {
@@ -50,7 +51,7 @@ common_style = {
     },
     
     "suptitle.text": {
-        "zorder": 105.0,
+        "zorder": 106.0,
         "size": 20,
         "weight": 'normal',
         "slant": 'roman',
@@ -60,7 +61,7 @@ common_style = {
     },
     
     "title.text": {
-        "zorder": 104.0,
+        "zorder": 105.0,
         "size": 17,
         "weight": 'normal',
         "slant": 'roman',
@@ -70,7 +71,7 @@ common_style = {
     },
     
     "taxis.label.text": {
-        "zorder": 102.0,
+        "zorder": 103.0,
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
@@ -80,7 +81,7 @@ common_style = {
     },
     
     "baxis.label.text": {
-        "zorder": 102.0,
+        "zorder": 103.0,
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
@@ -90,7 +91,7 @@ common_style = {
     },
     
     "laxis.label.text": {
-        "zorder": 102.0,
+        "zorder": 103.0,
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
@@ -100,7 +101,7 @@ common_style = {
     },
     
     "raxis.label.text": {
-        "zorder": 102.0,
+        "zorder": 103.0,
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
@@ -113,11 +114,11 @@ common_style = {
     "tticks.labels.max_ticks": 13,
     "tticks.margins": ('9p', '9p'),
     "tticks.ticks.line": {
-        "zorder": 101.0,
+        "zorder": 102.0,
         "width": '1p'
     },
     "tticks.labels.text": {
-        "zorder": 101.1,
+        "zorder": 102.1,
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
@@ -130,11 +131,11 @@ common_style = {
     "bticks.labels.max_ticks": 13,
     "bticks.margins": ('9p', '9p'),
     "bticks.ticks.line": {
-        "zorder": 101.0,
+        "zorder": 102.0,
         "width": '1p'
     },
     "bticks.labels.text": {
-        "zorder": 101.1,
+        "zorder": 102.1,
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
@@ -147,11 +148,11 @@ common_style = {
     "lticks.labels.max_ticks": 13,
     "lticks.margins": ('9p', '9p'),
     "lticks.ticks.line": {
-        "zorder": 101.0,
+        "zorder": 102.0,
         "width": '1p'
     },
     "lticks.labels.text": {
-        "zorder": 101.1,
+        "zorder": 102.1,
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
@@ -164,11 +165,11 @@ common_style = {
     "rticks.labels.max_ticks": 13,
     "rticks.margins": ('9p', '9p'),
     "rticks.ticks.line": {
-        "zorder": 101.0,
+        "zorder": 102.0,
         "width": '1p'
     },
     "rticks.labels.text": {
-        "zorder": 101.1,
+        "zorder": 102.1,
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
@@ -185,7 +186,7 @@ common_style = {
     "legend.ipady": ('0p', '0p'),
     "legend.symbols.width": '15p',
     "legend.labels.text": {
-        "zorder": 103.0,
+        "zorder": 104.0,
         "size": 12,
         "weight": 'normal',
         "slant": 'roman',
@@ -198,19 +199,19 @@ common_style = {
     "datalabel.offset": ('0p', '-36p'),
     "datalabel.scientific": 4,
     "datalabel.arrow.polygon": {
-        "zorder": 106.0,
+        "zorder": 107.0,
         "width": '1p'
     },
     "datalabel.point.oval": {
-        "zorder": 106.1,
+        "zorder": 107.1,
         "width": '1p'
     },
     "datalabel.box.rectangle": {
-        "zorder": 106.2,
+        "zorder": 107.2,
         "width": '1p'
     },
     "datalabel.text": {
-        "zorder": 106.3,
+        "zorder": 107.3,
         "size": 12,
         "weight": 'normal',
         "slant": 'roman',
@@ -221,12 +222,12 @@ common_style = {
     },
     
     "veil.rectangle": {
-        "zorder": 107.0,
+        "zorder": 108.0,
         "width": '0p'
     },
     
     "toolbar.rubberband.rectangle": {
-        "zorder": 108.0,
+        "zorder": 109.0,
         "width": '1p'
     },
     

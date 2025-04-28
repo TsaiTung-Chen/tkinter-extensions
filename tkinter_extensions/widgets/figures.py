@@ -584,7 +584,7 @@ class _Transform2D:  # 2D transformation
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
             round_: bool = False,
-            clip: bool = False
+            clip: bool = True
     ) -> NDArray[Float]:
         xs, ys = np.array(xs), np.array(ys)  # copy
         assert isinstance(xs, np.ndarray), xs
@@ -598,15 +598,13 @@ class _Transform2D:  # 2D transformation
             xs, ys = self._clip(xs, ys, limits='input')
         xs = self._x_tf(xs, round_=round_)
         ys = self._y_tf(ys, round_=round_)
-        if clip and not scalar:
-            xs, ys = self._clip(xs, ys, limits='output')
         
         xy = np.asarray([xs, ys])
         if scalar:
             return xy.ravel()
         return xy
     
-    def _clip(  # currently unused
+    def _clip(
             self,
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
@@ -3663,7 +3661,7 @@ class _Plot(_BaseWidgetWrapper):
         return line
 
 
-class _Toolbar(_BaseWidgetWrapper):
+class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
     _tag: str = 'toolbar'
     _cursors: dict[str, str] = {"pan": 'fleur', "zoom": 'crosshair'}
     
@@ -3900,7 +3898,7 @@ class _Toolbar(_BaseWidgetWrapper):
         if not history or viewset != history[-1]:
             history.add(viewset)
     
-    def _pan_on_leftpress(self, event: tk.Event):#TODO: x/y pan
+    def _pan_on_leftpress(self, event: tk.Event):
         plot = self._figure._hovered_plot
         canvas = plot._tkwidget
         if not (movable_oids := canvas.find_withtag('movable=True')):
@@ -3913,7 +3911,7 @@ class _Toolbar(_BaseWidgetWrapper):
         self._motion_start = (event.x, event.y)
         self._anchor_start = (x1, y1)
     
-    def _pan_on_leftmotion(self, event: tk.Event):
+    def _pan_on_leftmotion(self, event: tk.Event):#TODO: x/y pan
         if not (plot := self._active_plot):
             return
         
@@ -3937,7 +3935,7 @@ class _Toolbar(_BaseWidgetWrapper):
         self._pan_zoom_on_leftrelease((cx1, cy1, cx2, cy2))
         self._anchor_start = None
     
-    def _zoom_on_leftpress(self, event: tk.Event):#TODO: x/y zoom
+    def _zoom_on_leftpress(self, event: tk.Event):
         self._update_history()
         plot = self._figure._hovered_plot
         
@@ -3952,7 +3950,7 @@ class _Toolbar(_BaseWidgetWrapper):
         self._active_plot = plot
         self._motion_start = (x, y)
     
-    def _zoom_on_leftmotion(self, event: tk.Event):
+    def _zoom_on_leftmotion(self, event: tk.Event):#TODO: x/y zoom
         plot = self._active_plot
         start_x, start_y = self._motion_start
         
