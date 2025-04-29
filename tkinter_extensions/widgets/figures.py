@@ -2054,10 +2054,10 @@ class _Ticks(_BaseComponent):
         # Add margins
         default_marg1, default_marg2 = self._default_style[f"{self._tag}.margins"]
         req_marg1, req_marg2 = self._req_margins
-        marg1 = self._to_px(default_marg1 if req_marg1 is None else req_marg1)
-        marg2 = self._to_px(default_marg2 if req_marg2 is None else req_marg2)
-        assert marg1 >= 0. and marg2 >= 0., (marg1, marg2)
-        cmin, cmax = (cmin + marg1), (cmax - marg2)
+        mrg1 = self._to_px(default_marg1 if req_marg1 is None else req_marg1)
+        mrg2 = self._to_px(default_marg2 if req_marg2 is None else req_marg2)
+        assert mrg1 >= 0. and mrg2 >= 0., (mrg1, mrg2)
+        cmin, cmax = (cmin + mrg1), (cmax - mrg2)
         if cmin > cmax:
             cmin = cmax = round((cmin + cmax) / 2.)
         new_climits = [cmin, cmax]
@@ -2211,7 +2211,7 @@ class _Ticks(_BaseComponent):
             self._req_transform = tf
             self._stale = True
         self._limits = [dmin, dmax]
-        self._margins = [marg1, marg2]
+        self._margins = [mrg1, mrg2]
         self._growing_p = growing_p
     
     def _get_transform(self) -> _BaseTransform1D:
@@ -3682,6 +3682,7 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
         self._active_plot: _Plot | None = None
         self._motion_start: tuple[Int, Int] | None = None
         self._anchor_start: tuple[Int, Int] | None = None
+        self._pan_offsets: tuple[Int, Int] | None = None
         self._zoom_box: tuple[Int, Int, Int, Int] | None = None
         
         self._home_bt = ttk.Button(
@@ -3758,6 +3759,7 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
         event_type = getattr(event.type, 'name', event.type)
         assert event_type in ('KeyPress', 'KeyRelease'), event
         
+        # Update the keypress state
         if (key := event.keysym.lower()) in self._keypress:
             self._keypress[key] = event_type == 'KeyPress'
     
@@ -3823,14 +3825,37 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
             plot._veil.set_state('normal')
             plot._veil.draw()
     
+    def _update_history(self):
+        # Append current limits
+        fig = self._figure
+        history = fig._history
+        
+        # Drop the views after current step
+        history.drop_future()
+        
+        # Create a ViewSet with current views
+        viewset = _ViewSet(
+            _PlotView(
+                plot,
+                {s: plot._get_ticks(s).get_limits() for s in 'rblt'}
+            )
+            for plot in fig._plots.flat
+        )
+        
+        # Update the view history
+        if not history or viewset != history[-1]:
+            history.add(viewset)
+    
     def _home_view(self):
         fig = self._figure
         history = fig._history
         autoscale = self._keypress["a"]
         
+        # Initialize history if not exists
         if not history:
             self._update_history()
         
+        # Updaet the view
         for plot in fig._plots.flat:
             if autoscale:
                 limits, margins = ((None, None), (None, None))
@@ -3851,16 +3876,21 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
                     plot._get_ticks(side)._set_limits(*limits, margins)
         fig.draw()
         
+        # Update history
         self._update_history()
     
     def _prev_view(self):
         fig = self._figure
         history = fig._history
         
+        # Initialize history if not exists
         if not history:
             self._update_history()
+        
+        # Get the info of the previous view
         viewset = history.back()
         
+        # Update the view
         for pview in viewset:
             plot, view = pview
             for side, (limits, margins) in view.items():
@@ -3871,32 +3901,19 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
         fig = self._figure
         history = fig._history
         
+        # Initialize history if not exists
         if not history:
             self._update_history()
+        
+        # Get the info of the next view
         viewset = history.forward()
         
+        # Update the view
         for pview in viewset:
             plot, view = pview
             for side, (limits, margins) in view.items():
                 plot._get_ticks(side)._set_limits(*limits, margins)
         fig.draw()
-    
-    def _update_history(self):
-        # Append current limits
-        fig = self._figure
-        history = fig._history
-        
-        history.drop_future()
-        viewset = _ViewSet(
-            _PlotView(
-                plot,
-                {s: plot._get_ticks(s).get_limits() for s in 'rblt'}
-            )
-            for plot in fig._plots.flat
-        )
-        
-        if not history or viewset != history[-1]:
-            history.add(viewset)
     
     def _pan_on_leftpress(self, event: tk.Event):
         plot = self._figure._hovered_plot
@@ -3904,86 +3921,140 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
         if not (movable_oids := canvas.find_withtag('movable=True')):
             return
         
-        x1, y1 = canvas.coords(movable_oids[0])[:2]
+        # Get the anchor point (the lowest item in the stacking list)
+        x1, y1, _, _ = canvas.bbox(movable_oids[0])
         
+        # Initialize the states
         self._update_history()
         self._active_plot = plot
         self._motion_start = (event.x, event.y)
         self._anchor_start = (x1, y1)
     
-    def _pan_on_leftmotion(self, event: tk.Event):#TODO: x/y pan
+    def _pan_on_leftmotion(self, event: tk.Event):
         if not (plot := self._active_plot):
             return
         
+        # Determine current pan mode
+        along_x = self._keypress["x"]
+        along_y = self._keypress["y"]
+        if not along_x and not along_y:
+            along_x = along_y = True
+        
+        # Calculate the amounts of offsets
         start_x, start_y = self._motion_start
         anchor_x, anchor_y = self._anchor_start
-        x1 = anchor_x + (event.x - start_x)
-        y1 = anchor_y + (event.y - start_y)
+        dx = event.x - start_x if along_x else 0
+        dy = event.y - start_y if along_y else 0
+        x1, y1 = (anchor_x + dx, anchor_y + dy)
+        
+        # Update movable artists
         plot._tkwidget.moveto('movable=True', x1, y1)
+        
+        # Update the states
+        self._pan_offsets = (dx, dy)
     
     def _pan_on_leftrelease(self, event: tk.Event):
-        if not (plot := self._active_plot):
+        if not (plot := self._active_plot) or not (offsets := self._pan_offsets):
+            self._clear_pan_zoom_states()
             return
         
-        start_x, start_y = self._motion_start
+        # Calculate the amounts of mouse offsets
+        dx, dy = offsets
+        cbounds = plot._cbounds
+        cx12 = np.sort(cbounds["b"])
+        cy12 = np.sort(cbounds["l"])
+        cx1, cx2 = cx12 - dx
+        cy1, cy2 = cy12 - dy
         
-        cx12 = np.sort(plot._cbounds['b'])
-        cy12 = np.sort(plot._cbounds['l'])
-        cx1, cx2 = cx12 - (event.x - start_x)
-        cy1, cy2 = cy12 - (event.y - start_y)
-        
+        # Update view and clear states
         self._pan_zoom_on_leftrelease((cx1, cy1, cx2, cy2))
-        self._anchor_start = None
+        self._clear_pan_zoom_states()
     
     def _zoom_on_leftpress(self, event: tk.Event):
         self._update_history()
         plot = self._figure._hovered_plot
         
-        xlimits = sorted(plot._cbounds['b'])
-        ylimits = sorted(plot._cbounds['l'])
+        # Calculate rubberband coordinates
+        cbounds = plot._cbounds
+        xlimits = np.sort(cbounds["b"])
+        ylimits = np.sort(cbounds["l"])
         x, y = np.clip(event.x, *xlimits), np.clip(event.y, *ylimits)
+        
+        # Update rubberband
         rubberband = plot._rubberband
         rubberband.set_coords(x, y, x, y)
         rubberband.set_state('normal')
         rubberband.draw()
         
+        # Initilize the states
         self._active_plot = plot
         self._motion_start = (x, y)
     
-    def _zoom_on_leftmotion(self, event: tk.Event):#TODO: x/y zoom
+    def _zoom_on_leftmotion(self, event: tk.Event):
         plot = self._active_plot
-        start_x, start_y = self._motion_start
+        x1, y1 = self._motion_start
         
-        xlimits = np.sort(plot._cbounds['b'])
-        ylimits = np.sort(plot._cbounds['l'])
-        x, y = np.clip(event.x, *xlimits), np.clip(event.y, *ylimits)
-        x1, x2 = np.sort([start_x, x])
-        y1, y2 = np.sort([start_y, y])
+        # Determine current pan mode
+        along_x = self._keypress["x"]
+        along_y = self._keypress["y"]
+        if not along_x and not along_y:
+            along_x = along_y = True
         
+        # Calculate rubberband coordinates
+        cbounds = plot._cbounds
+        xlimits = np.sort(cbounds["b"])
+        ylimits = np.sort(cbounds["l"])
+        if along_x:
+            x = np.clip(event.x, *xlimits)
+            x1, x2 = np.sort([x1, x])
+        else:
+            x1, x2 = xlimits
+        if along_y:
+            y = np.clip(event.y, *ylimits)
+            y1, y2 = np.sort([y1, y])
+        else:
+            y1, y2 = ylimits
+        
+        # Update rubberband
         rubberband = plot._rubberband
         rubberband.set_coords(x1, y1, x2, y2)
         rubberband.draw()
         
+        # Update the states
         self._zoom_box = (x1, y1, x2, y2)
     
     def _zoom_on_leftrelease(self, event: tk.Event):
         if not (plot := self._active_plot):
+            self._clear_pan_zoom_states()
             return
         
+        # Hide rubberband
         plot = self._active_plot
         rubberband = plot._rubberband
         rubberband.set_state('hidden')
         rubberband.draw()
         
-        self._pan_zoom_on_leftrelease(self._zoom_box)
-        self._zoom_box = None
+        if not (box := self._zoom_box):
+            return
+        
+        # Update view and clear states
+        self._pan_zoom_on_leftrelease(box)
+        self._clear_pan_zoom_states()
     
     def _pan_zoom_on_leftrelease(self, cbounds: tuple[Int, Int, Int, Int]):
         plot = self._active_plot
         cx1, cy1, cx2, cy2 = cbounds
         
         for side, tf in plot._transforms.items():
-            c12 = np.asarray([cx1, cx2] if side in 'bt' else [cy1, cy2])
+            # Calculate canvas limits from cbounds and margins
+            ticks = plot._get_ticks(side)
+            _, [mrg1, mrg2] = ticks.get_limits()
+            c1, c2 = [cx1, cx2] if side in 'bt' else [cy1, cy2]
+            c12 = np.array([c1+mrg1, c2-mrg2])
+            if c12[0] > c12[1]:
+                c12 = np.array([c1, c2])
+            
+            # Transform into data limits
             with np.errstate(all='raise'):
                 try:
                     itf = tf.get_inverse()
@@ -3991,13 +4062,21 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
                     d12.sort()
                 except FloatingPointError:
                     continue
+            
+            # Update data limits
             if np.isfinite(d12).all():
-                plot._get_ticks(side).set_limits(*d12)
+                ticks.set_limits(*d12)
         plot.draw()
         
+        # Update history
+        self._update_history()
+    
+    def _clear_pan_zoom_states(self):
         self._active_plot = None
         self._motion_start = None
-        self._update_history()
+        self._anchor_start = None
+        self._pan_offsets = None
+        self._zoom_box = None
 
 
 # =============================================================================
