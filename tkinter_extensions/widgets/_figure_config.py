@@ -228,7 +228,7 @@ common_style = {
     
     "toolbar.rubberband.rectangle": {
         "zorder": 109.0,
-        "width": '1p'
+        "width": '3p'
     },
     
     "text": {
