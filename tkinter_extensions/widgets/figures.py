@@ -3760,7 +3760,7 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips, x y coordinate
         self._pan_bt.pack(side='left', padx=('6p', '0p'))
         self._pan_tt = ToolTip(
             self._pan_bt,
-            text='Pan\nPress and hold X/Y to fix the axis',
+            text='Pan view\nPress and hold X/Y to fix the axis',
             bootstyle='light-inverse'
         )
         
