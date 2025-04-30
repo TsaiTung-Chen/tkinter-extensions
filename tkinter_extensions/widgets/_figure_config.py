@@ -228,7 +228,8 @@ common_style = {
     
     "toolbar.rubberband.rectangle": {
         "zorder": 109.0,
-        "width": '3p'
+        "width": '1p',
+        "dash": ('2p', '3p')
     },
     
     "text": {
@@ -249,26 +250,29 @@ common_style = {
         "zorder": 1.0,
         "width": '2p',
         "smooth": False,
-        "dash": ''
+        "dash": ()
     },
     
     "rectangle": {
         "zorder": 1.0,
         "width": '2p',
-        "facecolor": ''
+        "facecolor": '',
+        "dash": ()
     },
     
     "oval": {
         "zorder": 1.0,
         "width": '2p',
-        "facecolor": ''
+        "facecolor": '',
+        "dash": ()
     },
     
     "polygon": {
         "zorder": 1.0,
         "width": '2p',
         "smooth": False,
-        "facecolor": ''
+        "facecolor": '',
+        "dash": ()
     }
 }
 

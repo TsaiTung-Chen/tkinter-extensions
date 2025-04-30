@@ -1254,7 +1254,7 @@ class _Line(_BaseArtist):
             canvas: tk.Canvas,
             color: str | None = None,
             width: Dimension | None = None,
-            dash: str | tuple[Int] | None = None,
+            dash: tuple[Dimension, ...] | None = None,
             smooth: bool | None = None,
             datalabel: bool = False,
             **kwargs
@@ -1321,9 +1321,13 @@ class _Line(_BaseArtist):
             k: defaults.get(k, root_defaults[k])
             for k, v in cf.items() if v is None
         })
-        cf.update(width=self._to_px(cf["width"]), fill=cf.pop('color'))
+        cf.update(
+            fill=cf.pop('color'),
+            width=self._to_px(cf["width"]),
+            dash=self._to_px(cf["dash"])
+        )
         if self._hover:
-            cf.update(activewidth=cf["width"] + 2.)
+            cf.update(activewidth=cf["width"] * 2)
         self.itemconfigure(**cf)
         
         if self._antialias_enabled:
@@ -1344,7 +1348,7 @@ class _Line(_BaseArtist):
             xys: ArrayLike,
             fill: str,
             width: Dimension,
-            dash: str | tuple[Int],
+            dash: tuple[Dimension, ...],
             smooth: bool,
             activewidth: Dimension | None = None
     ):
@@ -1382,12 +1386,12 @@ class _Line(_BaseArtist):
             self,
             color: str | None = None,
             width: Dimension | None = None,
-            dash: str | tuple[Int] | None = None,
+            dash: tuple[Dimension, ...] | None = None,
             smooth: bool | None = None
     ):
         assert isinstance(color, (str, type(None))), color
         assert isinstance(width, (Dimension, type(None))), width
-        assert isinstance(dash, (str, tuple, type(None))), dash
+        assert isinstance(dash, (tuple, type(None))), dash
         assert isinstance(smooth, (bool, type(None))), smooth
         
         old = self._req_style
@@ -1403,7 +1407,7 @@ class _Line(_BaseArtist):
         return {
             "color": self.cget('fill'),
             "width": self.cget('width'),
-            "dash": self.cget('dash'),
+            "dash": self.cget('dash') or (),
             "smooth": self.cget('smooth')
         }
     
@@ -1412,7 +1416,7 @@ class _Line(_BaseArtist):
             "tag": self._tag,
             "color": self.cget('fill'),
             "width": self.cget('width'),
-            "dash": self.cget('dash')
+            "dash": self.cget('dash') or ()
         }
     
     def set_data(
@@ -1561,12 +1565,13 @@ class _BasePoly(_BaseArtist):
             for k, v in cf.items() if v is None
         })
         cf.update(
-            width=self._to_px(cf["width"]),
             fill=cf.pop('facecolor'),
-            outline=cf.pop('edgecolor')
+            outline=cf.pop('edgecolor'),
+            width=self._to_px(cf["width"]),
+            dash=self._to_px(cf["dash"])
         )
         if self._hover:
-            cf.update(activewidth=cf["width"] + 1.)
+            cf.update(activewidth=cf["width"] * 2)
         self.itemconfigure(**cf)
         
         # Update zorder and state
@@ -1578,17 +1583,20 @@ class _BasePoly(_BaseArtist):
             self,
             facecolor: str | None = None,
             edgecolor: str | None = None,
-            width: Dimension | None = None
+            width: Dimension | None = None,
+            dash: tuple[Dimension, ...] | None = None
     ):
         assert isinstance(facecolor, (str, type(None))), facecolor
         assert isinstance(edgecolor, (str, type(None))), edgecolor
         assert isinstance(width, (Dimension, type(None))), width
+        assert isinstance(dash, (tuple, type(None))), dash
         
         old = self._req_style
         new = {
             "facecolor": facecolor,
             "edgecolor": edgecolor,
-            "width": width
+            "width": width,
+            "dash": dash
         }
         new.update({ k: old.get(k, None) for k, v in new.items() if v is None })
         if new != old:
@@ -1599,7 +1607,8 @@ class _BasePoly(_BaseArtist):
         return {
             "facecolor": self.cget('fill'),
             "edgecolor": self.cget('outline'),
-            "width": self.cget('width')
+            "width": self.cget('width'),
+            "dash": self.cget('dash') or ()
         }
 
 
@@ -1612,6 +1621,7 @@ class _Rectangle(_BasePoly):
             facecolor: str | None = None,
             edgecolor: str | None = None,
             width: Dimension | None = None,
+            dash: tuple[Dimension, ...] | None = None,
             **kwargs
     ):
         super().__init__(canvas=canvas, antialias=False, **kwargs)
@@ -1619,7 +1629,9 @@ class _Rectangle(_BasePoly):
             0, 0, 0, 0,
             fill='', outline='', width='0p', state='hidden', tags=self._tags
         )
-        self.set_style(facecolor=facecolor, edgecolor=edgecolor, width=width)
+        self.set_style(
+            facecolor=facecolor, edgecolor=edgecolor, width=width, dash=dash
+        )
 
 
 class _Oval(_BasePoly):
@@ -1631,6 +1643,7 @@ class _Oval(_BasePoly):
             facecolor: str | None = None,
             edgecolor: str | None = None,
             width: Dimension | None = None,
+            dash: tuple[Dimension, ...] | None = None,
             **kwargs
     ):
         super().__init__(canvas=canvas, antialias=False, **kwargs)
@@ -1638,7 +1651,9 @@ class _Oval(_BasePoly):
             0, 0, 0, 0,
             fill='', outline='', width='0p', state='hidden', tags=self._tags
         )
-        self.set_style(facecolor=facecolor, edgecolor=edgecolor, width=width)
+        self.set_style(
+            facecolor=facecolor, edgecolor=edgecolor, width=width, dash=dash
+        )
 
 
 class _Polygon(_BasePoly):
@@ -1651,6 +1666,7 @@ class _Polygon(_BasePoly):
             edgecolor: str | None = None,
             width: Dimension | None = None,
             smooth: bool | None = None,
+            dash: tuple[Dimension, ...] | None = None,
             **kwargs
     ):
         super().__init__(canvas=canvas, antialias=False, **kwargs)
@@ -1659,7 +1675,11 @@ class _Polygon(_BasePoly):
             fill='', outline='', width='0p', state='hidden', tags=self._tags
         )
         self.set_style(
-            facecolor=facecolor, edgecolor=edgecolor, width=width, smooth=smooth
+            facecolor=facecolor,
+            edgecolor=edgecolor,
+            width=width,
+            dash=dash,
+            smooth=smooth
         )
     
     def set_style(
@@ -3112,7 +3132,6 @@ class _Plot(_BaseWidgetWrapper):
         self._rubberband: _Rectangle = _Rectangle(
             canvas, state='hidden', tag='toolbar.rubberband.rectangle'
         )
-        self._rubberband._bounds: tuple[Int, Int, Int, Int]
         
         canvas.bind('<Enter>', lambda e: figure._set_hovered_plot(self), add=True)
         canvas.bind(
@@ -3598,7 +3617,7 @@ class _Plot(_BaseWidgetWrapper):
             r: ArrayLike | None = None,
             color: str | None = None,
             width: Dimension | None = None,
-            dash: str | tuple[Int] | None = None,
+            dash: tuple[Dimension, ...] | None = None,
             smooth: bool | None = None,
             state: Literal['normal', 'hidden', 'disabled'] = 'normal',
             zorder: IntFloat | None = None,
