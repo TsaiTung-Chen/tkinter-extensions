@@ -300,6 +300,42 @@ class WrapLabel(ttk.Label):
         )
 
 
+class ToolTip(ttk.tooltip.ToolTip):
+    def __init__(
+        self,
+        widget,
+        text='widget info',
+        bootstyle=None,
+        wraplength=None,
+        delay=250,   # milliseconds
+        padding=(4, 1),
+        **kwargs,
+    ):
+        super().__init__(
+            widget=widget,
+            text=text,
+            bootstyle=bootstyle,
+            wraplength=wraplength,
+            delay=delay,
+            **kwargs
+        )
+        
+        if wraplength is None:
+            self.wraplength = wraplength  # override the value
+        self.padding = padding  # save for later use
+    
+    def show_tip(self, *_):
+        if self.toplevel:
+            return
+        
+        super().show_tip(*_)
+        
+        lb, = self.toplevel.winfo_children()
+        assert isinstance(lb, ttk.Label), (type(lb), lb)
+        
+        lb.configure(padding=self.padding)  # override the value set in super func
+
+
 # =============================================================================
 # ---- Main
 # =============================================================================

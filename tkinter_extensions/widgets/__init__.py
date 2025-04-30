@@ -21,7 +21,8 @@ from tkinter_extensions.widgets.plotters import Plotter
 from tkinter_extensions.widgets.figures import Figure
 from tkinter_extensions.widgets.spreadsheets import Sheet, Book
 from tkinter_extensions.widgets._others import (
-    Window, UndockedFrame, OptionMenu, Combobox, ColorButton, WrapLabel
+    Window, UndockedFrame, OptionMenu, Combobox, ColorButton, WrapLabel,
+    ToolTip
 )
 
 
@@ -30,6 +31,6 @@ __all__ = [
     'CollapsedFrame', 'ScrolledWidget', 'ScrolledTkFrame', 'ScrolledFrame',
     'ScrolledLabelframe', 'ScrolledText', 'ScrolledTreeview', 'ScrolledCanvas',
     'UndockedFrame', 'Plotter', 'Figure', 'Sheet', 'Book', 'Window', 'OptionMenu',
-    'Combobox', 'ColorButton', 'WrapLabel'
+    'Combobox', 'ColorButton', 'WrapLabel', 'ToolTip'
 ]
 

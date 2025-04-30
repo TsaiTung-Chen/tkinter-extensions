@@ -28,7 +28,7 @@ from tkinter_extensions.constants import (
 )
 from tkinter_extensions.utils import defer, unbind, contrast_color
 from tkinter_extensions.widgets.scrolled import ScrolledCanvas
-from tkinter_extensions.widgets._others import UndockedFrame
+from tkinter_extensions.widgets._others import UndockedFrame, ToolTip
 from tkinter_extensions.widgets._figure_config import STYLES
 
 _ANCHORS = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
@@ -3680,7 +3680,7 @@ class _Plot(_BaseWidgetWrapper):
         return line
 
 
-class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
+class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips, x y coordinate
     _tag: str = 'toolbar'
     _cursors: dict[str, str] = {"pan": 'fleur', "zoom": 'crosshair'}
     
@@ -3695,6 +3695,7 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
         frame = tk.Frame(figure, **kwargs)
         super().__init__(frame)
         
+        # Initialize the states
         self._keypress: dict[str, bool] = dict.fromkeys('axy', False)
         self._org_cursors: dict[_Plot, str] = {}
         self._bindings: dict[_Plot, list[str]] = {}
@@ -3704,10 +3705,16 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
         self._pan_offsets: tuple[Int, Int] | None = None
         self._zoom_box: tuple[Int, Int, Int, Int] | None = None
         
+        # Create buttons and label
         self._home_bt = ttk.Button(
             frame, text='Home', command=self._home_view, takefocus=False
         )
         self._home_bt.pack(side='left')
+        self._home_tt = ToolTip(
+            self._home_bt,
+            text='Reset to original view\nPress and hold A to autoscale',
+            bootstyle='light-inverse'
+        )
         
         self._prev_bt = ttk.Button(
             frame,
@@ -3717,6 +3724,11 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
             state='disabled'
         )
         self._prev_bt.pack(side='left', padx=('6p', '0p'))
+        self._prev_tt = ToolTip(
+            self._prev_bt,
+            text='Back to previous view',
+            bootstyle='light-inverse'
+        )
         
         self._next_bt = ttk.Button(
             frame,
@@ -3726,6 +3738,11 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
             state='disabled'
         )
         self._next_bt.pack(side='left', padx=('3p', '0p'))
+        self._next_tt = ToolTip(
+            self._next_bt,
+            text='Forward to next view',
+            bootstyle='light-inverse'
+        )
         
         self._var_mode: vrb.StringVar = vrb.StringVar(  # pan, zoom, or none
             frame, value='none'
@@ -3741,6 +3758,11 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
             takefocus=False
         )
         self._pan_bt.pack(side='left', padx=('6p', '0p'))
+        self._pan_tt = ToolTip(
+            self._pan_bt,
+            text='Pan\nPress and hold X/Y to fix the axis',
+            bootstyle='light-inverse'
+        )
         
         self._zoom_bt = ttk.Checkbutton(
             frame,
@@ -3752,10 +3774,16 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips
             takefocus=False
         )
         self._zoom_bt.pack(side='left', padx=('3p', '0p'))
+        self._zoom_tt = ToolTip(
+            self._zoom_bt,
+            text='Zoom to rectangle\nPress and hold X/Y to fix the axis',
+            bootstyle='light-inverse'
+        )
         
         self._xyz_lb = tk.Label(frame, textvariable=var_coord)
         self._xyz_lb.pack(side='left', padx=('6p', '0p'))
         
+        # Monitor key press
         figure.bind('<KeyPress>', self._on_key, add=True)
         figure.bind('<KeyRelease>', self._on_key, add=True)
     
