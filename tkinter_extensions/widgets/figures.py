@@ -3134,7 +3134,7 @@ class _Plot(_BaseWidgetWrapper):
         self._bartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._lartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
         self._rartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
-        self._transforms: dict[str, _Transform2D] = {}
+        self._transforms: dict[str, _BaseTransform1D] = {}
         self._dbounds: dict[str, NDArray[Float]] = {}
         self._cbounds: dict[str, NDArray[Int]] = {}
         
@@ -3157,10 +3157,9 @@ class _Plot(_BaseWidgetWrapper):
             canvas, state='hidden', tag='toolbar.rubberband.rectangle'
         )
         
-        canvas.bind('<Enter>', lambda e: figure._set_hovered_plot(self), add=True)
-        canvas.bind(
-            '<Leave>', lambda e: figure._unset_hovered_plot(self), add=True
-        )
+        canvas.bind('<Enter>', self._on_enter, add=True)
+        canvas.bind('<Leave>', self._on_leave, add=True)
+        canvas.bind('<Motion>', self._on_motion, add=True)
         
         self.set_btickslabels(True)
         self.set_ltickslabels(True)
@@ -3186,6 +3185,50 @@ class _Plot(_BaseWidgetWrapper):
         for side in 'rblt':
             self._get_axis(side).update_theme()
             self._get_ticks(side).update_theme()
+    
+    def _on_enter(self, event: tk.Event):
+        self._figure._set_hovered_plot(self)
+    
+    def _on_leave(self, event: tk.Event):
+        self._figure._unset_hovered_plot(self)
+        self._figure._var_coord.set('\n')
+    
+    def _on_motion(self, event: tk.Event):
+        if not (tfs := self._transforms):
+            return
+        
+        dbounds, cbounds = (self._dbounds, self._cbounds)
+        sci = self._default_style['datalabel.scientific']
+        cx, cy = (event.x, event.y)  # current cursor position on the canvas
+        
+        # Transform the canvas coordinates into data coordinates
+        coords = {}
+        for side in 'tb':
+            itf = tfs[side].get_inverse()
+            x = np.clip(cx, *sorted(cbounds[side]))
+            x = np.clip(itf(x), *sorted(dbounds[side]))  # data => canvas
+            coords[side] = '{0:.{1}g}'.format(x, sci)  # convert to string
+        for side in 'lr':
+            itf = tfs[side].get_inverse()
+            y = np.clip(cy, *sorted(cbounds[side]))
+            y = np.clip(itf(y), *sorted(dbounds[side]))  # data => canvas
+            coords[side] = '{0:.{1}g}'.format(y, sci)  # convert to string
+        coords = {
+            "bottom": coords["b"],
+            "left": coords["l"],
+            "top": coords["t"],
+            "right": coords["r"]
+        }
+        
+        # Align texts
+        lengths = [ max(map(len, stings)) for stings in coords.items() ]
+        content = \
+            ' | '.join( f'{s:<{l}}' for s, l in zip(coords.keys(), lengths) ) \
+            + '\n' \
+            + ' | '.join( f'{s:<{l}}' for s, l in zip(coords.values(), lengths) )
+        
+        # Update variable value
+        self._figure._var_coord.set(content)
     
     @_with_draw_events
     def draw(self):
@@ -3704,7 +3747,7 @@ class _Plot(_BaseWidgetWrapper):
         return line
 
 
-class _Toolbar(_BaseWidgetWrapper):#TODO: x, y coordinate
+class _Toolbar(_BaseWidgetWrapper):
     _tag: str = 'toolbar'
     _cursors: dict[str, str] = {"pan": 'fleur', "zoom": 'crosshair'}
     
@@ -3730,6 +3773,7 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: x, y coordinate
         self._zoom_box: tuple[Int, Int, Int, Int] | None = None
         
         # Create buttons and label
+        x = 0
         self._home_bt = ttk.Button(
             frame, text='Home', command=self._home_view, takefocus=False
         )
@@ -3739,7 +3783,9 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: x, y coordinate
             text='Reset to original view\nPress and hold A to autoscale',
             bootstyle='light-inverse'
         )
+        x += self._home_bt.winfo_reqwidth()
         
+        padx = ('6p', '0p')
         self._prev_bt = ttk.Button(
             frame,
             text='Prev',
@@ -3747,13 +3793,15 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: x, y coordinate
             takefocus=False,
             state='disabled'
         )
-        self._prev_bt.pack(side='left', padx=('6p', '0p'))
+        self._prev_bt.pack(side='left', padx=padx)
         self._prev_tt = ToolTip(
             self._prev_bt,
             text='Back to previous view',
             bootstyle='light-inverse'
         )
+        x += self._prev_bt.winfo_reqwidth() + sum(self._to_px(padx))
         
+        padx = ('3p', '0p')
         self._next_bt = ttk.Button(
             frame,
             text='Next',
@@ -3761,17 +3809,20 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: x, y coordinate
             takefocus=False,
             state='disabled'
         )
-        self._next_bt.pack(side='left', padx=('3p', '0p'))
+        self._next_bt.pack(side='left', padx=padx)
         self._next_tt = ToolTip(
             self._next_bt,
             text='Forward to next view',
             bootstyle='light-inverse'
         )
+        x += self._next_bt.winfo_reqwidth() + sum(self._to_px(padx))
         
         self._var_mode: vrb.StringVar = vrb.StringVar(  # pan, zoom, or none
             frame, value='none'
         )
         self._var_mode.trace_add('write', self._on_mode_changed, weak=True)
+        
+        padx = ('6p', '0p')
         self._pan_bt = ttk.Checkbutton(
             frame,
             text='Pan',
@@ -3781,13 +3832,15 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: x, y coordinate
             bootstyle='toolbutton',
             takefocus=False
         )
-        self._pan_bt.pack(side='left', padx=('6p', '0p'))
+        self._pan_bt.pack(side='left', padx=padx)
         self._pan_tt = ToolTip(
             self._pan_bt,
             text='Pan view\nPress and hold X/Y to fix the axis',
             bootstyle='light-inverse'
         )
+        x += self._pan_bt.winfo_reqwidth() + sum(self._to_px(padx))
         
+        padx = ('3p', '0p')
         self._zoom_bt = ttk.Checkbutton(
             frame,
             text='Zoom',
@@ -3797,16 +3850,25 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: x, y coordinate
             bootstyle='toolbutton',
             takefocus=False
         )
-        self._zoom_bt.pack(side='left', padx=('3p', '0p'))
+        self._zoom_bt.pack(side='left', padx=padx)
         self._zoom_tt = ToolTip(
             self._zoom_bt,
             text='Zoom to rectangle\nPress and hold X/Y to fix the axis',
             bootstyle='light-inverse'
         )
+        x += self._zoom_bt.winfo_reqwidth() + sum(self._to_px(padx))
         
-        self._xyz_lb = tk.Label(frame, textvariable=var_coord)
-        self._xyz_lb.pack(side='left', padx=('6p', '0p'))
+        placeholder = tk.Label(frame, text=' \n ', font='Courier')
+        placeholder.pack(side='left')
+        x += placeholder.winfo_reqwidth()
         
+        self._xyz_lb = tk.Label(
+            frame, textvariable=var_coord, justify='left', font='Courier'
+        )
+        self._xyz_lb.place(x=x+1, y=0)  # use `place` to prevent plots from
+         # automatically being resized
+        
+        #TODO: bind root and save id
         # Monitor key press
         figure.bind('<KeyPress>', self._on_key, add=True)
         figure.bind('<KeyRelease>', self._on_key, add=True)
@@ -3834,7 +3896,7 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: x, y coordinate
         if (key := event.keysym.lower()) in self._keypress:
             self._keypress[key] = event_type == 'KeyPress'
     
-    def _on_mode_changed(self, *args):
+    def _on_mode_changed(self, *args):#TODO: clean up on deletion
         fig = self._figure
         org_cursors = self._org_cursors
         bindings = self._bindings
@@ -3884,7 +3946,7 @@ class _Toolbar(_BaseWidgetWrapper):#TODO: x, y coordinate
         
         for plot in fig._plots.flat:
             canvas = plot._tkwidget
-            org_cursors[plot] = canvas["cursor"]
+            org_cursors[plot] = canvas.cget('cursor')
             canvas.configure(cursor=new_cursor)
             
             bindings[plot] = [
@@ -4177,7 +4239,7 @@ class Figure(UndockedFrame):
         self._hovered_plot: _Plot | None = None
         self._draw_idle_id: str = 'after#'
         self._history: _ViewSetHistory = _ViewSetHistory(self)
-        self._var_coord: vrb.StringVar = vrb.StringVar(self, value='()')
+        self._var_coord: vrb.StringVar = vrb.StringVar(self, value='\n')
         self._default_style: dict[str, Any]
         
         self.grid_propagate(False)  # allow `self` to be resized
