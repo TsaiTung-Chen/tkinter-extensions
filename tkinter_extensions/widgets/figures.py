@@ -542,6 +542,8 @@ class _InverseLogarithm(_BaseTransform1D):
 
 
 class _Transform2D:  # 2D transformation
+    _boundary_extension: Float = 5.
+    
     def __init__(
             self,
             x_transform: _BaseTransform1D = _FirstOrderPolynomial(),
@@ -584,7 +586,8 @@ class _Transform2D:  # 2D transformation
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
             round_: bool = False,
-            clip: bool = True
+            clip: bool = True,
+            extend_boundaries: bool = True  # extend output boundaries
     ) -> NDArray[Float]:
         xs, ys = np.array(xs), np.array(ys)  # copy
         assert isinstance(xs, np.ndarray), xs
@@ -594,10 +597,20 @@ class _Transform2D:  # 2D transformation
         
         scalar = xs.ndim == 0
         
+        # Clip input values to prevent the trasformation of invalid values
         if clip and not scalar:
             xs, ys = self._clip(xs, ys, limits='input')
+        
+        # Perform transformation
         xs = self._x_tf(xs, round_=round_)
         ys = self._y_tf(ys, round_=round_)
+        
+        # Clip output values to restrict the output range. This can accelerate
+        # the rendering process of artists.
+        if clip and not scalar:
+            xs, ys = self._clip(
+                xs, ys, limits='output', extend_boundaries=extend_boundaries
+            )
         
         xy = np.asarray([xs, ys])
         if scalar:
@@ -608,7 +621,8 @@ class _Transform2D:  # 2D transformation
             self,
             xs: IntFloat | NDArray[IntFloat],
             ys: IntFloat | NDArray[IntFloat],
-            limits: Literal['input', 'output']
+            limits: Literal['input', 'output'],
+            extend_boundaries: bool = True  # extend output boundaries
     ) -> tuple[NDArray[Float], NDArray[Float]]:
         def _restrict(
                 xs: NDArray[Float], ys: NDArray[Float], u: Literal['x', 'y']
@@ -693,6 +707,16 @@ class _Transform2D:  # 2D transformation
         else:  # limits == 'input'
             xmin, xmax = self._out_xlimits
             ymin, ymax = self._out_ylimits
+            
+            # Extend the limits. This prevent showing incomplete artists while
+            # panning the view.
+            if extend_boundaries:
+                dx = xmax - xmin
+                dy = ymax - ymin
+                xmin -= dx * self._boundary_extension
+                xmax += dx * self._boundary_extension
+                ymin -= dy * self._boundary_extension
+                ymax += dy * self._boundary_extension
         
         xs, ys = _restrict(xs, ys, 'x')
         xs, ys = _restrict(xs, ys, 'y')
@@ -3680,7 +3704,7 @@ class _Plot(_BaseWidgetWrapper):
         return line
 
 
-class _Toolbar(_BaseWidgetWrapper):#TODO: tooptips, x y coordinate
+class _Toolbar(_BaseWidgetWrapper):#TODO: x, y coordinate
     _tag: str = 'toolbar'
     _cursors: dict[str, str] = {"pan": 'fleur', "zoom": 'crosshair'}
     
