@@ -152,12 +152,13 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
         if self._undock_button and self._undock_button._place_info:
             self._undock_button.place_forget()
         
+        self._root().focus_set()
+        self.focus_set()
+        
         if callback_final:
             callback_final()
         
         tk.Wm.wm_deiconify(self)
-        self._root().focus_set()
-        self.focus_set()
         self.lift()
     
     def dock(self):
@@ -171,6 +172,9 @@ class UndockedFrame(tk.Frame):  # ttk can't be undocked so use tk instead
         
         if self._undock_button and self._undock_button._place_info:
             self._undock_button.place(**self._undock_button._place_info)
+        
+        self._root().focus_set()
+        self.focus_set()
         
         if callback_final:
             callback_final()

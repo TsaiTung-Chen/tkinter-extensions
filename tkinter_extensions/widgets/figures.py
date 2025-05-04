@@ -43,6 +43,7 @@ def _cleanup_tk_attributes(obj):
     for name, attr in list(vars(obj).items()):
         if isinstance(attr, (tk.Variable, tk.Image, _BaseElement)):
             delattr(obj, name)
+            print(obj, name)#???
 
 
 def _to_px(
@@ -756,7 +757,7 @@ class _BaseElement:
 
 
 # =============================================================================
-# ---- Figure Artists
+# ---- Plot Artists
 # =============================================================================
 class _BaseArtist(_BaseElement):
     _name: str
@@ -1727,7 +1728,7 @@ class _Polygon(_BasePoly):
 
 
 # =============================================================================
-# ---- Figure Components
+# ---- Plot Components
 # =============================================================================
 class _BaseComponent(_BaseElement):
     def __init__(self, plot: _Plot, canvas: tk.Canvas | None = None, **kwargs):
@@ -3015,6 +3016,7 @@ class _BaseWidgetWrapper:
         if isinstance(tkwidget, tk.Canvas):
             tkwidget._zorder_tags: dict[_BaseArtist, str] = {}
             tkwidget.bind('<Configure>', self._on_configure, add=True)
+        tkwidget.bind('<Destroy>', self._on_destroy, add=True)
     
     @property
     def _default_style(self) -> dict[str, Any]:
@@ -3022,6 +3024,11 @@ class _BaseWidgetWrapper:
     
     def _to_px(self, dimension: Dimension) -> float | tuple[float, ...]:
         return _to_px(self._tkwidget._root(), dimension)
+    
+    def _on_destroy(self, event: tk.Event):
+        if event.widget is not self._tkwidget:
+            return
+        _cleanup_tk_attributes(self)
     
     def _on_configure(self, event: tk.Event):
         def _resize():
@@ -3763,9 +3770,8 @@ class _Toolbar(_BaseWidgetWrapper):
         super().__init__(frame)
         
         # Initialize the states
-        self._keypress: dict[str, bool] = dict.fromkeys('axy', False)
         self._org_cursors: dict[_Plot, str] = {}
-        self._bindings: dict[_Plot, list[str]] = {}
+        self._plot_bindings: dict[_Plot, dict[str, str]] = {}
         self._active_plot: _Plot | None = None
         self._motion_start: tuple[Int, Int] | None = None
         self._anchor_start: tuple[Int, Int] | None = None
@@ -3867,11 +3873,12 @@ class _Toolbar(_BaseWidgetWrapper):
         )
         self._xyz_lb.place(x=x+1, y=0)  # use `place` to prevent plots from
          # automatically being resized
-        
-        #TODO: bind root and save id
-        # Monitor key press
-        figure.bind('<KeyPress>', self._on_key, add=True)
-        figure.bind('<KeyRelease>', self._on_key, add=True)
+    
+    def _on_destroy(self, event: tk.Event | None = None):
+        if event.widget is not self:
+            return
+        self._var_mode.set('none')
+        super()._on_destroy(event)
     
     def update_theme(self):
         super().update_theme()
@@ -3888,18 +3895,10 @@ class _Toolbar(_BaseWidgetWrapper):
     def get_facecolor(self) -> str:
         return self._tkwidget.cget('background')
     
-    def _on_key(self, event: tk.Event):
-        event_type = getattr(event.type, 'name', event.type)
-        assert event_type in ('KeyPress', 'KeyRelease'), event
-        
-        # Update the keypress state
-        if (key := event.keysym.lower()) in self._keypress:
-            self._keypress[key] = event_type == 'KeyPress'
-    
-    def _on_mode_changed(self, *args):#TODO: clean up on deletion
+    def _on_mode_changed(self, *args):
         fig = self._figure
         org_cursors = self._org_cursors
-        bindings = self._bindings
+        plot_bindings = self._plot_bindings
         mode = self._var_mode
         prev_mode, new_mode = mode.previous_value, mode.get()
         mode.value_changed(update=True)
@@ -3907,37 +3906,48 @@ class _Toolbar(_BaseWidgetWrapper):
         if prev_mode == new_mode:
             return
         
-        if prev_mode != 'none':  # stop pan or zoom mode
+        # Turn off pan or zoom mode
+        if prev_mode != 'none':
             for plot in fig._plots.flat:
+                # Restore the old cursor
                 canvas = plot._tkwidget
                 canvas.configure(cursor=org_cursors[plot])
                 
-                press_id, motion_id, release_id = bindings[plot]
-                unbind(canvas, MLEFTPRESS, press_id)
-                unbind(canvas, MLEFTMOTION, motion_id)
-                unbind(canvas, MLEFTRELEASE, release_id)
+                # Unbind mouse callbacks
+                bindings = plot_bindings[plot]
+                unbind(canvas, MLEFTPRESS, bindings[MLEFTPRESS])
+                unbind(canvas, MLEFTMOTION, bindings[MLEFTMOTION])
+                unbind(canvas, MLEFTRELEASE, bindings[MLEFTRELEASE])
+                plot_bindings.pop(plot)
                 
+                # Hide veil
                 plot._veil.set_state('hidden')
                 plot._veil.draw()
             
             org_cursors.clear()
-            bindings.clear()
+            
+            # Hide rubberband
+            if (plot := self._active_plot):
+                rubberband = plot._rubberband
+                rubberband.set_state('hidden')
+                rubberband.draw()
+            
+            self._clear_pan_zoom_states()
         
         assert not org_cursors, org_cursors
-        assert not bindings, bindings
         
         if new_mode == 'none':
             return
         
         # Start pan or zoom mode
         if new_mode == 'pan':
-            press_cb, motion_cb, release_cb = (
+            on_press, on_motion, on_release = (
                 self._pan_on_leftpress,
                 self._pan_on_leftmotion,
                 self._pan_on_leftrelease
             )
         else:  # zoom mode
-            press_cb, motion_cb, release_cb = (
+            on_press, on_motion, on_release = (
                 self._zoom_on_leftpress,
                 self._zoom_on_leftmotion,
                 self._zoom_on_leftrelease
@@ -3945,16 +3955,21 @@ class _Toolbar(_BaseWidgetWrapper):
         new_cursor = self._cursors[new_mode]
         
         for plot in fig._plots.flat:
+            assert plot not in plot_bindings, (plot, plot_bindings)
+            
+            # Apply new cursor
             canvas = plot._tkwidget
             org_cursors[plot] = canvas.cget('cursor')
             canvas.configure(cursor=new_cursor)
             
-            bindings[plot] = [
-                canvas.bind(MLEFTPRESS, press_cb, add=True),
-                canvas.bind(MLEFTMOTION, motion_cb, add=True),
-                canvas.bind(MLEFTRELEASE, release_cb, add=True)
-            ]
+            # Bind motion callbacks
+            plot_bindings[plot] = {
+                MLEFTPRESS: canvas.bind(MLEFTPRESS, on_press, add=True),
+                MLEFTMOTION: canvas.bind(MLEFTMOTION, on_motion, add=True),
+                MLEFTRELEASE: canvas.bind(MLEFTRELEASE, on_release, add=True)
+            }
             
+            # Show veil
             plot._veil.set_state('normal')
             plot._veil.draw()
     
@@ -3982,7 +3997,7 @@ class _Toolbar(_BaseWidgetWrapper):
     def _home_view(self):
         fig = self._figure
         history = fig._history
-        autoscale = self._keypress["a"]
+        autoscale = fig._keypress["a"]
         
         # Initialize history if not exists
         if not history:
@@ -4007,7 +4022,7 @@ class _Toolbar(_BaseWidgetWrapper):
                 
                 for side, (limits, margins) in pview.view.items():
                     plot._get_ticks(side)._set_limits(*limits, margins)
-        fig.draw()
+        fig.draw_idle()
         
         # Update history
         self._update_history()
@@ -4028,7 +4043,7 @@ class _Toolbar(_BaseWidgetWrapper):
             plot, view = pview
             for side, (limits, margins) in view.items():
                 plot._get_ticks(side)._set_limits(*limits, margins)
-        fig.draw()
+        fig.draw_idle()
     
     def _next_view(self):
         fig = self._figure
@@ -4046,7 +4061,7 @@ class _Toolbar(_BaseWidgetWrapper):
             plot, view = pview
             for side, (limits, margins) in view.items():
                 plot._get_ticks(side)._set_limits(*limits, margins)
-        fig.draw()
+        fig.draw_idle()
     
     def _pan_on_leftpress(self, event: tk.Event):
         plot = self._figure._hovered_plot
@@ -4068,8 +4083,9 @@ class _Toolbar(_BaseWidgetWrapper):
             return
         
         # Determine current pan mode
-        along_x = self._keypress["x"]
-        along_y = self._keypress["y"]
+        keypress = self._figure._keypress
+        along_x = keypress["x"]
+        along_y = keypress["y"]
         if not along_x and not along_y:
             along_x = along_y = True
         
@@ -4128,8 +4144,9 @@ class _Toolbar(_BaseWidgetWrapper):
         x1, y1 = self._motion_start
         
         # Determine current pan mode
-        along_x = self._keypress["x"]
-        along_y = self._keypress["y"]
+        keypress = self._figure._keypress
+        along_x = keypress["x"]
+        along_y = keypress["y"]
         if not along_x and not along_y:
             along_x = along_y = True
         
@@ -4199,7 +4216,7 @@ class _Toolbar(_BaseWidgetWrapper):
             # Update data limits
             if np.isfinite(d12).all():
                 ticks.set_limits(*d12)
-        plot.draw()
+        plot.draw_idle()
         
         # Update history
         self._update_history()
@@ -4239,6 +4256,7 @@ class Figure(UndockedFrame):
         self._hovered_plot: _Plot | None = None
         self._draw_idle_id: str = 'after#'
         self._history: _ViewSetHistory = _ViewSetHistory(self)
+        self._keypress: dict[str, bool] = dict.fromkeys('axy', False)
         self._var_coord: vrb.StringVar = vrb.StringVar(self, value='\n')
         self._default_style: dict[str, Any]
         
@@ -4256,8 +4274,10 @@ class Figure(UndockedFrame):
         
         self.bind('<Destroy>', self._on_destroy, add=True)
         self.bind('<<ThemeChanged>>', self._on_theme_changed, add=True)
-        self.focus_set()
+        self.bind('<KeyPress>', self._on_key, add=True)
+        self.bind('<KeyRelease>', self._on_key, add=True)
         
+        self.focus_set()
         self.after_idle(self._initialize)
     
     def _to_px(self, dimension: Dimension) -> float | tuple[float, ...]:
@@ -4277,13 +4297,23 @@ class Figure(UndockedFrame):
         if self._hovered_plot == plot:
             self._hovered_plot = None
     
-    def _on_destroy(self, event: tk.Event | None = None):
+    def _on_destroy(self, event: tk.Event):
+        if event.widget is not self:
+            return
         _cleanup_tk_attributes(self)
     
     def _on_theme_changed(self, event: tk.Event):
         self.update_theme()
         if self._initialized:
             self.draw_idle()
+    
+    def _on_key(self, event: tk.Event):
+        event_type = getattr(event.type, 'name', event.type)
+        assert event_type in ('KeyPress', 'KeyRelease'), event
+        
+        # Update the keypress state
+        if (key := event.keysym.lower()) in self._keypress:
+            self._keypress[key] = event_type == 'KeyPress'
     
     def update_theme(self):
         self._default_style = deepcopy(STYLES[self._root().style.theme.type])
@@ -4431,11 +4461,14 @@ class Figure(UndockedFrame):
                 pady=pady
             )
             
+            if self._plots.size:
+                self.draw_idle()
+            
             return self._suptitle
         
         # Disable suptitle
         if hasattr(self, '_suptitle'):
-            self._suptitle.destroy()
+            self._suptitle._tkwidget.destroy()
             delattr(self, '_suptitle')
     
     def get_suptitle(self) -> _Suptitle:
@@ -4467,7 +4500,7 @@ class Figure(UndockedFrame):
         # Clean up old plots
         for r, row in enumerate(self._plots):
             for c, plot in enumerate(row):
-                plot._tkwidget.grid_forget()
+                plot._tkwidget.destroy()
                 self.grid_columnconfigure(c, weight=0)
             self.grid_rowconfigure(r, weight=0)
         self._history.clear()
@@ -4573,7 +4606,7 @@ if __name__ == '__main__':
             plt.set_llimits(-1.7, 1.7)
             plt.set_legend(True)
     
-    fig.after(3000, lambda: root.style.theme_use('cyborg'))
+    root.after(3000, lambda: root.style.theme_use('cyborg'))
     
     root.mainloop()
 
