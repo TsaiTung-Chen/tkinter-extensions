@@ -43,7 +43,6 @@ def _cleanup_tk_attributes(obj):
     for name, attr in list(vars(obj).items()):
         if isinstance(attr, (tk.Variable, tk.Image, _BaseElement)):
             delattr(obj, name)
-            print(obj, name)#???
 
 
 def _to_px(
@@ -254,7 +253,7 @@ class _PlotView(NamedTuple):
     view: dict[str, tuple[Any, Any]]
     
     # The `__new__()` of `NamedTuple` can't be overwritten, so we define `make()`
-    # instead. `make()` will be called when a instance is created.
+    # instead. `make()` will be called when a instance is being created.
     @classmethod
     def make(cls, plot: _Plot, view: dict[str, tuple[Any, Any]]):
         assert isinstance(plot, _Plot), plot
@@ -1730,7 +1729,7 @@ class _Polygon(_BasePoly):
 # =============================================================================
 # ---- Plot Components
 # =============================================================================
-class _BaseComponent(_BaseElement):
+class _BaseComponent(_BaseElement):#TODO: stale
     def __init__(self, plot: _Plot, canvas: tk.Canvas | None = None, **kwargs):
         assert isinstance(plot, _Plot), plot
         assert isinstance(plot._figure, Figure), plot._figure
@@ -3932,7 +3931,7 @@ class _Toolbar(_BaseWidgetWrapper):
                 rubberband.set_state('hidden')
                 rubberband.draw()
             
-            self._clear_pan_zoom_states()
+            self._clear_navigating_states()
         
         assert not org_cursors, org_cursors
         
@@ -3985,7 +3984,7 @@ class _Toolbar(_BaseWidgetWrapper):
         viewset = _ViewSet(
             _PlotView(
                 plot,
-                {s: plot._get_ticks(s).get_limits() for s in 'rblt'}
+                { s: plot._get_ticks(s).get_limits() for s in 'rblt' }
             )
             for plot in fig._plots.flat
         )
@@ -4004,15 +4003,17 @@ class _Toolbar(_BaseWidgetWrapper):
             self._update_history()
         
         # Updaet the view
-        for plot in fig._plots.flat:
-            if autoscale:
-                limits, margins = ((None, None), (None, None))
+        if autoscale:
+            limits, margins = ((None, None), (None, None))
+            for plot in fig._plots.flat:
                 for side in 'rblt':
                     plot._get_ticks(side)._set_limits(*limits, margins)
-            else:
-                # Restore the first pair of limits
-                for pview in history[0]:
-                    if isinstance(pview, _PlotView) and pview.plot is plot:
+        else:
+            # Restore with their first views
+            first_viewset = history[0]
+            for plot in fig._plots.flat:
+                for pview in first_viewset:
+                    if pview.plot is plot:
                         break
                 else:
                     raise ValueError(
@@ -4022,7 +4023,7 @@ class _Toolbar(_BaseWidgetWrapper):
                 
                 for side, (limits, margins) in pview.view.items():
                     plot._get_ticks(side)._set_limits(*limits, margins)
-        fig.draw_idle()
+        fig.draw()
         
         # Update history
         self._update_history()
@@ -4039,11 +4040,10 @@ class _Toolbar(_BaseWidgetWrapper):
         viewset = history.back()
         
         # Update the view
-        for pview in viewset:
-            plot, view = pview
+        for plot, view in viewset:
             for side, (limits, margins) in view.items():
                 plot._get_ticks(side)._set_limits(*limits, margins)
-        fig.draw_idle()
+        fig.draw()
     
     def _next_view(self):
         fig = self._figure
@@ -4057,11 +4057,10 @@ class _Toolbar(_BaseWidgetWrapper):
         viewset = history.forward()
         
         # Update the view
-        for pview in viewset:
-            plot, view = pview
+        for plot, view in viewset:
             for side, (limits, margins) in view.items():
                 plot._get_ticks(side)._set_limits(*limits, margins)
-        fig.draw_idle()
+        fig.draw()
     
     def _pan_on_leftpress(self, event: tk.Event):
         plot = self._figure._hovered_plot
@@ -4104,7 +4103,7 @@ class _Toolbar(_BaseWidgetWrapper):
     
     def _pan_on_leftrelease(self, event: tk.Event):
         if not (plot := self._active_plot) or not (offsets := self._pan_offsets):
-            self._clear_pan_zoom_states()
+            self._clear_navigating_states()
             return
         
         # Calculate the amounts of mouse offsets
@@ -4116,8 +4115,8 @@ class _Toolbar(_BaseWidgetWrapper):
         cy1, cy2 = cy12 - dy
         
         # Update view and clear states
-        self._pan_zoom_on_leftrelease((cx1, cy1, cx2, cy2))
-        self._clear_pan_zoom_states()
+        self._navigate_on_leftrelease((cx1, cy1, cx2, cy2))
+        self._clear_navigating_states()
     
     def _zoom_on_leftpress(self, event: tk.Event):
         self._update_history()
@@ -4175,7 +4174,7 @@ class _Toolbar(_BaseWidgetWrapper):
     
     def _zoom_on_leftrelease(self, event: tk.Event):
         if not (plot := self._active_plot):
-            self._clear_pan_zoom_states()
+            self._clear_navigating_states()
             return
         
         # Hide rubberband
@@ -4188,10 +4187,10 @@ class _Toolbar(_BaseWidgetWrapper):
             return
         
         # Update view and clear states
-        self._pan_zoom_on_leftrelease(box)
-        self._clear_pan_zoom_states()
+        self._navigate_on_leftrelease(box)
+        self._clear_navigating_states()
     
-    def _pan_zoom_on_leftrelease(self, cbounds: tuple[Int, Int, Int, Int]):
+    def _navigate_on_leftrelease(self, cbounds: tuple[Int, Int, Int, Int]):#FIXME: pan zoom datalabel
         plot = self._active_plot
         cx1, cy1, cx2, cy2 = cbounds
         
@@ -4216,12 +4215,12 @@ class _Toolbar(_BaseWidgetWrapper):
             # Update data limits
             if np.isfinite(d12).all():
                 ticks.set_limits(*d12)
-        plot.draw_idle()
+        plot.draw()
         
         # Update history
         self._update_history()
     
-    def _clear_pan_zoom_states(self):
+    def _clear_navigating_states(self):
         self._active_plot = None
         self._motion_start = None
         self._anchor_start = None
@@ -4577,7 +4576,7 @@ if __name__ == '__main__':
     
     root = Window(title='Figure Demo', themename='morph')
     
-    x = np.arange(0, 10, 1/48000, dtype=float)
+    x = np.arange(0, 10, 1/480, dtype=float)
     y = np.sin(2*np.pi*1*x)
     #x = np.array([3, 6, 6, 3, 3], dtype=float)
     #y = np.array([-0.5, -0.5, 0.5, 0.5, -0.5], dtype=float)
