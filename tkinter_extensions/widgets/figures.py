@@ -811,6 +811,7 @@ class _BaseArtist(_BaseElement):
         self._antialias_enabled: bool = bool(antialias)
         self._antialias_bg: Callable[[], str] | None = antialias_bg
         self._hover: bool = hover
+        self._last_coords: list[Int] = []
         self._id: int
         self._id_aa: int
         self._stale: bool
@@ -1082,6 +1083,9 @@ class _Text(_BaseArtist):
     def draw(self):
         state = self._req_state
         
+        if self.coords() != self._last_coords:
+            self._stale = True
+        
         if not self._stale:
             self._set_state(state)
             return
@@ -1164,6 +1168,7 @@ class _Text(_BaseArtist):
         self._padx = padx
         self._pady = pady
         self._stale = False
+        self._last_coords = self.coords()
     
     def bbox(self, *, padding: bool = True) -> tuple[int, int, int, int] | None:
         assert isinstance(padding, bool), padding
@@ -1317,6 +1322,9 @@ class _Line(_BaseArtist):
     def draw(self):
         state = self._req_state
         
+        if self.coords() != self._last_coords:
+            self._stale = True
+        
         if not self._stale:
             self._set_state(state)
             return
@@ -1366,6 +1374,7 @@ class _Line(_BaseArtist):
             dl.draw()
         
         self._stale = False
+        self._last_coords = self.coords()
     
     def _antialias(
             self,
@@ -1570,6 +1579,9 @@ class _BasePoly(_BaseArtist):
     def draw(self):
         state = self._req_state
         
+        if self.coords() != self._last_coords:
+            self._stale = True
+        
         if not self._stale:
             self._set_state(state)
             return
@@ -1602,6 +1614,7 @@ class _BasePoly(_BaseArtist):
         self._set_state(state)
         self._update_zorder()
         self._stale = False
+        self._last_coords = self.coords()
     
     def set_style(
             self,
@@ -2824,7 +2837,7 @@ class _DataLabel(_BaseComponent):
         self._text.set_style(text='\n'.join([label, point]), color=fg)
         self._text.set_bounds((x1, y1, x1, y1))
         self._text.draw()
-        if not self._settled:  # magnify the font size
+        if not self._settled:  # temporarily magnify the font size
             req_style = self._text._req_style
             original_text_size = req_style["size"]
             try:
@@ -2841,6 +2854,19 @@ class _DataLabel(_BaseComponent):
         self._box.set_coords(box_x1, box_y1, box_x2, box_y2)
         self._box.draw()
         
+        # Draw arrow (pratically, it's a triangle)
+        s = min(box_x2-box_x1+1, box_y2-box_y1+1) / 2.  # shortest side / 2
+        tan_dx, tan_dy = (x1 - x0), (y1 - y0)  # tangent vector
+        dist = np.sqrt(tan_dx**2 + tan_dy**2)
+        tan_dx, tan_dy = (tan_dx / dist), (tan_dy / dist)  # unit tangent vector
+        r = s if dist == s else min(max(dist/abs(dist-s)*s/2.*0.7, 1.), s)
+        ppd_dx, ppd_dy = int(tan_dy * r), int(-tan_dx * r)  # perpendicular vector
+        arrow_x1, arrow_y1 = (x1 + ppd_dx), (y1 + ppd_dy)
+        arrow_x2, arrow_y2 = (x1 - ppd_dx), (y1 - ppd_dy)
+        self._arrow.set_style(facecolor=bg)
+        self._arrow.set_coords(x0, y0, arrow_x1, arrow_y1, arrow_x2, arrow_y2)
+        self._arrow.draw()
+        
         # Draw point
         if not (w := float(self._line.cget('activewidth'))):
             w = float(self._line.cget('width'))
@@ -2850,19 +2876,6 @@ class _DataLabel(_BaseComponent):
         self._point.set_style(facecolor=bg)
         self._point.set_coords(point_x1, point_y1, point_x2, point_y2)
         self._point.draw()
-        
-        # Draw arrow (pratically, it's a triangle)
-        s = min(box_x2-box_x1+1, box_y2-box_y1+1) / 2.  # shortest side / 2
-        tan_dx, tan_dy = (x1 - x0), (y1 - y0)  # tangent vector
-        dist = np.sqrt(tan_dx**2 + tan_dy**2)
-        tan_dx, tan_dy = (tan_dx / dist), (tan_dy / dist)  # unit tangent vector
-        r = s if dist == s else min(max(dist/abs(dist-s)*s/2.*0.7, 1.), s)
-        ppd_dx, ppd_dy = int(tan_dy * r), int(-tan_dx * r)  # perpendicular vector
-        x2, y2 = (x1 - ppd_dx), (y1 - ppd_dy)
-        x1, y1 = (x1 + ppd_dx), (y1 + ppd_dy)
-        self._arrow.set_style(facecolor=bg)
-        self._arrow.set_coords(x0, y0, x1, y1, x2, y2)
-        self._arrow.draw()
     
     def bbox(self) -> tuple[int, int, int, int] | None:
         pass
@@ -4190,7 +4203,7 @@ class _Toolbar(_BaseWidgetWrapper):
         self._navigate_on_leftrelease(box)
         self._clear_navigating_states()
     
-    def _navigate_on_leftrelease(self, cbounds: tuple[Int, Int, Int, Int]):#FIXME: pan zoom datalabel
+    def _navigate_on_leftrelease(self, cbounds: tuple[Int, Int, Int, Int]):
         plot = self._active_plot
         cx1, cy1, cx2, cy2 = cbounds
         

@@ -13,13 +13,13 @@ from copy import deepcopy
 Zorder:
     0.     frame: grid
     1~100. user defined
-    101.   frame: cover, edge
-    102.   ticks: ticks, labels
-    103.   axis: label
-    104.   legend
-    105.   title
-    106.   suptitle
-    107.   datalabel: arrow, point, box, text
+    101.   datalabel: arrow, point, box, text
+    102.   frame: cover, edge
+    103.   ticks: ticks, labels
+    104.   axis: label
+    105.   legend
+    106.   title
+    107.   suptitle
     108.   veil: rectangle
     109.   toolbar: rubberband
 """
@@ -36,12 +36,12 @@ common_style = {
     "frame": {
     },
     "frame.cover.polygon": {
-        "zorder": 101.0,
+        "zorder": 102.0,
         "width": '1p',
         "edgecolor": ''
     },
     "frame.edge.rectangle": {
-        "zorder": 101.1,
+        "zorder": 102.1,
         "width": '1p'
     },
     "frame.grid.enabled": ('b', 'l'),
@@ -51,7 +51,7 @@ common_style = {
     },
     
     "suptitle.text": {
-        "zorder": 106.0,
+        "zorder": 107.0,
         "size": 20,
         "weight": 'normal',
         "slant": 'roman',
@@ -61,7 +61,7 @@ common_style = {
     },
     
     "title.text": {
-        "zorder": 105.0,
+        "zorder": 106.0,
         "size": 17,
         "weight": 'normal',
         "slant": 'roman',
@@ -71,7 +71,7 @@ common_style = {
     },
     
     "taxis.label.text": {
-        "zorder": 103.0,
+        "zorder": 104.0,
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
@@ -81,7 +81,7 @@ common_style = {
     },
     
     "baxis.label.text": {
-        "zorder": 103.0,
+        "zorder": 104.0,
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
@@ -91,7 +91,7 @@ common_style = {
     },
     
     "laxis.label.text": {
-        "zorder": 103.0,
+        "zorder": 104.0,
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
@@ -101,7 +101,7 @@ common_style = {
     },
     
     "raxis.label.text": {
-        "zorder": 103.0,
+        "zorder": 104.0,
         "size": 13,
         "weight": 'normal',
         "slant": 'roman',
@@ -114,11 +114,11 @@ common_style = {
     "tticks.labels.max_ticks": 13,
     "tticks.margins": ('9p', '9p'),
     "tticks.ticks.line": {
-        "zorder": 102.0,
+        "zorder": 103.0,
         "width": '1p'
     },
     "tticks.labels.text": {
-        "zorder": 102.1,
+        "zorder": 103.1,
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
@@ -131,11 +131,11 @@ common_style = {
     "bticks.labels.max_ticks": 13,
     "bticks.margins": ('9p', '9p'),
     "bticks.ticks.line": {
-        "zorder": 102.0,
+        "zorder": 103.0,
         "width": '1p'
     },
     "bticks.labels.text": {
-        "zorder": 102.1,
+        "zorder": 103.1,
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
@@ -148,11 +148,11 @@ common_style = {
     "lticks.labels.max_ticks": 13,
     "lticks.margins": ('9p', '9p'),
     "lticks.ticks.line": {
-        "zorder": 102.0,
+        "zorder": 103.0,
         "width": '1p'
     },
     "lticks.labels.text": {
-        "zorder": 102.1,
+        "zorder": 103.1,
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
@@ -165,11 +165,11 @@ common_style = {
     "rticks.labels.max_ticks": 13,
     "rticks.margins": ('9p', '9p'),
     "rticks.ticks.line": {
-        "zorder": 102.0,
+        "zorder": 103.0,
         "width": '1p'
     },
     "rticks.labels.text": {
-        "zorder": 102.1,
+        "zorder": 103.1,
         "size": 11,
         "weight": 'normal',
         "slant": 'roman',
@@ -186,7 +186,7 @@ common_style = {
     "legend.ipady": ('0p', '0p'),
     "legend.symbols.width": '15p',
     "legend.labels.text": {
-        "zorder": 104.0,
+        "zorder": 105.0,
         "size": 12,
         "weight": 'normal',
         "slant": 'roman',
@@ -199,19 +199,19 @@ common_style = {
     "datalabel.offset": ('0p', '-36p'),
     "datalabel.scientific": 4,
     "datalabel.arrow.polygon": {
-        "zorder": 107.0,
+        "zorder": 101.0,
         "width": '1p'
     },
     "datalabel.point.oval": {
-        "zorder": 107.1,
+        "zorder": 101.1,
         "width": '1p'
     },
     "datalabel.box.rectangle": {
-        "zorder": 107.2,
+        "zorder": 101.2,
         "width": '1p'
     },
     "datalabel.text": {
-        "zorder": 107.3,
+        "zorder": 101.3,
         "size": 12,
         "weight": 'normal',
         "slant": 'roman',
