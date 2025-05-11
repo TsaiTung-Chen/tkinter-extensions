@@ -829,42 +829,43 @@ class _BaseArtist(_BaseElement):
         self.delete()
     
     def coords(self, *args, **kwargs) -> list[float]:
-        return tk.Canvas.coords(self._canvas, self._id, *args, **kwargs)
+        return self._canvas.coords(self._id, *args, **kwargs)
     
     def move(self, *args, **kwargs):
-        tk.Canvas.move(self._canvas, self._id, *args, **kwargs)
+        self._canvas.move(self._id, *args, **kwargs)
     
     def moveto(self, *args, **kwargs):
-        tk.Canvas.move(self._canvas, self._id, *args, **kwargs)
+        self._canvas.move(self._id, *args, **kwargs)
     
     def lift(self, *args, **kwargs):
-        tk.Canvas.tag_raise(self._canvas, self._id, *args, **kwargs)
+        self._canvas.tag_raise(self._id, *args, **kwargs)
     
     def lower(self, *args, **kwargs):
-        tk.Canvas.tag_lower(self._canvas, self._id, *args, **kwargs)
+        self._canvas.tag_lower(self._id, *args, **kwargs)
     
     def itemconfigure(self, *args, **kwargs) -> Any:
-        return tk.Canvas.itemconfigure(self._canvas, self._id, *args, **kwargs)
+        return self._canvas.itemconfigure(self._id, *args, **kwargs)
     
     def cget(self, *args, **kwargs) -> Any:
-        return tk.Canvas.itemcget(self._canvas, self._id, *args, **kwargs)
+        return self._canvas.itemcget(self._id, *args, **kwargs)
     
     def bbox(self) -> tuple[int, int, int, int] | None:
-        return tk.Canvas.bbox(self._canvas, self._id)
+        return self._canvas.bbox(self._id)
     
     def delete(self):
+        canvas = self._canvas
         for side in (self._x_side, self._y_side):
             if side is not None:
-                artists = getattr(self._canvas, f'_{side}artists')
+                artists = getattr(canvas, f'_{side}artists')
                 try:
                     artists[f'{self._name}s'].remove(self)
                 except ValueError:
                     pass
         
-        self._canvas._zorder_tags.pop(self, None)
+        canvas._zorder_tags.pop(self, None)
         
         try:
-            tk.Canvas.delete(self._canvas, self._id)
+            canvas.delete(self._id)
         except tk.TclError:
             pass
     
@@ -905,10 +906,11 @@ class _BaseArtist(_BaseElement):
         
         self.itemconfigure(state=state)
         
+        canvas = self._canvas
         if self._antialias_enabled:
-            tk.Canvas.itemconfigure(self._canvas, self._id_aa, state=state)
+            canvas.itemconfigure(self._id_aa, state=state)
         elif hasattr(self, '_id_aa'):
-            tk.Canvas.itemconfigure(self._canvas, self._id_aa, state='hidden')
+            canvas.itemconfigure(self._id_aa, state='hidden')
     
     def set_state(
             self,
@@ -952,20 +954,21 @@ class _BaseArtist(_BaseElement):
             except ZorderNotFoundError:
                 pass
             else:
-                tk.Canvas.dtag(self._canvas, oid, f'zorder={old_zorder}')
+                canvas.dtag(oid, f'zorder={old_zorder}')
         #> end of _delete_zorder()
         
+        canvas = self._canvas
         zorder = self._req_zorder if self._req_zorder is not None \
             else self._default_style["zorder"]
         new_tag = f'zorder={zorder}'
         
         _delete_zorder(self._id)
-        tk.Canvas.addtag_withtag(self._canvas, new_tag, self._id)
-        self._canvas._zorder_tags[self] = new_tag
+        canvas.addtag_withtag(new_tag, self._id)
+        canvas._zorder_tags[self] = new_tag
         
         if hasattr(self, '_id_aa'):
             _delete_zorder(self._id_aa)
-            tk.Canvas.addtag_withtag(self._canvas, new_tag, self._id_aa)
+            canvas.addtag_withtag(new_tag, self._id_aa)
     
     def _bind(self, sequence: str, callback: Callable[[tk.Event], Any]):
         assert isinstance(sequence, str), sequence
@@ -1742,7 +1745,7 @@ class _Polygon(_BasePoly):
 # =============================================================================
 # ---- Plot Components
 # =============================================================================
-class _BaseComponent(_BaseElement):#TODO: stale
+class _BaseComponent(_BaseElement):
     def __init__(self, plot: _Plot, canvas: tk.Canvas | None = None, **kwargs):
         assert isinstance(plot, _Plot), plot
         assert isinstance(plot._figure, Figure), plot._figure
