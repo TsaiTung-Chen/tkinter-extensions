@@ -696,17 +696,3 @@ class Querybox:
         dialog.show(position, wait=wait, callback=callback)
         return dialog.result
 
-
-# =============================================================================
-# ---- Test
-# =============================================================================
-if __name__ == '__main__':
-    root = ttk.Window()
-    result = Querybox.get_float(
-        title='Test',
-        prompt='Enter a number.',
-        wait=True,
-        callback=print
-    )
-    root.destroy()
-
