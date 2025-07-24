@@ -2670,8 +2670,8 @@ class _Legend(_BaseComponent):
     
     def get_edge(self) -> dict[str, Any]:
         return {
-            "color": self._canvas.container["background"],
-            "width": self._canvas.container["padding"]
+            "color": self._canvas.container.cget('background'),
+            "width": self._canvas.container.cget('padx')
         }
     
     def set_enabled(self, enable: bool = True):
@@ -4585,7 +4585,7 @@ class Figure(UndockedFrame):
 
 
 # =============================================================================
-# ---- Main
+# ---- Test
 # =============================================================================
 if __name__ == '__main__':
     from ._others import Window
