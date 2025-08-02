@@ -1,0 +1,3 @@
+ttkbootstrap
+numpy>=2.0
+
