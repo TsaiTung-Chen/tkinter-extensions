@@ -17,7 +17,13 @@ from tkinter_extensions.widgets.scrolled import (
 from tkinter_extensions.widgets.scrolled import (
     ScrolledText, ScrolledTreeview, ScrolledCanvas
 )
-from tkinter_extensions.widgets.plotter import Plotter
+try:
+    import matplotlib
+except ModuleNotFoundError:
+    Plotter = None
+else:
+    from tkinter_extensions.widgets.plotter import Plotter
+
 from tkinter_extensions.widgets.figure import Figure
 from tkinter_extensions.widgets.spreadsheets import Sheet, Book
 from tkinter_extensions.widgets._others import (
