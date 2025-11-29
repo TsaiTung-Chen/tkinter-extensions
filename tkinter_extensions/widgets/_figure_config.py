@@ -1,13 +1,11 @@
-# -*- coding: utf-8 -*-
 """
 Created on Thu Dec 11 09:15:49 2020
-
 @author: tungchentsai
 """
-
+from typing import Any
 from copy import deepcopy
 # =============================================================================
-# ---- Common style
+# MARK: Common Styles
 # =============================================================================
 """
 Zorder:
@@ -24,7 +22,7 @@ Zorder:
     109.   toolbar: rubberband
 """
 
-common_style = {
+common_style: dict[str, Any] = {
     "size": ('960p', '540p'),
     "colors": [
         '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
@@ -278,13 +276,13 @@ common_style = {
 
 
 # =============================================================================
-# ---- Light style
+# MARK: Light Style
 # =============================================================================
 light_facecolor = '#D9E3F1'
 light_frame_facecolor = '#CFD9E8'
 light_frame_edgecolor = '#666666'
 
-light_style = deepcopy(common_style)
+light_style: dict[str, Any] = deepcopy(common_style)
 light_style.update({
     "frame": {
         **common_style["frame"],
@@ -392,13 +390,13 @@ light_style.update({
 
 
 # =============================================================================
-# ---- Dark Style
+# MARK: Dark Style
 # =============================================================================
 dark_facecolor = 'black'
 dark_frame_facecolor = 'black'
 dark_frame_edgecolor = '#808080'
 
-dark_style = deepcopy(common_style)
+dark_style: dict[str, Any] = deepcopy(common_style)
 dark_style.update({
     "frame": {
         **common_style["frame"],
@@ -506,7 +504,7 @@ dark_style.update({
 
 
 # =============================================================================
-# ---- Styles
+# MARK: Styles
 # =============================================================================
-STYLES = {"light": light_style, "dark": dark_style}
+STYLES: dict[str, dict[str, Any]] = {"light": light_style, "dark": dark_style}
 

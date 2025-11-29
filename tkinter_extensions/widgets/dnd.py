@@ -1,47 +1,48 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Created on Thu Sep  5 22:48:41 2024
-
 @author: tungchentsai
 """
-
-from __future__ import annotations
 import math
-from typing import Any, Callable
+from typing import Any, Literal, cast
+from collections.abc import Callable, Sequence
 import tkinter as tk
 
-import ttkbootstrap as ttk
+import ttkbootstrap as tb
+from ttkbootstrap import style as tb_style
 
 from tkinter_extensions import variables as vrb
 from tkinter_extensions.utils import unbind
-from tkinter_extensions.constants import MLEFTPRESS
+from tkinter_extensions._constants import MLEFTPRESS, Int, _Int
 # =============================================================================
-# ---- Drag and Drop
+# MARK: Drag and Drop
 # =============================================================================
-class DnDItem(ttk.Frame):
+#TODO: Introduce a `DnDItemInfo` information `dataclass` to store DnD related info
+
+class DnDItem(tb.Frame):
     """
     `DnDItem` is a frame widget which can be put into `DnDContainer` (a canvas
     widget) using the method `DnDContainer.dnd_put`.
     """
+    _root: Callable[[], tb.Window]
+    
     def __init__(
-            self,
-            master=None,
-            bootstyle='default',
-            dnd_bordercolor: str = 'warning',
-            dnd_borderwidth: int = 1,
-            selectbutton: bool = False,
-            selectbutton_kw: dict = {
-                "bootstyle": 'primary',
-            },
-            dragbutton: bool = False,
-            dragbutton_kw: dict = {
-                "text": '::',
-                "takefocus": False,
-                "bootstyle": 'link-primary'
-            },
-            button_sticky: str = '',
-            **kwargs
+        self,
+        master: tk.Misc,
+        bootstyle: str | tuple[str, ...] | None = 'default',
+        dnd_bordercolor: str = 'warning',
+        dnd_borderwidth: Int = 1,
+        selectbutton: bool = False,
+        selectbutton_kw: dict[str, Any] = {
+            "bootstyle": 'primary',
+        },
+        dragbutton: bool = False,
+        dragbutton_kw: dict[str, Any] = {
+            "text": '::',
+            "takefocus": False,
+            "bootstyle": 'link-primary'
+        },
+        button_sticky: str = '',
+        **kwargs
     ):
         if not isinstance(master, DnDContainer):
             raise ValueError(
@@ -50,18 +51,24 @@ class DnDItem(ttk.Frame):
             )
         
         # Create a wrapper frame
-        self._wrapper = tk.Frame(master, padx=0, pady=0)
+        self._wrapper: tk.Frame = tk.Frame(master, padx=0, pady=0)
         self._wrapper.grid_rowconfigure(0, weight=1)
         self._wrapper.grid_columnconfigure(2, weight=1)
         
-        self._background_fm = ttk.Frame(self._wrapper, bootstyle=bootstyle)
+        self._background_fm: tb.Frame = tb.Frame(
+            self._wrapper,
+            bootstyle=bootstyle
+        )
         self._background_fm.place(relwidth=1., relheight=1.)
         
         # Make a selectbutton and show it only when the rearrangement is active
         self._rearrange_active: bool = False
-        self._selected = vrb.BooleanVar(self._wrapper, value=False)
+        self._selected: vrb.BooleanVar = vrb.BooleanVar(
+            self._wrapper, value=False
+        )
+        self._select_bt: tb.Checkbutton | None = None
         if selectbutton:
-            self._select_bt = ttk.Checkbutton(
+            self._select_bt = tb.Checkbutton(
                 self._wrapper,
                 variable=self._selected,
                 **selectbutton_kw
@@ -73,44 +80,64 @@ class DnDItem(ttk.Frame):
         else:
             self._select_bt = None
         
+        self._drag_bt: tb.Button | None = None
         if dragbutton:
-            self._drag_bt = ttk.Button(self._wrapper, **dragbutton_kw)
+            self._drag_bt = tb.Button(self._wrapper, **dragbutton_kw)
             self._drag_bt.grid(row=0, column=1, sticky=button_sticky)
             self._drag_bt.grid_remove()
-            self._drag_bt.dnd_trigger: bool = True
+            setattr(self._drag_bt, 'dnd_trigger', True)
         else:
             self._drag_bt = None
         
         # Content frame
-        super().__init__(self._wrapper, bootstyle=bootstyle, **kwargs)
+        super().__init__(
+            self._wrapper,
+            bootstyle=bootstyle,
+            **kwargs
+        )
         self.grid(row=0, column=2, sticky='nswe')
+        
+        # Object id on the canvas
+        self._oid: int = -1  # assigned when put onto a canvas
         
         # Pad `self` later to make it work like a border
         self._dnd_bordercolor = dnd_bordercolor
         self._dnd_borderwidth: int = int(dnd_borderwidth)
         self._dnd_container: DnDContainer = master
+        
+        # DnD state variables
         self._dnd_active: bool = False
+        self._trigger: tk.Misc | None = None
+        self._initial_items: list[DnDItem] = []
+        self._initial_background: str = ''
+        self._target: DnDItem | None = None
+        self._container_x: int
+        self._container_y: int
+        self._offset_x: int
+        self._offset_y: int
+        self._motion_pattern: str
+        self._release_pattern: str
     
     @property
-    def wrapper(self) -> tk.Frame:
+    def wrapper(self):
         return self._wrapper
     
     @property
-    def dnd_active(self) -> bool:
+    def dnd_active(self):
         """
         Returns whether the DnD is currently working.
         """
         return self._dnd_active
     
     @property
-    def selected(self) -> vrb.BooleanVar:
+    def selected(self):
         """
         Returns whether this item is selected.
         """
         return self._selected
     
     @property
-    def rearrange_active(self) -> bool:
+    def rearrange_active(self):
         """
         Returns whether the rearrangement mode is on.
         
@@ -119,7 +146,7 @@ class DnDItem(ttk.Frame):
         """
         return self._rearrange_active
     
-    def set_rearrangement(self, enable: bool):
+    def set_rearrangement(self, enable: bool) -> None:
         """
         Switches the rearrangement mode on or off.
         
@@ -152,7 +179,7 @@ class DnDItem(ttk.Frame):
         self._selected.set(False)
         self._rearrange_active = enable
     
-    def _on_motion(self, event: tk.Event):
+    def _on_motion(self, event: tk.Event) -> None:
         """
         This method will be called when the mouse cursor moves after the DnD
         starts.
@@ -160,10 +187,10 @@ class DnDItem(ttk.Frame):
         self.dnd_motion(event)
         
         # Update target
-        x = event.x_root - self._dnd_container_x
-        y = event.y_root - self._dnd_container_y
+        x = event.x_root - self._container_x
+        y = event.y_root - self._container_y
         oids = self._dnd_container.dnd_oids
-        new_target = None
+        new_target: DnDItem | None = None
         for oid in self._dnd_container.find_overlapping(x, y, x, y):
             try:
                 hover = oids[oid]
@@ -187,13 +214,13 @@ class DnDItem(ttk.Frame):
             if new_target is not None:  # entering a new target
                 new_target.dnd_enter(event, self, old_target)
     
-    def _on_release(self, event: tk.Event | None):
+    def _on_release(self, event: tk.Event) -> None:
         """
         This method will be called once the button is released.
         """
         self._finish(event, commit=True)
     
-    def _finish(self, event: tk.Event | None, commit: bool):
+    def _finish(self, event: tk.Event, commit: bool) -> None:
         target = self._target
         try:
             if commit and target is not None:
@@ -201,21 +228,21 @@ class DnDItem(ttk.Frame):
         finally:
             self.dnd_end(event)
     
-    def cancel(self, event: tk.Event | None = None):
+    def cancel(self) -> None:
         """
         Stop the drag and drop. `dnd_commit` will not be called.
         """
-        self._finish(event, commit=False)
+        self._finish(tk.Event(), commit=False)
     
-    def dnd_start(self, event: tk.Event):
+    def dnd_start(self, event: tk.Event) -> None:
         """
         Starts drag and drop mechanism.
         
-        This method is a entry point for DnD and should be bind to some widget.
+        This method is an entry point for DnD and should be bind to some widget.
         """
         assert isinstance(button := event.num, int), button
         
-        widget = event.widget
+        trigger = event.widget
         wrapper = self._wrapper
         dnd_container = self._dnd_container
         
@@ -226,50 +253,58 @@ class DnDItem(ttk.Frame):
         w, h = wrapper.winfo_width(), wrapper.winfo_height()
         
         self._dnd_active = True
-        self._target: DnDItem | None = None
-        self._offset_x: int = x - event.x_root
-        self._offset_y: int = y - event.y_root
+        self._trigger = trigger
+        self._initial_items = dnd_container.dnd_items.copy()
+        self._initial_background = wrapper.cget('background')
+        self._target = None
+        self._container_x = self._dnd_container.winfo_rootx()
+        self._container_y = self._dnd_container.winfo_rooty()
+        self._offset_x = x - event.x_root
+        self._offset_y = y - event.y_root
         self._motion_pattern = f'<B{button}-Motion>'
         self._release_pattern = f'<ButtonRelease-{button}>'
-        self._initial_widget: tk.Misc | None = widget
-        self._initial_items: list[DnDItem] | None = dnd_container.dnd_items.copy()
-        self._initial_background = wrapper["background"]
-        self._dnd_container_x: int = self._dnd_container.winfo_rootx()
-        self._dnd_container_y: int = self._dnd_container.winfo_rooty()
         
         focus_widget: tk.Misc | None = self.focus_get()
-        tk.Wm.wm_manage(wrapper, wrapper)  # make wrapper become a toplevel
-        tk.Wm.wm_overrideredirect(wrapper, True)
-        tk.Wm.wm_attributes(wrapper, '-topmost', True)
-        tk.Wm.wm_geometry(wrapper, f'{w}x{h}+{x}+{y}')
+        tk.Wm.wm_manage(wrapper, wrapper)  # pyright: ignore [reportArgumentType] (type extended)
+         # make `wrapper` become a toplevel
+        tk.Wm.wm_overrideredirect(wrapper, True)  # pyright: ignore [reportCallIssue, reportArgumentType] (type extended)
+        tk.Wm.wm_attributes(wrapper, '-topmost', True)  # pyright: ignore [reportCallIssue, reportArgumentType] (type extended)
+        tk.Wm.wm_geometry(wrapper, f'{w}x{h}+{x}+{y}')  # pyright: ignore [reportCallIssue, reportArgumentType] (type extended)
         if focus_widget:
             self.after_idle(focus_widget.focus_set)
         
         # Add border
-        style = ttk.Style.get_instance()
-        if (bordercolor := style.colors.get(self._dnd_bordercolor)) is None:
+        style = self._root().style
+        assert isinstance(style, tb_style.Style), type(style)
+        colors: tb_style.Colors | list = style.colors
+        assert isinstance(colors, tb_style.Colors), colors
+        bordercolor = colors.get(self._dnd_bordercolor)
+        if bordercolor is None:
             bordercolor = self._dnd_bordercolor
+        assert isinstance(bordercolor, str), bordercolor
         wrapper.configure(
             background=bordercolor,
             padx=self._dnd_borderwidth,
             pady=self._dnd_borderwidth
         )
         
-        self._motion_id = widget.bind(
-            self._motion_pattern, self._on_motion, add=True)
-        self._release_id = widget.bind(
-            self._release_pattern, self._on_release, add=True)
+        self._motion_id = trigger.bind(
+            self._motion_pattern, self._on_motion, add=True
+        )
+        self._release_id = trigger.bind(
+            self._release_pattern, self._on_release, add=True
+        )
     
-    def dnd_motion(self, event: tk.Event):
+    def dnd_motion(self, event: tk.Event) -> None:
         # Move the source widget
         x, y = (event.x_root + self._offset_x, event.y_root + self._offset_y)
-        tk.Wm.wm_geometry(self._wrapper, f'+{x}+{y}')
+        tk.Wm.wm_geometry(self._wrapper, f'+{x}+{y}')  # pyright: ignore [reportCallIssue, reportArgumentType] (type extended)
     
     def dnd_accept(
-            self,
-            event: tk.Event,
-            source: DnDItem
-    ) -> DnDItem | None:
+        self,
+        event: tk.Event,
+        source: 'DnDItem'
+    ) -> 'DnDItem | None':
         """
         When the mouse cursor is hovering on `self`, this method will be called
         and returns a new target widget if the condition is matched.
@@ -279,41 +314,42 @@ class DnDItem(ttk.Frame):
         if self != source and self._wrapper.master == source._wrapper.master:
              # are siblings
             return self
+        return None
     
     def dnd_enter(
-            self,
-            event: tk.Event,
-            source: DnDItem,
-            old_target: DnDItem
-    ):
+        self,
+        event: tk.Event,
+        source: 'DnDItem',
+        old_target: 'DnDItem | None'
+    ) -> None:
         """
         When the mouse cursor moves into this item, this method will be called.
         """
         assert isinstance(source, DnDItem), source
     
     def dnd_leave(
-            self,
-            event: tk.Event,
-            source: DnDItem,
-            new_target: DnDItem
-    ):
+        self,
+        event: tk.Event,
+        source: 'DnDItem',
+        new_target: 'DnDItem | None'
+    ) -> None:
         """
         When the mouse cursor leave this item, this method will be called.
         """
         assert isinstance(source, DnDItem), source
     
     def dnd_commit(
-            self,
-            event: tk.Event,
-            source: DnDItem
-    ):
+        self,
+        event: tk.Event,
+        source: 'DnDItem'
+    ) -> None:
         """
         When the DnD is going to end, this method of the new target will be
         called.
         """
         assert isinstance(source, DnDItem), source
     
-    def dnd_end(self, event: tk.Event | None):
+    def dnd_end(self, event: tk.Event) -> None:
         """
         This method is the last DnD method, which will be called when DnD ends.
         """
@@ -322,7 +358,7 @@ class DnDItem(ttk.Frame):
         dnd_container = self._dnd_container
         
         # Restore `self` to become a regular widget
-        tk.Wm.wm_forget(wrapper, wrapper)
+        tk.Wm.wm_forget(wrapper, wrapper)  # pyright: ignore [reportArgumentType] (type extended)
         wrapper.configure(  # remove border
             background=self._initial_background,
             padx=0,
@@ -342,9 +378,12 @@ class DnDItem(ttk.Frame):
         dnd_container._resize(self)
         
         # Restore settings from `dnd_start`
-        unbind(self._initial_widget, self._motion_pattern, self._motion_id)
-        unbind(self._initial_widget, self._release_pattern, self._release_id)
-        self._target = self._initial_widget = self._initial_items = None
+        trigger = self._trigger
+        assert isinstance(trigger, tk.Misc), trigger
+        unbind(trigger, self._motion_pattern, self._motion_id)
+        unbind(trigger, self._release_pattern, self._release_id)
+        self._target = self._trigger = None
+        self._initial_items = []
         self._dnd_active = False
         
         if dnd_container._dnd_end_callback:
@@ -353,11 +392,11 @@ class DnDItem(ttk.Frame):
 
 class OrderlyDnDItem(DnDItem):
     def dnd_enter(
-            self,
-            event: tk.Event,
-            source: DnDItem,
-            old_target: DnDItem
-    ):
+        self,
+        event: tk.Event,
+        source: DnDItem,
+        old_target: DnDItem | None
+    ) -> None:
         """
         Exchange the position of the `source` item and the new target the mouse
         cursor just entered.
@@ -380,28 +419,31 @@ class OrderlyDnDItem(DnDItem):
         
         # Exchange the geometries
         geometries = dnd_container._dnd_geometries
-        old_source_geo = geometries[new_target_idx]
-        old_target_geo = geometries[new_source_idx]
-        new_source_geo = geometries[new_source_idx].copy()
-        new_target_geo = geometries[new_target_idx].copy()
-        new_source_geo.update({
-            "width": old_source_geo["width"],
-            "height": old_source_geo["height"],
-            "relwidth": old_source_geo["relwidth"],
-            "relheight": old_source_geo["relheight"],
+        old_source_geometry = geometries[new_target_idx]
+        old_target_geometry = geometries[new_source_idx]
+        new_source_geometry = old_target_geometry.copy()
+        new_target_geometry = old_source_geometry.copy()
+        new_source_geometry.update({
+            "width": old_source_geometry["width"],
+            "height": old_source_geometry["height"],
+            "relwidth": old_source_geometry["relwidth"],
+            "relheight": old_source_geometry["relheight"],
         })
-        new_target_geo.update({
-            "width": old_target_geo["width"],
-            "height": old_target_geo["height"],
-            "relwidth": old_target_geo["relwidth"],
-            "relheight": old_target_geo["relheight"],
+        new_target_geometry.update({
+            "width": old_target_geometry["width"],
+            "height": old_target_geometry["height"],
+            "relwidth": old_target_geometry["relwidth"],
+            "relheight": old_target_geometry["relheight"],
         })
-        geometries[new_source_idx] = new_source_geo
-        geometries[new_target_idx] = new_target_geo
+        geometries[new_source_idx] = new_source_geometry
+        geometries[new_target_idx] = new_target_geometry
         
         # Update the UI
-        dnd_container._put(self, new_target_geo)
-        dnd_container._resize(self, new_target_geo)
+        dnd_container._put(self, new_target_geometry)
+        dnd_container._resize(self, new_target_geometry)
+
+
+#TODO: Add a (immutable) `NamedTuple` `DnDItemList`
 
 
 class DnDContainer(tk.Canvas):
@@ -410,16 +452,15 @@ class DnDContainer(tk.Canvas):
     items with type `DnDItem` should be put onto this canvas with the method
     `DnDContainer.dnd_put`.
     """
-    
-    _dnd_tag = 'dnd-item'
+    _root: Callable[[], tb.Window]
+    _dnd_tag = 'dnd-item'  #TODO: move this to `DnDItemInfo`
     
     def __init__(
-            self,
-            master=None,
-            dnd_start_callback: Callable[[tk.Event, DnDItem], Any] | None = None,
-            dnd_end_callback: Callable[[tk.Event, list[DnDItem]], Any] | None \
-                = None,
-            **kwargs
+        self,
+        master: tk.Misc,
+        dnd_start_callback: Callable[[tk.Event, DnDItem], Any] | None = None,
+        dnd_end_callback: Callable[[tk.Event, list[DnDItem]], Any] | None = None,
+        **kwargs
     ):
         super().__init__(master=master, **kwargs)
         self.bind('<Configure>', self._on_configure)
@@ -427,16 +468,20 @@ class DnDContainer(tk.Canvas):
         self._canvas_h: int = 0
         self._rearrange_active: bool = False
         self._dnd_items: list[DnDItem] = []
-        self._dnd_oids: dict[DnDItem] = {}
+        self._dnd_oids: dict[int, DnDItem] = {}
+        self._dnd_geometries: list[dict[str, Any]] = []
+        self._dnd_geometry_params: dict[str, Any] = {}
+        self._dnd_start_callback: Callable[[tk.Event, DnDItem], Any] | None
+        self._dnd_end_callback: Callable[[tk.Event, list[DnDItem]], Any] | None
         self.set_dnd_start_callback(dnd_start_callback)
         self.set_dnd_end_callback(dnd_end_callback)
     
     @property
-    def dnd_tag(self) -> str:
+    def dnd_tag(self):
         return self._dnd_tag
     
     @property
-    def dnd_items(self) -> list[DnDItem]:
+    def dnd_items(self):
         """
         Returns the items put onto this canvas with `self.dnd_put`.
         
@@ -445,7 +490,7 @@ class DnDContainer(tk.Canvas):
         return self._dnd_items
     
     @property
-    def dnd_oids(self) -> dict[int, DnDItem]:
+    def dnd_oids(self):
         """
         Returns the DnD items' canvas oids.
         
@@ -454,7 +499,7 @@ class DnDContainer(tk.Canvas):
         return self._dnd_oids
     
     @property
-    def rearrange_active(self) -> bool:
+    def rearrange_active(self):
         """
         Returns whether the rearrangement mode is on.
         """
@@ -482,7 +527,7 @@ class DnDContainer(tk.Canvas):
         active = items.pop().rearrange_active
         return all( item.rearrange_active == active for item in items )
     
-    def _on_configure(self, event: tk.Event | None = None):
+    def _on_configure(self, event: tk.Event | None = None) -> None:
         """
         Refreshes the DnD items' positions and sizes.
         """
@@ -500,15 +545,14 @@ class DnDContainer(tk.Canvas):
                 self._resize(item, geometry)
     
     def dnd_put(
-            self,
-            items: list[list[DnDItem]] | list[DnDItem],
-            orient: str = 'vertical',
-            sticky: str = '',
-            expand: tuple[bool, bool] | list[bool] | bool = False,
-            ipadding: tuple[int, int] | list[int] | int = 0,
-            padding: tuple[int, int] | tuple[int, int, int, int] | list[int] |
-                int = 0
-    ):
+        self,
+        items: Sequence[Sequence[DnDItem]] | Sequence[DnDItem],
+        orient: Literal['horizontal', 'vertical'] = 'vertical',
+        sticky: str = '',  # consists of 'n', 's', 'w', 'e', no repeats
+        expand: tuple[bool, bool] | bool = False,
+        ipadding: tuple[Int, Int] | Int = 0,
+        padding: tuple[Int, Int] | tuple[Int, Int, Int, Int] | Int = 0
+    ) -> None:
         """
         Use this method to put `items` onto this canvas container.
         
@@ -526,10 +570,10 @@ class DnDContainer(tk.Canvas):
         
         Other arguments work like the arguments for the grid layout manager.
         """
-        assert isinstance(items, list), items
-        assert isinstance(expand, (tuple, list, bool, int)), expand
-        assert isinstance(padding, (tuple, list, int)), padding
-        assert isinstance(ipadding, (tuple, list, int)), ipadding
+        assert isinstance(items, Sequence), items
+        assert isinstance(expand, (tuple, bool, _Int)), expand
+        assert isinstance(padding, (tuple, _Int)), padding
+        assert isinstance(ipadding, (tuple, _Int)), ipadding
         assert orient in ('horizontal', 'vertical'), orient
         
         if self.find_withtag(self.dnd_tag):
@@ -538,64 +582,72 @@ class DnDContainer(tk.Canvas):
                 "items before calling `dnd_put` again."
             )
         
-        if isinstance(padding, (tuple, list)):
+        if isinstance(padding, tuple):
             assert len(padding) in (2, 4), padding
             if len(padding) == 2:
                 padding = (padding[0], padding[1], padding[0], padding[1])
-            else:
-                padding = tuple(padding)
-        else:  # int
+        else:  # Int
             padding = (padding, padding, padding, padding)
+        assert len(padding) == 4, padding
+        padding = cast(tuple[int, int, int, int], tuple(map(int, padding)))
         
-        pairs = list()
+        pairs = []
         for name, arg in [('expand', expand), ('ipadding', ipadding)]:
-            if isinstance(arg, (tuple, list)):
+            if isinstance(arg, tuple):
                 assert len(arg) == 2, (name, arg)
                 arg = tuple(arg)
             else:
                 arg = (arg, arg)
             pairs.append(arg)
         expand, (ipadx, ipady) = pairs
+        ipadx, ipady = int(ipadx), int(ipady)
         assert isinstance(sticky, str), (type(sticky), sticky)
         assert set(sticky).issubset('nesw'), sticky
-        assert all( isinstance(p, int) for p in padding ), padding
         assert all( p >= 0 for p in padding ), padding
-        assert all( isinstance(p, int) for p in (ipadx, ipady) ), (ipadx, ipady)
         assert all( p >= 0 for p in (ipadx, ipady) ), (ipadx, ipady)
         
         # Ensure `items` is a 2D structure
-        if not isinstance(items[0], list):
+        _items: Sequence[Sequence[DnDItem]]
+        if isinstance(items[0], Sequence):
+            assert all( isinstance(row, Sequence) for row in items ), items
+            n_cols = len(items[0])
+            for row in items:
+                assert isinstance(row, Sequence), items
+                assert len(row) == n_cols, items
+                assert all( isinstance(item, DnDItem) for item in row ), items
+            _items = cast(Sequence[Sequence[DnDItem]], items)
+        else:
+            assert all( isinstance(item, DnDItem) for item in items ), items
             if orient == 'horizontal':
-                items = [items]
+                _items = cast(Sequence[Sequence[DnDItem]], [items])
             else:  # vertical
-                items = [ [w] for w in items ]
-        R, C = len(items), max( len(item) for item in items )
+                _items = cast(Sequence[Sequence[DnDItem]], [ [w] for w in items ])
+        R, C = len(items), max( len(row) for row in _items )
         
         # Make items' rearrangements state consistent
-        items_flat = [ w for row in items for w in row ]
-        assert all([ isinstance(w, DnDItem) for w in items_flat]), items
+        items_flat: list[DnDItem] = [ w for row in _items for w in row ]
         rearrange_active = self._rearrange_active
         for item in items_flat:
             if item.rearrange_active != rearrange_active:
                 item.set_rearrangement(rearrange_active)
         
         # Calculate canvas size and place items onto the canvas
-        oids = [
+        oids: list[int] = [
             self.create_window(
                 0, 0, anchor='nw', window=item.wrapper, tags=self.dnd_tag
-            )
-            for item in items_flat
+            ) for item in items_flat
         ]
         self.update_idletasks()
-        widths, heights = list(), list()
+        widths: list[int] = []
+        heights: list[int] = []
         for oid, item in zip(oids, items_flat):
-            item._oid: int = oid
+            item._oid = oid
             widths.append(item.wrapper.winfo_reqwidth())  # natural width
             heights.append(item.wrapper.winfo_reqheight())  # natural height
         cell_w, cell_h = max(widths), max(heights)
         canvas_w: int = C*cell_w + (padding[0] + padding[2]) + (C - 1)*ipadx
         canvas_h: int = R*cell_h + (padding[1] + padding[3]) + (R - 1)*ipady
-        self._dnd_geometry_params = {
+        self._dnd_geometry_params: dict[str, Any] = {
             "shape": (R, C),
             "expand": expand,
             "ipadding": (ipadx, ipady),
@@ -606,7 +658,7 @@ class DnDContainer(tk.Canvas):
         
         # Calculate geometry and update items' position and size.
         # The resultant geometries are based on these items' natural sizes
-        geometries = []
+        geometries: list[dict[str, Any]] = []
         for i, item in enumerate(items_flat):
             geometries.append(
                 self._calculate_geometry(i, widths[i], heights[i])
@@ -615,13 +667,13 @@ class DnDContainer(tk.Canvas):
             # Setup widget's DnD functions
             self.rebind_dnd_start(item)
         
-        self._dnd_geometries: list[dict] = geometries
+        self._dnd_geometries: list[dict[str, Any]] = geometries
         self._dnd_items: list[DnDItem] = items_flat
         self._dnd_oids: dict[int, DnDItem] = dict(zip(oids, items_flat))
         self.configure(width=canvas_w, height=canvas_h)
         self._on_configure()  # ensure the item layout is refreshed
     
-    def dnd_forget(self, destroy: bool = True):
+    def dnd_forget(self, destroy: bool = True) -> None:
         """
         Removes the DnD items which were put onto the canvas. Destroy the items
         if `destroy` is `True`.
@@ -629,7 +681,7 @@ class DnDContainer(tk.Canvas):
         if not self._dnd_items:
             return
         
-        self.delete(self.dnd_tag)
+        self.delete(self._dnd_tag)
         
         if destroy:
             for item in self._dnd_items:
@@ -640,7 +692,9 @@ class DnDContainer(tk.Canvas):
         self._dnd_oids.clear()
         self._dnd_geometry_params.clear()
     
-    def _put(self, item: DnDItem, geometry: dict | None = None):
+    def _put(
+        self, item: DnDItem, geometry: dict[str, Any] | None = None
+    ) -> None:
         """
         Updates the position of `item` according to `geometry`. If `geometry` is
         `None`, get the geometry from `self._dnd_geometries`.
@@ -653,7 +707,9 @@ class DnDContainer(tk.Canvas):
         self.itemconfigure(item._oid, anchor=geometry["anchor"])
         self.coords(item._oid, x, y)
     
-    def _resize(self, item: DnDItem, geometry: dict | None = None):
+    def _resize(
+        self, item: DnDItem, geometry: dict[str, Any] | None = None
+    ) -> None:
         """
         Updates the size of `item` according to `geometry`. If `geometry` is
         `None`, get the geometry from `self._dnd_geometries`.
@@ -671,12 +727,16 @@ class DnDContainer(tk.Canvas):
         
         self.itemconfigure(item._oid, width=w, height=h)
     
-    def _calculate_geometry(self, idx, natural_width, natural_height) -> dict:
+    def _calculate_geometry(
+        self, idx: int, natural_width: int, natural_height: int
+    ) -> dict[str, Any]:
         """
         This method mimics the grid layout manager by calculating the 
         position and size of each widget in the cell.
         """
-        def _calc(i, I, size, natural_L, stick, exp, ipad, p1, p2) -> dict:
+        def _calc(
+            i, I, size, natural_L, stick, exp, ipad, p1, p2
+        ) -> dict[str, float]:
             # Cell size (size_c) = L/I + (-(p1 + p2) - (I-1)*ipad)/I
             r = 1. / I  # relative part
             f = (-(p1 + p2) - (I - 1)*ipad)/I  # fixed part
@@ -767,7 +827,7 @@ class DnDContainer(tk.Canvas):
             sticky_y, expy, ipady, padding[1], padding[3]
         )
         
-        geometry = {
+        geometry: dict[str, Any] = {
             "anchor": (anchor_x + anchor_y) or 'center',
             "relx": geometry_x["relpos"],
             "x": geometry_x["pos"],
@@ -781,41 +841,42 @@ class DnDContainer(tk.Canvas):
         
         return geometry
     
-    def rebind_dnd_start(self, moved: DnDItem):
+    def rebind_dnd_start(self, moved: DnDItem) -> None:
         """
         Overwrites this method to customize the trigger widget.
         """
         self._rebind_dnd_start(MLEFTPRESS, trigger=moved, moved=moved)
     
     def _rebind_dnd_start(
-            self,
-            sequence: str,
-            *,
-            trigger: tk.Misc,
-            moved: DnDItem
-    ):
+        self,
+        sequence: str,
+        *,
+        trigger: tk.Misc,
+        moved: DnDItem
+    ) -> None:
         """
         Rebinds the `moved.dnd_start` method to `trigger` widget and its
         descendants with `sequence` events.
         """
         assert isinstance(moved, DnDItem), (type(moved), moved)
         
-        trigger.configure(cursor='hand2')
-        if hasattr(trigger, '_dnd_start_id'):
-            unbind(trigger, sequence, trigger._dnd_start_id)
-        trigger._dnd_start_id = trigger.bind(sequence, moved.dnd_start, add=True)
+        trigger.configure(cursor='hand2')  # pyright: ignore [reportCallIssue]
+        if (old_id := getattr(trigger, '_dnd_start_id', None)) is not None:
+            unbind(trigger, sequence, old_id)
+        new_id = trigger.bind(sequence, moved.dnd_start, add=True)
+        setattr(trigger, '_dnd_start_id', new_id)
         
         for child in trigger.winfo_children():
             self._rebind_dnd_start(sequence, trigger=child, moved=moved)
     
-    def select_all(self):
+    def select_all(self) -> None:
         """
         Selects all DnD items.
         """
         for item in self._dnd_items:
             item.selected.set(True)
     
-    def deselect_all(self):
+    def deselect_all(self) -> None:
         """
         Deselects all DnD items.
         """
@@ -830,7 +891,7 @@ class DnDContainer(tk.Canvas):
         self.set_rearrangement(enable)
         return enable
     
-    def set_rearrangement(self, enable: bool):
+    def set_rearrangement(self, enable: bool) -> None:
         """
         Set the rearrangement mode.
         
@@ -850,7 +911,9 @@ class DnDContainer(tk.Canvas):
         
         self._set_rearrangement(enable, self._dnd_geometry_params)
     
-    def _set_rearrangement(self, enable: bool, geometry_params: dict):
+    def _set_rearrangement(
+        self, enable: bool, geometry_params: dict[str, Any]
+    ) -> None:
         assert self._dnd_items, self._dnd_items
         
         items = self._dnd_items
@@ -872,9 +935,9 @@ class DnDContainer(tk.Canvas):
         self.dnd_put(**put_kw)
     
     def set_dnd_start_callback(
-            self,
-            callback: Callable[[tk.Event, DnDItem], Any] | None
-    ):
+        self,
+        callback: Callable[[tk.Event, DnDItem], Any] | None
+    ) -> None:
         """
         The callback function will be executed once DnD starts.
         
@@ -886,9 +949,9 @@ class DnDContainer(tk.Canvas):
         self._dnd_start_callback = callback
     
     def set_dnd_end_callback(
-            self,
-            callback: Callable[[tk.Event, list[DnDItem]], Any] | None
-    ):
+        self,
+        callback: Callable[[tk.Event, list[DnDItem]], Any] | None
+    ) -> None:
         """
         The callback function will be executed once DnD ends.
         
@@ -906,20 +969,25 @@ class RearrangedDnDContainer(DnDContainer):
     rearrange the items.
     """
     def __init__(
-            self,
-            master=None,
-            button_loc: str = 'top-right',
-            button_kw: dict = {
-                "text": '⋯',
-                "takefocus": False,
-                "bootstyle": 'primary'
-            },
-            **kwargs
+        self,
+        master: tk.Misc,
+        button_loc:
+            Literal[
+                'top-left', 'top-right', 'bottom-left', 'bottom-right'
+            ]
+            = 'top-right',
+        button_kw: dict[str, Any] = {
+            "text": '⋯',
+            "takefocus": False,
+            "bootstyle": 'primary'
+        },
+        **kwargs
     ):
         super().__init__(master=master, **kwargs)
         
-        if button_loc not in ('top-left', 'top-right',
-                              'bottom-left', 'bottom-right'):
+        if button_loc not in (
+            'top-left', 'top-right', 'bottom-left', 'bottom-right'
+        ):
             raise ValueError(
                 "`button_loc` must be one of 'top-left', 'top-right', "
                 f"'bottom-left', and 'bottom-right' but got {repr(button_loc)}."
@@ -940,7 +1008,7 @@ class RearrangedDnDContainer(DnDContainer):
             relx = 1.
         
         # Create the rearrangement button
-        self._rearrange_bt = ttk.Button(
+        self._rearrange_bt: tb.Button = tb.Button(
             self,
             command=self._on_button_clicked,
             **button_kw
@@ -950,8 +1018,11 @@ class RearrangedDnDContainer(DnDContainer):
         
         self.update_idletasks()
         self._button_h: int = self._rearrange_bt.winfo_reqheight()
-        self._button_loc: str = button_loc
-        self._original_padding: tuple[int, int, int, int] = (0, 0, 0, 0)
+        self._button_loc = button_loc
+        self._original_padding: tuple[Int, Int, Int, Int]
+        self._rearrange_commands: tuple[dict[str, Any], ...]
+        self._other_commands: tuple[dict[str, Any], ...]
+        self._rearrange_callback: Callable[[RearrangedDnDContainer], Any] | None
         self.configure(height=self._button_h)
         self.bind('<<ThemeChanged>>', self._create_bt_style)
         self.set_rearrange_commands({
@@ -960,17 +1031,20 @@ class RearrangedDnDContainer(DnDContainer):
         self.set_other_commands()
         self.set_rearrange_callback()
     
-    def _create_bt_style(self, event=None, new: bool = False) -> str:
+    def _create_bt_style(
+        self, event: tk.Event | None = None, new: bool = False
+    ) -> str:
         if new:
             bt_style = 'Rearrange.DnDContainer.' + self._rearrange_bt["style"]
         else:
             bt_style = self._rearrange_bt["style"]
-        style = ttk.Style.get_instance()
+        style = tb_style.Style.get_instance()
+        assert isinstance(style, tb_style.Style), type(style)
         style.configure(bt_style, padding=(6, 3))  # modify padding
         
         return bt_style
     
-    def _on_button_clicked(self):
+    def _on_button_clicked(self) -> None:
         """
         This method will be called once the rearrangement button is clicked.
         This will bring up a menu containing some options related to 
@@ -991,7 +1065,7 @@ class RearrangedDnDContainer(DnDContainer):
         )
         
         if rearrange_active:
-            ## Commands in rearrangement mode
+            ## Commands for rearrangement mode
             if self._rearrange_commands:
                 menu.add_command(label='Select All', command=self.select_all)
                 menu.add_command(label='Deselect All', command=self.deselect_all)
@@ -1001,11 +1075,11 @@ class RearrangedDnDContainer(DnDContainer):
                     kw["command"] = cmd
                 menu.add_command(**kw)
         else:
-            ## Commands not in rearrangement mode
+            ## Commands not for rearrangement mode
             for kw in self._other_commands:
                 menu.add_command(**kw)
         
-        if menu.index('end') > 0:  # has mode commands
+        if (idx := menu.index('end')) and idx > 0:  # has mode commands
             menu.insert_separator(1)  # insert a separator below the toggle
         
         menu.post(x, y)
@@ -1031,71 +1105,58 @@ class RearrangedDnDContainer(DnDContainer):
             "items": [ items[r*C:(r+1)*C] for r in range(R) ],  # 1-D => 2-D
             "sticky": params["sticky"],
             "expand": params["expand"],
-            "padding": params["padding"],
+            "padding": self._original_padding,
             "ipadding": params["ipadding"]
         }
         self.dnd_forget(destroy=False)
         if items:
-            self.dnd_put(offset=False, **put_kw)
+            self.dnd_put(**put_kw)
         
         for item in selected:
             item.destroy()
         
         return selected
     
-    def dnd_put(self, *args, padding=0, offset: bool = True, **kwargs):
+    def dnd_put(
+        self,
+        *args,
+        padding: tuple[Int, Int] | tuple[Int, Int, Int, Int] | Int = 0,
+        **kwargs
+    ):
         """
         Modify the super-class method `dnd_put` to make space for the
-        rearrrangement button before putting the items onto the canvas if
+        rearrangement button before putting the items onto the canvas if
         `offset` is `True`. If `offset` is False, directly put the items onto
         the canvas as if the value of `padding` has been modified for the
         rearrangement button, and then calculate and save the original
         (unmodified) padding.
         """
-        # Assume `padding` has been modified
-        if not offset:
-            super().dnd_put(*args, padding=padding, **kwargs)
-            
-            ## Offset upwards
-            px1, py1, px2, py2 = padding
-            if 'top' in self._button_loc:
-                py1 -= self._button_h
-            else:
-                py2 -= self._button_h
-            
-            self._original_padding = (px1, py1, px2, py2)
-            return
-        
         # Modify the y padding to make space for the rearrangement button
-        assert isinstance(padding, (tuple, list, int)), padding
-        
-        if isinstance(padding, (tuple, list)):
+        if isinstance(padding, tuple):
             assert len(padding) in (2, 4), padding
             if len(padding) == 2:
                 padding = (padding[0], padding[1], padding[0], padding[1])
-            else:
-                padding = tuple(padding)
-        else:  # int
+        else:  # Int
             padding = (padding, padding, padding, padding)
-        assert all( isinstance(p, int) for p in padding ), padding
-        assert all( p >= 0 for p in padding ), padding
+        _padding = tuple(map(int, padding))
+        assert isinstance(_padding, tuple) and len(_padding) == 4, _padding
+        padding = _padding
         
-        self._original_padding = padding
-        
-        ## Offset downwards
         px1, py1, px2, py2 = padding
         if 'top' in self._button_loc:
             py1 += self._button_h
         else:
             py2 += self._button_h
         
-        super().dnd_put(*args, padding=(px1, py1, px2, py2), **kwargs)
+        return super().dnd_put(*args, padding=(px1, py1, px2, py2), **kwargs)
     
     def dnd_forget(self, *args, **kwargs):
-        super().dnd_forget(*args, **kwargs)
+        result = super().dnd_forget(*args, **kwargs)
         self.configure(height=self._button_h)
+        
+        return result
     
-    def rebind_dnd_start(self, moved: DnDItem):
+    def rebind_dnd_start(self, moved: DnDItem) -> None:
         """
         Rebind `dnd_start` to `moved._drag_bt`.
         
@@ -1122,7 +1183,7 @@ class RearrangedDnDContainer(DnDContainer):
                 MLEFTPRESS, trigger=moved._drag_bt, moved=moved
             )
     
-    def set_rearrangement(self, enable: bool):
+    def set_rearrangement(self, enable: bool) -> None:
         """
         Set the rearrangement mode.
         
@@ -1140,30 +1201,45 @@ class RearrangedDnDContainer(DnDContainer):
         if not self._dnd_items:
             return
         
+        if enable:  # from disabled to enabled
+            # Save the original padding for later use
+            px1, py1, px2, py2 = self._dnd_geometry_params["padding"]
+            if 'top' in self._button_loc:
+                py1 -= self._button_h
+            else:
+                py2 -= self._button_h
+            self._original_padding = (px1, py1, px2, py2)
+        
         geometry_params = self._dnd_geometry_params.copy()
         geometry_params["padding"] = self._original_padding
         self._set_rearrangement(enable, geometry_params)
     
-    def set_rearrange_commands(self, *kw_dictionaries: dict[str, Any]):
+    def set_rearrange_commands(self, *kw_dictionaries: dict[str, Any]) -> None:
         """
         Sets the keyword arguments for each menu command which shows up once the
         rearrangement button is clicked and `self.rearrangement_active` is
         `True`.
         """
-        self._rearrange_commands: list[dict[str, Any]] = list(kw_dictionaries)
+        assert all( isinstance(d, dict) for d in kw_dictionaries ), kw_dictionaries
+        
+        self._rearrange_commands = kw_dictionaries
     
-    def set_other_commands(self, *kw_dictionaries: dict[str, Any]):
+    def set_other_commands(self, *kw_dictionaries: dict[str, Any]) -> None:
         """
-        Sets the keyword arguments for each menu command which shows up once the
-        rearrangement button is clicked and `self.rearrangement_active` is
-        `False`.
+        Sets the keyword arguments for each menu command which shows up once
+        `self.rearrangement_active` is `False` and the rearrangement button is
+        clicked.
         """
-        self._other_commands: list[dict[str, Any]] = list(kw_dictionaries)
+        assert all( isinstance(d, dict) for d in kw_dictionaries ), kw_dictionaries
+        
+        self._other_commands = kw_dictionaries
     
-    def set_rearrange_callback(self, callback: Callable | None = None):
+    def set_rearrange_callback(self, callback: Callable | None = None) -> None:
         """
         Sets the callback function which will be called every time the
         rearrangement button disappears.
         """
-        self._rearrange_callback: Callable | None = callback
+        assert callable(callback) or callback is None, callback
+        
+        self._rearrange_callback = callback
 

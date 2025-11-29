@@ -35,8 +35,8 @@ win = ttk.Toplevel(title='Sheet', position=(100, 100), size=(800, 500))
 sh = Sheet(win, shape=(12, 16), scrollbar_bootstyle='light-round')
 sh.pack(fill='both', expand=True)
 
-sh.set_foregroundcolors(5, 3, 5, 3, colors='#FF0000', undo=True)
-sh.set_backgroundcolors(5, 3, 5, 3, colors='#2A7AD5', undo=True)
+sh.set_colors(5, 3, 5, 3, field='foreground', colors='#FF0000', undo=True)
+sh.set_colors(5, 3, 5, 3, field='background', colors='#2A7AD5', undo=True)
 sh.resize_cells(5, axis=0, sizes=[80], trace=None, undo=True)
 
 def _set_value_method1():

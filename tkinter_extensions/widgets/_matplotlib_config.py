@@ -1,7 +1,5 @@
-# -*- coding: utf-8 -*-
 """
 Created on Thu Dec 11 09:15:49 2020
-
 @author: tungchentsai
 
 USAGE:
@@ -25,11 +23,11 @@ Z-order	 Artist
 TUTORIALS:
 https://matplotlib.org/stable/tutorials/introductory/customizing.html
 """
-
+from typing import Any
 # =============================================================================
-# ---- Styles ( default: `matplotlib.rcdefaults()` )
+# MARK: Styles (default: `matplotlib.rcdefaults()`)
 # =============================================================================
-common_style = {
+common_style: dict[str, Any] = {
     "interactive": False,
     "savefig.dpi": 120,
     
@@ -66,7 +64,7 @@ common_style = {
 #    "ytick.minor.visible": True,
 }
 
-light_style = common_style.copy()
+light_style: dict[str, Any] = common_style.copy()
 light_style.update({
     "text.color":'black',
     
@@ -92,7 +90,7 @@ light_style.update({
     "ytick.color": '#1A1A1A',
 })
 
-dark_style = common_style.copy()
+dark_style: dict[str, Any] = common_style.copy()
 dark_style.update({
     "text.color": 'white',
     
@@ -119,5 +117,5 @@ dark_style.update({
 })
 
 
-RC = {"light": light_style, "dark": dark_style}
+RC: dict[str, dict[str, Any]] = {"light": light_style, "dark": dark_style}
 

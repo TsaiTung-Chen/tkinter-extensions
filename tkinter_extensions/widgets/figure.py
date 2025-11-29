@@ -1,13 +1,14 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Created on Sat Dec 28 21:39:51 2024
-
 @author: tungchentsai
 """
-
-from __future__ import annotations
-from typing import Any, Literal, Callable, Iterable, NamedTuple
+from types import NoneType
+from typing import (
+    Any, Self, Literal, Iterable, NamedTuple, Final,
+    overload, cast
+)
+from collections.abc import Callable, Sequence
+import copy
 import tkinter as tk
 from tkinter.font import Font
 from copy import deepcopy
@@ -16,72 +17,84 @@ from itertools import cycle as Cycle
 from decimal import Decimal, ROUND_FLOOR, ROUND_CEILING
 
 import numpy as np
-from numpy.typing import NDArray, ArrayLike
-import ttkbootstrap as ttk
+from numpy.typing import NDArray
+import ttkbootstrap as tb
+from ttkbootstrap.style import ThemeDefinition
 
 from tkinter_extensions import variables as vrb
-from tkinter_extensions.constants import (
-    Int, IntFloat, Float, Dimension,
+from tkinter_extensions._constants import (
     MLEFTPRESS, MLEFTMOTION, MLEFTRELEASE,
     MRIGHTPRESS, MRIGHTMOTION, MRIGHTRELEASE, MMOTION,
-    DRAWSTARTED, DRAWENDED
+    DRAWSTARTED, DRAWSUCCEEDED, DRAWFAILED, DRAWENDED,
+    Int, _Int, IntFloat, _IntFloat, Float, ScreenUnits, _ScreenUnits,
+    Anchor, _Anchor, NpInt, _NpInt, NpFloat, _NpFloat, _NpIntFloat,
+    NPFINFO
 )
-from tkinter_extensions.utils import defer, unbind, contrast_color
+from tkinter_extensions.utils import (
+    DropObject, mixin_base, to_pixels, defer, unbind, contrast_color
+)
 from tkinter_extensions.widgets.scrolled import ScrolledCanvas
 from tkinter_extensions.widgets._others import UndockedFrame, ToolTip
 from tkinter_extensions.widgets._figure_config import STYLES
 
-_ANCHORS = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
-_NP_FLOAT = np.float64
-_NP_FINFO = np.finfo(_NP_FLOAT)
-_PMIN, _MIN, _MAX = (_NP_FINFO.smallest_normal, _NP_FINFO.min, _NP_FINFO.max)
-_DMIN, _DMAX = (_NP_FLOAT(-1e+10), _NP_FLOAT(+1e+10))
+
+_AXISSIDES = ('r', 'b', 'l', 't')  # right, bottom, left, top
+_XAXISSIDES = ('b', 't')  # bottom, top
+_YAXISSIDES = ('r', 'l')  # right, left
+_ANCHORS = _Anchor.__args__
+_STATES = ('normal', 'hidden', 'disabled')
+_WEIGHTS = ('normal', 'bold')
+_SLANTS = ('roman', 'italic')
+
+_TINY = NPFINFO.smallest_normal  # smallest positive floating-point normal number
+_MIN, _MAX = (NPFINFO.min, NPFINFO.max)  # numpy float limits
+_DMIN, _DMAX = (_NpFloat(-1e+10), _NpFloat(+1e+10))  # data limits
+_INF = _NpFloat(np.inf)  # numpy infinity
+
+#TODO: apply `match/case`
 # =============================================================================
-# ---- Helpers
+# MARK: Helpers
 # =============================================================================
-def _cleanup_tk_attributes(obj):
+def _cleanup_tk_attributes(obj: Any) -> None:
     for name, attr in list(vars(obj).items()):
-        if isinstance(attr, (tk.Variable, tk.Image, _BaseElement)):
+        if isinstance(attr, (tk.Variable, tk.Image, _CanvasFundamentals)):
             delattr(obj, name)
 
 
-def _to_px(
-        root: tk.Tk,
-        dimension: Dimension | ArrayLike | None
-) -> float | None | tuple[float | None, ...]:
-    assert isinstance(root, tk.Tk), root
-    
-    _winfo_fpixels = root.winfo_fpixels
-    _to_pixels = lambda d: round(_winfo_fpixels(d))
-    
-    if dimension is None:
-        return None
-    elif isinstance(dimension, (str, IntFloat)):
-        return _to_pixels(dimension)
-    return tuple( None if d is None else _to_pixels(d) for d in dimension )
-
-
+#TODO: `sticky` => `anchor`; no 'center' in `sticky`
+@overload
 def _get_sticky_p(
-        direction: Literal['x', 'y'],
-        start: IntFloat,
-        stop: IntFloat,
-        sticky: str,
-        pad: IntFloat | tuple[IntFloat, IntFloat]
-) -> tuple[Int, Literal['n', 'e', 's', 'w', '']]:  # returns (position, anchor)
+    direction: Literal['x'],
+    start: IntFloat,
+    stop: IntFloat,
+    sticky: str,
+    pad: IntFloat | tuple[IntFloat, IntFloat]
+) -> tuple[int, Literal['e', 'w', '']]: ...
+@overload
+def _get_sticky_p(
+    direction: Literal['y'],
+    start: IntFloat,
+    stop: IntFloat,
+    sticky: str,
+    pad: IntFloat | tuple[IntFloat, IntFloat]
+) -> tuple[int, Literal['n', 's', '']]: ...
+def _get_sticky_p(
+    direction, start, stop, sticky, pad
+) -> tuple[int, Literal['n', 'e', 's', 'w', '']]:  # returns (position, anchor)
     assert direction in ('x', 'y'), direction
-    assert isinstance(start, IntFloat), start
-    assert isinstance(stop, IntFloat), stop
+    assert isinstance(start, _IntFloat), start
+    assert isinstance(stop, _IntFloat), stop
     assert start <= stop, (start, stop)
     assert isinstance(sticky, str), sticky
     assert sticky != '', sticky
     assert sticky == 'center' or set(sticky).issubset('nesw'), sticky
-    assert isinstance(pad, (IntFloat, tuple)), pad
+    assert isinstance(pad, (_IntFloat, tuple)), pad
     
     lower, upper = ('w', 'e') if direction == 'x' else ('n', 's')
-    if isinstance(pad, IntFloat):
+    if isinstance(pad, _IntFloat):
         pad = (pad, pad)
     else:  # tuple
-        assert len(pad) == 2 and all( isinstance(p, IntFloat) for p in pad ), pad
+        assert len(pad) == 2 and all( isinstance(p, _IntFloat) for p in pad ), pad
     
     start2 = start + pad[0]
     stop2 = stop - pad[1]
@@ -89,42 +102,39 @@ def _get_sticky_p(
         start, stop = start2, stop2
     
     if start > stop or sticky == 'center':
-        return (start + stop) / 2., ''
+        return int((start + stop) / 2.), ''
     
     if lower in sticky:
         if upper in sticky:
-            return (start + stop) / 2., ''
-        else:
-            return start, lower
-    else:
-        if upper in sticky:
-            return stop, upper
-        else:
-            return (start + stop) / 2., ''
+            return int((start + stop) / 2.), ''
+        return int(start), lower
+    
+    # `lower` not in `sticky`
+    if upper in sticky:
+        return int(stop), upper
+    return int((start + stop) / 2.), ''
 
 
-def _get_sticky_xy(  # returns (x, y, anchor)
-    xys: tuple[Dimension, Dimension, Dimension, Dimension],
+def _get_sticky_xy(
+    xys: tuple[IntFloat, IntFloat, IntFloat, IntFloat],
     sticky: str,
-    padx: Dimension | tuple[Dimension, Dimension],
-    pady: Dimension | tuple[Dimension, Dimension]
-) -> tuple[IntFloat, IntFloat, Literal['n', 'e', 's', 'w', '']]:
+    padx: IntFloat | tuple[IntFloat, IntFloat],
+    pady: IntFloat | tuple[IntFloat, IntFloat]
+) -> tuple[IntFloat, IntFloat, Anchor]:  # returns (x, y, anchor)
     x1, y1, x2, y2 = xys
-    x, anchor_x = _get_sticky_p(
-        'x', x1, x2, sticky=sticky, pad=padx
-    )
-    y, anchor_y = _get_sticky_p(
-        'y', y1, y2, sticky=sticky, pad=pady
-    )
+    x, anchor_x = _get_sticky_p('x', x1, x2, sticky=sticky, pad=padx)
+    y, anchor_y = _get_sticky_p('y', y1, y2, sticky=sticky, pad=pady)
+    
     if (anchor := anchor_y + anchor_x) == '':
         anchor = 'center'
+    assert anchor in _ANCHORS, anchor
     
     return (x, y, anchor)
 
 
 def _drop_consecutive_duplicates(
-        xs: NDArray[IntFloat], ys: NDArray[IntFloat]
-) -> NDArray[IntFloat]:
+    xs: NDArray[_NpIntFloat], ys: NDArray[_NpIntFloat]
+) -> NDArray[_NpIntFloat]:
     xy = np.asarray([xs, ys])
     assert xy.ndim == 2, xy.shape
     
@@ -139,7 +149,9 @@ def _drop_consecutive_duplicates(
     )
 
 
-def _drop_linearly_redundant_points(xy: NDArray[IntFloat]) -> NDArray[IntFloat]:
+def _drop_linearly_redundant_points(
+    xy: NDArray[_NpIntFloat]
+) -> NDArray[_NpIntFloat]:
     """
     Simplifies a series of points based on the perpendicular distance. Drop the
     points having a 0 perpendicular distance.
@@ -179,7 +191,7 @@ def _drop_linearly_redundant_points(xy: NDArray[IntFloat]) -> NDArray[IntFloat]:
     )
 
 
-def _cutoff_z_patterns(xy: NDArray[IntFloat]) -> NDArray[IntFloat]:
+def _cutoff_z_patterns(xy: NDArray[_NpIntFloat]) -> NDArray[_NpIntFloat]:
     """
     Z patterns usually result from rounding the points (x, y) from a tilt
     line segment. For example,
@@ -214,8 +226,10 @@ def _cutoff_z_patterns(xy: NDArray[IntFloat]) -> NDArray[IntFloat]:
             du1_idc.append(_du1_idc)
         du1_idc = np.concat(du1_idc)
         
-        z_pattern = (dvp[du1_idc - 1] & dvp[du1_idc + 1]) \
-                  | (dvn[du1_idc - 1] & dvn[du1_idc + 1])
+        z_pattern = (
+            (dvp[du1_idc - 1] & dvp[du1_idc + 1])
+            | (dvn[du1_idc - 1] & dvn[du1_idc + 1])
+        )
         
         return du1_idc[z_pattern]
     #> end of _find_z_patterns()
@@ -249,38 +263,55 @@ class ZorderNotFoundError(RuntimeError):
 
 
 class _PlotView(NamedTuple):
-    plot: _Plot
-    view: dict[str, tuple[Any, Any]]
+    plot: '_Plot'
+    view: dict[Literal['r', 'b', 'l', 't'], tuple[Any, Any]]
     
     # The `__new__()` of `NamedTuple` can't be overwritten, so we define `make()`
     # instead. `make()` will be called when a instance is being created.
     @classmethod
-    def make(cls, plot: _Plot, view: dict[str, tuple[Any, Any]]):
+    def make(
+        cls,
+        plot: '_Plot',
+        view: dict[Literal['r', 'b', 'l', 't'], tuple[Any, Any]]
+    ) -> Self:
         assert isinstance(plot, _Plot), plot
         assert isinstance(view, dict), view
-        assert tuple(view) == ('r', 'b', 'l', 't'), (view)
+        assert tuple(view) == _AXISSIDES, (view)
         
         for limits, margins in view.values():
             assert len(limits) == 2, limits
-            assert isinstance(limits[0], (IntFloat, type(None))), limits
-            assert isinstance(limits[1], (IntFloat, type(None))), limits
+            assert isinstance(limits[0], (_IntFloat, NoneType)), limits
+            assert isinstance(limits[1], (_IntFloat, NoneType)), limits
             assert len(margins) == 2, margins
-            assert isinstance(margins[0], (Dimension, type(None))), margins
-            assert isinstance(margins[1], (Dimension, type(None))), margins
+            assert isinstance(margins[0], (_ScreenUnits, NoneType)), margins
+            assert isinstance(margins[1], (_ScreenUnits, NoneType)), margins
         
         return cls(plot, view)
 
 
 class _ViewSet(tuple):
-    def __new__(cls, iterable: Iterable[_PlotView]):
+    def __new__(cls, iterable: Iterable[_PlotView]) -> Self:
         self = super().__new__(cls, iterable)
         assert all( isinstance(v, _PlotView) for v in self ), iterable
         return self
 
 
 class _ViewSetHistory:
+    def __init__(self, figure: 'Figure'):
+        self._figure: Figure = figure
+        self._step: int = -1
+        self._stack: list[_ViewSet] = []
+        self._update_toolbar_buttons()
+    
+    def __bool__(self) -> bool:
+        return bool(self._stack)
+    
+    def __getitem__(self, i: Int) -> _ViewSet:
+        assert isinstance(i, _Int), i
+        return self._stack[i]
+    
     @property
-    def step(self) -> int:
+    def step(self):
         return self._step
     
     @property
@@ -291,20 +322,7 @@ class _ViewSetHistory:
     def forwardable(self) -> bool:
         return 0 <= self._step < len(self._stack) - 1
     
-    def __init__(self, figure: Figure):
-        self._figure: Figure = figure
-        self._step: int = -1
-        self._stack: list[_ViewSet] = []
-        self._update_toolbar_buttons()
-    
-    def __bool__(self) -> bool:
-        return bool(self._stack)
-    
-    def __getitem__(self, i: Int) -> _ViewSet:
-        assert isinstance(i, Int), i
-        return self._stack[i]
-    
-    def _update_toolbar_buttons(self):
+    def _update_toolbar_buttons(self) -> None:
         if not (tb := getattr(self._figure, '_toolbar', None)):
             return
         
@@ -314,88 +332,94 @@ class _ViewSetHistory:
         state = 'normal' if self.forwardable else 'disabled'
         tb._next_bt.configure(state=state)
     
-    def add(self, v: _ViewSet):
+    def add(self, v: _ViewSet) -> None:
         assert isinstance(v, _ViewSet), v
         
         self._stack[:] = self._stack[:self._step+1] + [v]
         self._step += 1
         self._update_toolbar_buttons()
     
-    def replaced_by(self, iterable: Iterable):
+    def replaced_by(self, iterable: Iterable) -> None:
         new = list(iterable)
         assert all( isinstance(v, _ViewSet) for v in new ), new
         self._stack[:] = new
         self._step = len(self._stack) - 1
         self._update_toolbar_buttons()
     
-    def clear(self):
+    def clear(self) -> None:
         self.__init__(self._figure)
     
-    def drop_future(self):
+    def drop_future(self) -> None:
         self._stack[:] = self._stack[:self._step+1]
         self._update_toolbar_buttons()
     
-    def forward(self) -> Any:
+    def forward(self):
         assert self.forwardable, (self._step, self._stack)
         self._step += 1
         self._update_toolbar_buttons()
+        
         return self._stack[self._step]
     
-    def back(self) -> Any:
+    def back(self):
         assert self.backable, (self._step, self._stack)
         self._step -= 1
         self._update_toolbar_buttons()
+        
         return self._stack[self._step]
 
 
 class _BaseTransform1D:  # 1D transformation
-    def __eq__(self, obj) -> bool:
+    def __init__(self):
+        raise NotImplementedError
+    
+    def __eq__(self, obj: Any) -> bool:
         if type(self) != type(obj):
             return False
         return True
     
     def __call__(
-            self,
-            xs: IntFloat | NDArray[IntFloat]
-    ) -> NDArray[Float]:
-        assert isinstance(xs, (IntFloat, np.ndarray)), xs
+        self,
+        xs: IntFloat | NDArray[_NpIntFloat],
+        round_: bool = False
+    ) -> NDArray[_NpFloat]:
+        assert isinstance(xs, (_IntFloat, np.ndarray)), xs
+        assert round_ is False, '`round_` sould not be passed to base class method'
         
         xs = np.asarray(xs)
         dt = xs.dtype
-        assert any( np.issubdtype(dt, d) for d in IntFloat.__args__ ), xs.dtype
+        assert any( np.issubdtype(dt, d) for d in _IntFloat.__args__ ), xs.dtype
         
-        if not np.issubdtype(dt, np.floating):
-            xs = xs.astype(float)
-        
-        return xs
+        return xs.astype(_NpFloat)
     
-    def copy(self, *args, **kwargs):
+    def copy(self, *args, **kwargs) -> Self:
         raise NotImplementedError
     
     @classmethod
-    def from_points(cls, *args, **kwargs):
+    def from_points(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
     
-    def get_inverse(self):
+    def get_inverse(self) -> '_BaseTransform1D':
         raise NotImplementedError
 
 
 class _FirstOrderPolynomial(_BaseTransform1D):
     def __init__(self, c0: IntFloat = 0., c1: IntFloat = 1.):
-        assert isinstance(c0, IntFloat), c0
-        assert isinstance(c1, IntFloat), c1
+        assert isinstance(c0, _IntFloat), c0
+        assert isinstance(c1, _IntFloat), c1
         
-        self._c0: np.float64 = np.float64(c0)
-        self._c1: np.float64 = np.float64(c1)
+        self._c0: NpFloat = _NpFloat(c0)
+        self._c1: NpFloat = _NpFloat(c1)
     
-    def __eq__(self, obj) -> bool:
-        return super().__eq__(obj) and self._c0 == obj._c0 and self._c1 == obj._c1
+    def __eq__(self, obj: Any) -> bool:
+        return (
+            super().__eq__(obj) and self._c0 == obj._c0 and self._c1 == obj._c1
+        )
     
     def __call__(
-            self,
-            xs: IntFloat | NDArray[IntFloat],
-            round_: bool = False
-    ) -> Float | NDArray[Float]:
+        self,
+        xs: IntFloat | NDArray[_NpIntFloat],
+        round_: bool = False
+    ) -> NDArray[_NpFloat]:
         xs = super().__call__(xs)
         ys = self._c0 + self._c1 * xs  # y(x) = c0 + c1 * x (0D or 1D array)
         
@@ -405,12 +429,16 @@ class _FirstOrderPolynomial(_BaseTransform1D):
         
         return ys
     
-    def copy(self) -> _FirstOrderPolynomial:
+    def copy(self) -> Self:
         return type(self)(c0=self._c0, c1=self._c1)
     
     @classmethod
-    def from_points(cls, xs: ArrayLike, ys: ArrayLike) -> _FirstOrderPolynomial:
-        xs, ys = np.asarray(xs), np.asarray(ys)
+    def from_points(
+        cls,
+        xs: Sequence[IntFloat] | NDArray[_NpIntFloat],
+        ys: Sequence[IntFloat] | NDArray[_NpIntFloat],
+    ) -> Self:
+        xs, ys = np.asarray(xs, dtype=_NpFloat), np.asarray(ys, dtype=_NpFloat)
         assert xs.shape == ys.shape == (2,), [xs.shape, ys.shape]
         
         # y(x) = c0 + c1 * x
@@ -419,7 +447,7 @@ class _FirstOrderPolynomial(_BaseTransform1D):
         
         return cls(c0=c0, c1=c1)
     
-    def get_inverse(self) -> _FirstOrderPolynomial:
+    def get_inverse(self) -> '_FirstOrderPolynomial':
         assert self._c1 != 0., self._c1
         
         c1_inv = 1. / self._c1  # c1_inv = 1 / c1
@@ -430,30 +458,32 @@ class _FirstOrderPolynomial(_BaseTransform1D):
 
 class _Logarithm(_BaseTransform1D):
     def __init__(
-            self,
-            base: IntFloat = 10.,
-            c0: IntFloat = 0.,
-            c1: IntFloat = 1.
+        self,
+        base: IntFloat = 10.,
+        c0: IntFloat = 0.,
+        c1: IntFloat = 1.
     ):
-        assert isinstance(base, IntFloat), base
-        assert isinstance(c0, IntFloat), c0
-        assert isinstance(c1, IntFloat), c1
+        assert isinstance(base, _IntFloat), base
+        assert isinstance(c0, _IntFloat), c0
+        assert isinstance(c1, _IntFloat), c1
         assert base > 0., base
         
-        self._c0: np.float64 = np.float64(c0)
-        self._c1: np.float64 = np.float64(c1)
-        self._base: np.float64 = np.float64(base)
-        self._log2_base: np.float64 = np.log2(self._base)
+        self._c0: NpFloat = _NpFloat(c0)
+        self._c1: NpFloat = _NpFloat(c1)
+        self._base: NpFloat = _NpFloat(base)
+        self._log2_base: NpFloat = np.log2(self._base)
     
-    def __eq__(self, obj) -> bool:
-        return super().__eq__(obj) and self._base == obj._base and \
-            self._c0 == obj._c0 and self._c1 == obj._c1
+    def __eq__(self, obj: Any) -> bool:
+        return (
+            super().__eq__(obj) and self._base == obj._base
+            and self._c0 == obj._c0 and self._c1 == obj._c1
+        )
     
     def __call__(
-            self,
-            xs: IntFloat | NDArray[IntFloat],
-            round_: bool = False
-    ) -> NDArray[Float]:
+        self,
+        xs: IntFloat | NDArray[_NpIntFloat],
+        round_: bool = False
+    ) -> NDArray[_NpFloat]:
         xs = super().__call__(xs)
         
         if self._base == 2.:
@@ -471,16 +501,20 @@ class _Logarithm(_BaseTransform1D):
         
         return ys
     
-    def copy(self) -> _Logarithm:
+    def copy(self) -> Self:
         return type(self)(base=self._base, c0=self._c0, c1=self._c1)
     
     @classmethod
     def from_points(
-            cls, xs: ArrayLike, ys: ArrayLike, base: IntFloat = 10.
-    ) -> _Logarithm:
+        cls,
+        xs: Sequence[IntFloat] | NDArray[_NpIntFloat],
+        ys: Sequence[IntFloat] | NDArray[_NpIntFloat],
+        base: IntFloat = 10.
+    ) -> Self:
         assert base > 0., base
         
         # y(x) = c1 * log(x) / log(base) + c0
+        xs = np.asarray(xs, dtype=_NpFloat)
         if base == 2.:
             log_xs = np.log2(xs)
         elif base == np.e:
@@ -490,41 +524,46 @@ class _Logarithm(_BaseTransform1D):
         else:
             log_xs = np.log2(xs) / np.log2(base)
         
+        ys = np.asarray(ys, dtype=_NpFloat)
+        assert len(log_xs) == len(ys) == 2, (xs, ys)
+        
         c1 = (ys[1] - ys[0]) / (log_xs[1] - log_xs[0])  # c1 = (y1 - y0) / (x1 - x0)
         c0 = ys[0] - c1 * log_xs[0]  # c0 = y0 - c1 * x0
         
         return cls(base=base, c0=c0, c1=c1)
     
-    def get_inverse(self) -> _InverseLogarithm:
+    def get_inverse(self) -> '_InverseLogarithm':
         return _InverseLogarithm(base=self._base, c0=self._c0, c1=self._c1)
 
 
 class _InverseLogarithm(_BaseTransform1D):
     def __init__(
-            self,
-            base: IntFloat = 10.,
-            c0: IntFloat = 0.,
-            c1: IntFloat = 1.
+        self,
+        base: IntFloat = 10.,
+        c0: IntFloat = 0.,
+        c1: IntFloat = 1.
     ):
-        assert isinstance(base, IntFloat), base
-        assert isinstance(c0, IntFloat), c0
-        assert isinstance(c1, IntFloat), c1
+        assert isinstance(base, _IntFloat), base
+        assert isinstance(c0, _IntFloat), c0
+        assert isinstance(c1, _IntFloat), c1
         assert base > 0., base
         assert c1 != 0., c1
         
-        self._c0: np.float64 = np.float64(c0)
-        self._c1: np.float64 = np.float64(c1)
-        self._base: np.float64 = np.float64(base)
+        self._c0: NpFloat = _NpFloat(c0)
+        self._c1: NpFloat = _NpFloat(c1)
+        self._base: NpFloat = _NpFloat(base)
     
     def __eq__(self, obj) -> bool:
-        return super().__eq__(obj) and self._base == obj._base and \
-            self._c0 == obj._c0 and self._c1 == obj._c1
+        return (
+            super().__eq__(obj) and self._base == obj._base
+            and self._c0 == obj._c0 and self._c1 == obj._c1
+        )
     
     def __call__(
-            self,
-            xs: IntFloat | NDArray[IntFloat],
-            round_: bool = False
-    ) -> NDArray[Float]:
+        self,
+        xs: IntFloat | NDArray[_NpIntFloat],
+        round_: bool = False
+    ) -> NDArray[_NpFloat]:
         xs = super().__call__(xs)
         ys = self._base ** ((xs - self._c0) / self._c1)
         
@@ -534,7 +573,7 @@ class _InverseLogarithm(_BaseTransform1D):
         
         return ys
     
-    def copy(self) -> _InverseLogarithm:
+    def copy(self) -> Self:
         return type(self)(base=self._base, c0=self._c0, c1=self._c1)
     
     def get_inverse(self) -> _Logarithm:
@@ -545,50 +584,67 @@ class _Transform2D:  # 2D transformation
     _boundary_extension: Float = 5.
     
     def __init__(
-            self,
-            x_transform: _BaseTransform1D = _FirstOrderPolynomial(),
-            y_transform: _BaseTransform1D = _FirstOrderPolynomial(),
-            inp_xbounds: ArrayLike | None = None,   # input xlimits
-            inp_ybounds: ArrayLike | None = None,   # input ylimits
-            out_xbounds: ArrayLike = [-np.inf, np.inf],   # output xlimits
-            out_ybounds: ArrayLike = [-np.inf, np.inf]    # output ylimits
+        self,
+        x_transform: _BaseTransform1D = _FirstOrderPolynomial(),
+        y_transform: _BaseTransform1D = _FirstOrderPolynomial(),
+        inp_xbounds:
+            Sequence[IntFloat]
+            | NDArray[_NpIntFloat]
+            | None
+            = None,   # input xlimits
+        inp_ybounds:
+            Sequence[IntFloat]
+            | NDArray[_NpIntFloat]
+            | None
+            = None,   # input ylimits
+        out_xbounds:
+            Sequence[IntFloat]
+            | NDArray[_NpIntFloat]
+            = [-_INF, _INF],   # output xlimits
+        out_ybounds:
+            Sequence[IntFloat]
+            | NDArray[_NpIntFloat]
+            = [-_INF, _INF]    # output ylimits
     ):
         assert isinstance(x_transform, _BaseTransform1D), x_transform
         assert isinstance(y_transform, _BaseTransform1D), y_transform
         
         if inp_xbounds is None:
             if isinstance(x_transform, _Logarithm):
-                inp_xbounds = [_PMIN, np.inf]
+                inp_xbounds = [_TINY, _INF]
             else:
-                inp_xbounds = [-np.inf, np.inf]
+                inp_xbounds = [-_INF, _INF]
         if inp_ybounds is None:
             if isinstance(x_transform, _Logarithm):
-                inp_ybounds = [_PMIN, np.inf]
+                inp_ybounds = [_TINY, _INF]
             else:
-                inp_ybounds = [-np.inf, np.inf]
+                inp_ybounds = [-_INF, _INF]
         
-        inp_xbounds = np.array(inp_xbounds, dtype=float)
+        inp_xbounds = np.array(inp_xbounds, dtype=_NpFloat)
         if isinstance(x_transform, _Logarithm):
-            inp_xbounds[inp_xbounds < _PMIN] = _PMIN
-        inp_ybounds = np.array(inp_ybounds, dtype=float)
+            inp_xbounds[inp_xbounds < _TINY] = _TINY
+        inp_ybounds = np.array(inp_ybounds, dtype=_NpFloat)
         if isinstance(y_transform, _Logarithm):
-            inp_ybounds[inp_ybounds < _PMIN] = _PMIN
+            inp_ybounds[inp_ybounds < _TINY] = _TINY
+        
+        out_xbounds = np.asarray(out_xbounds, dtype=_NpFloat)
+        out_ybounds = np.asarray(out_ybounds, dtype=_NpFloat)
         
         self._x_tf: _BaseTransform1D = x_transform
         self._y_tf: _BaseTransform1D = y_transform
-        self._inp_xlimits = _, _ = sorted(inp_xbounds)
-        self._inp_ylimits = _, _ = sorted(inp_ybounds)
-        self._out_xlimits = _, _ = sorted(out_xbounds)
-        self._out_ylimits = _, _ = sorted(out_ybounds)
+        self._inp_xlimits: tuple[_NpFloat, _NpFloat] = tuple(sorted(inp_xbounds))
+        self._inp_ylimits: tuple[_NpFloat, _NpFloat] = tuple(sorted(inp_ybounds))
+        self._out_xlimits: tuple[_NpFloat, _NpFloat] = tuple(sorted(out_xbounds))
+        self._out_ylimits: tuple[_NpFloat, _NpFloat] = tuple(sorted(out_ybounds))
     
     def __call__(
-            self,
-            xs: IntFloat | NDArray[IntFloat],
-            ys: IntFloat | NDArray[IntFloat],
-            round_: bool = False,
-            clip: bool = True,
-            extend_boundaries: bool = True  # extend output boundaries
-    ) -> NDArray[Float]:
+        self,
+        xs: IntFloat | NDArray[_NpIntFloat],
+        ys: IntFloat | NDArray[_NpIntFloat],
+        round_: bool = False,
+        clip: bool = True,
+        extend_boundaries: bool = True  # extend output boundaries
+    ) -> tuple[NDArray[_NpFloat], NDArray[_NpFloat]]:
         xs, ys = np.array(xs), np.array(ys)  # copy
         assert isinstance(xs, np.ndarray), xs
         assert isinstance(xs, np.ndarray), xs
@@ -612,33 +668,32 @@ class _Transform2D:  # 2D transformation
                 xs, ys, limits='output', extend_boundaries=extend_boundaries
             )
         
-        xy = np.asarray([xs, ys])
-        if scalar:
-            return xy.ravel()
-        return xy
+        return (xs, ys)
     
     def _clip(
-            self,
-            xs: IntFloat | NDArray[IntFloat],
-            ys: IntFloat | NDArray[IntFloat],
-            limits: Literal['input', 'output'],
-            extend_boundaries: bool = True  # extend output boundaries
-    ) -> tuple[NDArray[Float], NDArray[Float]]:
+        self,
+        xs: IntFloat | NDArray[_NpIntFloat],
+        ys: IntFloat | NDArray[_NpIntFloat],
+        limits: Literal['input', 'output'],
+        extend_boundaries: bool = True  # extend output boundaries
+    ) -> tuple[NDArray[_NpFloat], NDArray[_NpFloat]]:
         def _restrict(
-                xs: NDArray[Float], ys: NDArray[Float], u: Literal['x', 'y']
-        ) -> tuple[NDArray[Float], NDArray[Float]]:
+            xs: NDArray[_NpFloat], ys: NDArray[_NpFloat], u: Literal['x', 'y']
+        ) -> tuple[NDArray[_NpFloat], NDArray[_NpFloat]]:
             assert u in ('x', 'y'), u
             
             if u == 'x':
                 us, vs = xs.copy(), ys.copy()
                 umin, umax = (xmin, xmax)
-                _interp = lambda i, x: (ys[i+1]-ys[i])/(xs[i+1]-xs[i]) \
-                    * (x-xs[i]) + ys[i]
+                _interp: Callable[[NpInt, NpFloat], NpFloat] = lambda i, x: (
+                    (ys[i+1]-ys[i])/(xs[i+1]-xs[i]) * (x-xs[i]) + ys[i]
+                )
             else:  # u == 'y'
                 us, vs = ys.copy(), xs.copy()
                 umin, umax = (ymin, ymax)
-                _interp = lambda i, y: (xs[i+1]-xs[i])/(ys[i+1]-ys[i]) \
-                    * (y-ys[i]) + xs[i]
+                _interp: Callable[[NpInt, NpFloat], NpFloat] = lambda i, y: (
+                    (xs[i+1]-xs[i])/(ys[i+1]-ys[i]) * (y-ys[i]) + xs[i]
+                )
             
             us, vs = _interpolate(
                 us, vs, retain=umin <= us, ulimit=umin, interp=_interp
@@ -660,15 +715,19 @@ class _Transform2D:  # 2D transformation
         #> end of _restrict()
         
         def _interpolate(
-                us: NDArray[Float],
-                vs: NDArray[Float],
-                retain: NDArray[bool],
-                ulimit: Float,
-                interp: Callable
-        ) -> tuple[NDArray[Float], NDArray[Float]]:
-            crossing = np.diff(retain.astype(int))
+            us: NDArray[_NpFloat],
+            vs: NDArray[_NpFloat],
+            retain: NDArray[np.bool],
+            ulimit: Float,
+            interp: Callable[[NpInt, NpFloat], NpFloat] 
+        ) -> tuple[NDArray[_NpFloat], NDArray[_NpFloat]]:
+            ulimit = _NpFloat(ulimit)
+            crossing: NDArray[_NpInt] = np.diff(retain.astype(_NpInt))
             
-            us_inserts, vs_inserts = [], []
+            us_inserts: list[tuple[NpInt, NpFloat]] = []
+            vs_inserts: list[tuple[NpInt, NpFloat]] = []
+            i: NpInt
+            j: NpInt
             for j in (crossing == +1).nonzero()[0]:
                 # index: j        k = j+1
                 # valid: False    True
@@ -680,9 +739,9 @@ class _Transform2D:  # 2D transformation
                 if retain[j]:
                     # index: i       j = i+1            k = i+2
                     # valid: True    (False =>) True    True
-                    j2 = retain[:j].sum()
-                    us_inserts.append([j2, ulimit])
-                    vs_inserts.append([j2, interp(i, ulimit)])
+                    j2: NpInt = retain[:j].sum()
+                    us_inserts.append((j2, ulimit))
+                    vs_inserts.append((j2, interp(i, ulimit)))
                 else:
                     # index: i       j = i+1            k = i+2
                     # valid: True    False (=> True)    False
@@ -692,11 +751,13 @@ class _Transform2D:  # 2D transformation
             
             us, vs = us[retain], vs[retain]
             if us_inserts:
-                us = np.insert(us, *zip(*us_inserts))
-                vs = np.insert(vs, *zip(*vs_inserts))
+                us = np.insert(us, *np.asarray(us_inserts, dtype=object).T)
+                vs = np.insert(vs, *np.asarray(vs_inserts, dtype=object).T)
             
             return us, vs
         #> end of _interpolate()
+        
+        xs, ys = np.asarray(xs, dtype=_NpFloat), np.asarray(ys, dtype=_NpFloat)
         
         assert limits in ('input', 'output'), limits
         assert xs.shape == ys.shape, [xs.shape, ys.shape]
@@ -723,8 +784,8 @@ class _Transform2D:  # 2D transformation
         
         return xs, ys
     
-    def get_inverse(self) -> _Transform2D:
-        return _Transform2D(
+    def get_inverse(self) -> Self:
+        return type(self)(
             x_transform=self._x_tf.get_inverse(),
             y_transform=self._y_tf.get_inverse(),
             inp_xbounds=self._out_xlimits,
@@ -734,64 +795,86 @@ class _Transform2D:  # 2D transformation
         )
 
 
-class _BaseElement:
-    def __init__(self, canvas: tk.Canvas, tag: str = ''):
-        assert isinstance(canvas, tk.Canvas), canvas
-        assert isinstance(canvas._figure, Figure), canvas._figure
+# =============================================================================
+# MARK: CanvasFundamentals
+# =============================================================================
+class _CanvasFundamentals[C: _BaseCanvas]:
+    def __init__(self, canvas: C, tag: str = ''):
+        assert isinstance(canvas, (_BaseCanvas)), canvas
         assert isinstance(tag, str), tag
         
-        self._root = canvas._root
-        self._canvas: tk.Canvas = canvas
-        self._figure: Figure = canvas._figure
+        self._root: Callable[[], tb.Window] = canvas._root
+        self._canvas: C = canvas
         self._tag: str = tag
+    
+    @property
+    def canvas(self):
+        return self._canvas
+    
+    @property
+    def figure(self):
+        return self._canvas.figure
     
     def __del__(self):
         _cleanup_tk_attributes(self)
     
-    def _to_px(self, dimension: Dimension) -> float | tuple[float, ...]:
-        return _to_px(self._root(), dimension)
+    @overload
+    def _to_px(self, dimension: ScreenUnits) -> int: ...
+    @overload
+    def _to_px(self, dimension: None) -> None: ...
+    @overload
+    def _to_px(self, dimension: tuple[ScreenUnits, ...]) -> tuple[int, ...]: ...
+    @overload
+    def _to_px(
+        self, dimension: tuple[ScreenUnits | None, ...]
+    ) -> tuple[int | None, ...]: ...
+    def _to_px(self, dimension):
+        return to_pixels(self._root(), dimension)
     
-    def draw(self):
+    def draw(self) -> None:
         raise NotImplementedError
 
 
 # =============================================================================
-# ---- Plot Artists
+# MARK: Canvas Artists
 # =============================================================================
-class _BaseArtist(_BaseElement):
+class _BaseArtist[C: _BaseCanvas](_CanvasFundamentals[C]):
     _name: str
     
     def __init__(
-            self,
-            *args,
-            state: Literal['normal', 'hidden', 'disabled'] = 'normal',
-            label: str | None = None,
-            antialias: bool = False,
-            antialias_bg: Callable[[], str] | None = None,
-            hover: bool = False,
-            transform: _Transform2D = _Transform2D(),
-            movable: bool = False,
-            resizable: bool = False,
-            extra_tags: tuple[str, ...] = (),
-            x_side: Literal['b', 't'] | None = None,
-            y_side: Literal['l', 'r'] | None = None,
-            **kwargs
+        self,
+        *args,
+        state: Literal['normal', 'hidden', 'disabled'] = 'normal',
+        label: str | None = None,
+        antialias: bool = False,
+        antialias_bg: Callable[[], str] | None = None,
+        hover: bool = False,
+        transform: _Transform2D = _Transform2D(),
+        movable: bool = False,
+        resizable: bool = False,
+        extra_tags: tuple[str, ...] = (),
+        xaxisside: Literal['b', 't'] | None = None,
+        yaxisside: Literal['l', 'r'] | None = None,
+        **kwargs
     ):
-        assert x_side in ('b', 't', None), x_side
-        assert y_side in ('l', 'r', None), y_side
-        assert isinstance(label, (str, type(None))), label
+        assert state in _STATES, (state, _STATES)
+        assert isinstance(label, (str, NoneType)), label
+        assert isinstance(antialias, bool), antialias
+        assert antialias_bg is None or callable(antialias_bg), antialias_bg
+        assert isinstance(hover, bool), hover
+        assert isinstance(transform, _Transform2D), transform
         assert isinstance(movable, bool), movable
         assert isinstance(resizable, bool), resizable
         assert isinstance(extra_tags, tuple), extra_tags
         assert all( isinstance(t, str) for t in extra_tags ), extra_tags
-        assert antialias_bg is None or callable(antialias_bg), antialias_bg
-        assert isinstance(hover, bool), hover
+        assert xaxisside in (*_XAXISSIDES, None), (xaxisside, _XAXISSIDES)
+        assert yaxisside in (*_YAXISSIDES, None), (yaxisside, _YAXISSIDES)
         
         super().__init__(*args, **kwargs)
         
         self._req_label: str | None = label
         self._req_transform: _Transform2D = transform
-        self._req_coords: list[Dimension] = []
+        self._req_coords: tuple[ScreenUnits, ...] = ()
         self._req_state: Literal['normal', 'hidden', 'disabled'] = 'normal'
         self._req_zorder: float | None = None
         self._req_style: dict[str, Any] = {}
@@ -806,12 +889,12 @@ class _BaseArtist(_BaseElement):
         tags = tuple(dict.fromkeys(tags))  # ordered and unique elements
         
         self._tags: tuple[str, ...] = tags
-        self._x_side: Literal['b', 't'] | None = x_side
-        self._y_side: Literal['l', 'r'] | None = y_side
-        self._antialias_enabled: bool = bool(antialias)
+        self._xaxisside: Literal['b', 't'] | None = xaxisside
+        self._yaxisside: Literal['l', 'r'] | None = yaxisside
+        self._antialias_enabled: bool = antialias
         self._antialias_bg: Callable[[], str] | None = antialias_bg
         self._hover: bool = hover
-        self._last_coords: list[Int] = []
+        self._last_coords: tuple[float, ...] = ()
         self._id: int
         self._id_aa: int
         self._stale: bool
@@ -819,42 +902,62 @@ class _BaseArtist(_BaseElement):
     
     @property
     def _root_default_style(self) -> dict[str, Any]:
-        return self._figure._default_style[self._name]
+        return self.figure._default_style[self._name]
     
     @property
     def _default_style(self) -> dict[str, Any]:
-        return self._figure._default_style[self._tag]
+        return self.figure._default_style[self._tag]
+    
+    @property
+    def stale(self):
+        return self._stale
+    
+    @stale.setter
+    def stale(self, value: bool) -> None:
+        assert isinstance(value, bool), value
+        self._stale = value
     
     def __del__(self):
         self.delete()
     
-    def coords(self, *args, **kwargs) -> list[float]:
-        return self._canvas.coords(self._id, *args, **kwargs)
+    @overload
+    def coords(self) -> tuple[float, ...]: ...
+    @overload
+    def coords(self, args: Sequence[ScreenUnits], /) -> None: ...
+    @overload
+    def coords(
+        self, x1: ScreenUnits, y1: ScreenUnits, /, *args: ScreenUnits
+    ) -> None: ...
+    def coords(self, *args, **kwargs):
+        result = self._canvas.coords(self._id, *args, **kwargs)
+        if len(args) + len(kwargs) == 0:
+            assert isinstance(result, list), result
+            return tuple(result)
     
     def move(self, *args, **kwargs):
-        self._canvas.move(self._id, *args, **kwargs)
+        return self._canvas.move(self._id, *args, **kwargs)
     
     def moveto(self, *args, **kwargs):
-        self._canvas.move(self._id, *args, **kwargs)
+        return self._canvas.moveto(self._id, *args, **kwargs)
     
     def lift(self, *args, **kwargs):
-        self._canvas.tag_raise(self._id, *args, **kwargs)
+        return self._canvas.tag_raise(self._id, *args, **kwargs)
     
     def lower(self, *args, **kwargs):
-        self._canvas.tag_lower(self._id, *args, **kwargs)
+        return self._canvas.tag_lower(self._id, *args, **kwargs)
     
-    def itemconfigure(self, *args, **kwargs) -> Any:
+    def configure(self, *args, **kwargs):
         return self._canvas.itemconfigure(self._id, *args, **kwargs)
     
-    def cget(self, *args, **kwargs) -> Any:
+    def cget(self, *args, **kwargs) -> str:
         return self._canvas.itemcget(self._id, *args, **kwargs)
     
     def bbox(self) -> tuple[int, int, int, int] | None:
         return self._canvas.bbox(self._id)
     
-    def delete(self):
+    def delete(self) -> None:
         canvas = self._canvas
-        for side in (self._x_side, self._y_side):
+        for side in (self._xaxisside, self._yaxisside):
             if side is not None:
                 artists = getattr(canvas, f'_{side}artists')
                 try:
@@ -862,49 +965,48 @@ class _BaseArtist(_BaseElement):
                 except ValueError:
                     pass
         
-        canvas._zorder_tags.pop(self, None)
+        canvas.zorder_tags.pop(self, None)
         
         try:
             canvas.delete(self._id)
         except tk.TclError:
             pass
     
-    def set_transform(self, transform: _Transform2D | None):
-        assert isinstance(transform, (_Transform2D, type(None))), transform
+    def set_transform(self, transform: _Transform2D | None) -> None:
+        assert isinstance(transform, (_Transform2D, NoneType)), transform
         
         if transform is not None and transform != self._req_transform:
             self._req_transform = transform
             self._stale = True
     
-    def get_transform(self) -> _Transform2D:
+    def get_transform(self):
         return self._req_transform
     
-    def set_label(self, label: str | None = None):
-        assert isinstance(label, (str, type(None))), label
+    def set_label(self, label: str | None = None) -> None:
+        assert isinstance(label, (str, NoneType)), label
         
         if label is not None and label != self._req_label:
             self._req_label = label
     
-    def get_label(self) -> str | None:
+    def get_label(self):
         return self._req_label
     
-    def set_coords(self, *ps: Dimension):
-        assert all( isinstance(p, (Dimension, type(None))) for p in ps ), ps
+    def set_coords(self, *ps: ScreenUnits) -> None:
+        assert all( isinstance(p, (_ScreenUnits, NoneType)) for p in ps ), ps
         
         if ps is not None and ps != self._req_coords:
-            self._req_coords[:] = ps
+            self._req_coords = ps
             self._stale = True
     
-    def get_coords(self) -> list[float]:
+    def get_coords(self):
         return self.coords()
     
-    def _set_state(
-            self,
-            state: Literal['normal', 'hidden', 'disabled']
-    ):
-        assert state in ('normal', 'hidden', 'disabled')
+    def _apply_state(
+        self, state: Literal['normal', 'hidden', 'disabled']
+    ) -> None:
+        assert state in _STATES, (state, _STATES)
         
-        self.itemconfigure(state=state)
+        self.configure(state=state)
         
         canvas = self._canvas
         if self._antialias_enabled:
@@ -913,21 +1015,23 @@ class _BaseArtist(_BaseElement):
             canvas.itemconfigure(self._id_aa, state='hidden')
     
     def set_state(
-            self,
-            state: Literal['normal', 'hidden', 'disabled'] = None
-    ):
-        assert state in ('normal', 'hidden', 'disabled', None), state
+        self, state: Literal['normal', 'hidden', 'disabled'] | None
+    ) -> None:
+        assert state in (*_STATES, None), (state, _STATES)
         
         if state is not None and state != self._req_state:
             self._req_state = state
             self._stale = True
     
-    def get_state(self) -> str:
-        return self.cget('state')
+    def get_state(self) -> Literal['normal', 'hidden', 'disabled']:
+        state = self.cget('state')
+        assert state in ('normal', 'hidden', 'disabled'), state
+        
+        return state
     
-    def set_zorder(self, zorder: IntFloat | None = None):
-        assert isinstance(zorder, (IntFloat, type(None))), zorder
-        if (self._x_side or self._y_side) and zorder is not None and not (
+    def set_zorder(self, zorder: IntFloat | None = None) -> None:
+        assert isinstance(zorder, (_IntFloat, NoneType)), zorder
+        if (self._xaxisside or self._yaxisside) and zorder is not None and not (
                 1 <= zorder <= 100):
             raise ValueError(
                 'The `zorder` for a user-defined artist must satisfy '
@@ -944,10 +1048,10 @@ class _BaseArtist(_BaseElement):
                 return float(tag[7:])
         raise ZorderNotFoundError('Zorder has not been initialized yet.')
     
-    def get_zorder(self) -> float:
+    def get_zorder(self):
         return self._get_zorder(self._id)
     
-    def _update_zorder(self):  # update the zorder tag
+    def _update_zorder(self) -> None:  # update the zorder tag
         def _delete_zorder(oid: int):
             try:
                 old_zorder = self._get_zorder(oid)
@@ -964,79 +1068,79 @@ class _BaseArtist(_BaseElement):
         
         _delete_zorder(self._id)
         canvas.addtag_withtag(new_tag, self._id)
-        canvas._zorder_tags[self] = new_tag
+        canvas.zorder_tags[self] = new_tag
         
         if hasattr(self, '_id_aa'):
             _delete_zorder(self._id_aa)
             canvas.addtag_withtag(new_tag, self._id_aa)
     
-    def _bind(self, sequence: str, callback: Callable[[tk.Event], Any]):
+    def _bind(self, sequence: str, callback: Callable[[tk.Event], Any]) -> None:
         assert isinstance(sequence, str), sequence
-        assert isinstance(callback, (Callable, type(None))), callback
+        assert isinstance(callback, (Callable, NoneType)), callback
         
         self._canvas.tag_bind(self._id, sequence, callback)
         if hasattr(self, '_id_aa'):
             self._canvas.tag_bind(self._id_aa, sequence, callback)
     
-    def bind_enter(self, callback: Callable[[tk.Event], Any]):
+    def bind_enter(self, callback: Callable[[tk.Event], Any]) -> None:
         self._bind('<Enter>', callback)
     
-    def bind_leave(self, callback: Callable[[tk.Event], Any]):
+    def bind_leave(self, callback: Callable[[tk.Event], Any]) -> None:
         self._bind('<Leave>', callback)
     
-    def bind_motion(self, callback: Callable[[tk.Event], Any]):
+    def bind_motion(self, callback: Callable[[tk.Event], Any]) -> None:
         self._bind(MMOTION, callback)
     
-    def bind_leftpress(self, callback: Callable[[tk.Event], Any]):
+    def bind_leftpress(self, callback: Callable[[tk.Event], Any]) -> None:
         self._bind(MLEFTPRESS, callback)
     
-    def bind_leftmotion(self, callback: Callable[[tk.Event], Any]):
+    def bind_leftmotion(self, callback: Callable[[tk.Event], Any]) -> None:
         self._bind(MLEFTMOTION, callback)
     
-    def bind_leftrelease(self, callback: Callable[[tk.Event], Any]):
+    def bind_leftrelease(self, callback: Callable[[tk.Event], Any]) -> None:
         self._bind(MLEFTRELEASE, callback)
     
-    def bind_rightpress(self, callback: Callable[[tk.Event], Any]):
+    def bind_rightpress(self, callback: Callable[[tk.Event], Any]) -> None:
         self._bind(MRIGHTPRESS, callback)
     
-    def bind_rightmotion(self, callback: Callable[[tk.Event], Any]):
+    def bind_rightmotion(self, callback: Callable[[tk.Event], Any]) -> None:
         self._bind(MRIGHTMOTION, callback)
     
-    def bind_rightrelease(self, callback: Callable[[tk.Event], Any]):
+    def bind_rightrelease(self, callback: Callable[[tk.Event], Any]) -> None:
         self._bind(MRIGHTRELEASE, callback)
     
-    def _unbind(self, sequence: str):
+    def _unbind(self, sequence: str) -> None:
         assert isinstance(sequence, str), sequence
         
         self._canvas.tag_unbind(self._id, sequence)
         if hasattr(self, '_id_aa'):
             self._canvas.tag_unbind(self._id_aa, sequence)
     
-    def unbind_leftpress(self):
+    def unbind_leftpress(self) -> None:
         self._unbind(MLEFTPRESS)
     
-    def unbind_leftmotion(self):
+    def unbind_leftmotion(self) -> None:
         self._unbind(MLEFTMOTION)
     
-    def unbind_leftrelease(self):
+    def unbind_leftrelease(self) -> None:
         self._unbind(MLEFTRELEASE)
     
-    def unbind_rightpress(self):
+    def unbind_rightpress(self) -> None:
         self._unbind(MRIGHTPRESS)
     
-    def unbind_rightmotion(self):
+    def unbind_rightmotion(self) -> None:
         self._unbind(MRIGHTMOTION)
     
-    def unbind_rightrelease(self):
+    def unbind_rightrelease(self) -> None:
         self._unbind(MRIGHTRELEASE)
     
-    def set_style(self, *args, **kwargs):
+    def set_style(self, *args, **kwargs) -> None:
         raise NotImplementedError
     
-    def get_style(self):
+    def get_style(self) -> dict[str, Any]:
         raise NotImplementedError
     
-    def _get_legend_config(self):
+    def _get_legend_config(self) -> dict[str, Any]:
         raise NotImplementedError
 
 
@@ -1044,19 +1148,19 @@ class _Text(_BaseArtist):
     _name = 'text'
     
     def __init__(
-            self,
-            canvas: tk.Canvas,
-            text: str,
-            color: str | None = None,
-            angle: IntFloat | None = None,
-            family: str | None = None,
-            size: Int | None = None,
-            weight: str | None = None,
-            slant: str | None = None,
-            underline: bool | None = None,
-            overstrike: bool | None = None,
-            font: Font | None = None,
-            **kwargs
+        self,
+        canvas: '_FigureCanvas | _LegendCanvas',
+        text: str,
+        color: str | None = None,
+        angle: IntFloat | None = None,
+        family: str | None = None,
+        size: Int | None = None,
+        weight: Literal['normal', 'bold'] | None = None,
+        slant: Literal['roman', 'italic'] | None = None,
+        underline: bool | None = None,
+        overstrike: bool | None = None,
+        font: Font | None = None,
+        **kwargs
     ):
         assert isinstance(text, str), text
         
@@ -1083,17 +1187,17 @@ class _Text(_BaseArtist):
             overstrike=overstrike
         )
     
-    def draw(self):
+    def draw(self) -> None:
         state = self._req_state
         
         if self.coords() != self._last_coords:
             self._stale = True
         
         if not self._stale:
-            self._set_state(state)
+            self._apply_state(state)
             return
         
-        self._set_state('hidden')
+        self._apply_state('hidden')
         
         # Update style
         root_defaults = self._root_default_style
@@ -1111,7 +1215,7 @@ class _Text(_BaseArtist):
             underline=cf["underline"],
             overstrike=cf["overstrike"]
         )
-        self.itemconfigure(text=cf["text"], fill=cf["color"], angle=cf["angle"])
+        self.configure(text=cf["text"], fill=cf["color"], angle=cf["angle"])
         
         # Update position
         if self._req_coords:
@@ -1126,7 +1230,7 @@ class _Text(_BaseArtist):
             })
             
             # Get text size
-            self._set_state('normal')
+            self._apply_state('normal')
             if bbox := self.bbox():
                 tx1, ty1, tx2, ty2 = bbox
                 tw, th = (tx2 - tx1), (ty2 - ty1)
@@ -1154,19 +1258,22 @@ class _Text(_BaseArtist):
                 # Roll the anchor. e.g. 0 deg => 1 step, 45 deg => 2 step, ...
                 angle = float(self.cget('angle'))
                 assert 0.0 <= angle < 360.0, angle
-                shift = int((angle + 22.5) // 45)  # step with 45 deg
-                mapping = dict(zip(_ANCHORS, _ANCHORS[shift:] + _ANCHORS[:shift]))
+                shift = int((angle + 22.5) // 45)  # 45 deg for each step
+                anchors = tuple( a for a in _ANCHORS if a != 'center' )
+                mapping = dict(zip(anchors, anchors[shift:] + anchors[:shift]))
                 anchor = ''.join( mapping[a] for a in anchor )  # rolling
             x, y = self._req_transform(x, y, round_=True)
             if x.size == 0:
                 x = y = -1
                 anchor = 'se'
+            else:
+                x, y = _NpFloat(x), _NpFloat(y)
         
         self.coords(x, y)  # update position
-        self.itemconfigure(anchor=anchor)  # update anchor
+        self.configure(anchor=anchor)  # update anchor
         
         # Update zorder and state
-        self._set_state(state)
+        self._apply_state(state)
         self._update_zorder()
         self._padx = padx
         self._pady = pady
@@ -1179,26 +1286,36 @@ class _Text(_BaseArtist):
         if self.cget('text') and (bbox := super().bbox()):
             x1, y1, x2, y2 = bbox
             if padding:
-                x1 -= self._padx[0]
-                x2 += self._padx[1]
-                y1 -= self._pady[0]
-                y2 += self._pady[1]
+                x1 = int(x1 - self._padx[0])
+                x2 = int(x2 + self._padx[1])
+                y1 = int(y1 - self._pady[0])
+                y2 = int(y2 + self._pady[1])
             return (x1, y1, x2, y2)
         return None
     
     def set_bounds(
-            self,
-            xys: tuple[Dimension, Dimension, Dimension, Dimension] | None = None,
-            sticky: str | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None
-    ):
-        assert isinstance(xys, (tuple, type(None))), xys
-        assert isinstance(sticky, (str, type(None))), sticky
-        assert isinstance(padx, (Dimension, tuple, type(None))), padx
-        assert isinstance(pady, (Dimension, tuple, type(None))), pady
+        self,
+        xys:
+            tuple[
+                ScreenUnits | None,
+                ScreenUnits | None,
+                ScreenUnits | None,
+                ScreenUnits | None
+            ]
+            | None
+            = None,
+        sticky: str | None = None,
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None
+    ) -> None:
+        assert isinstance(xys, (tuple, NoneType)), xys
+        assert isinstance(sticky, (str, NoneType)), sticky
+        assert isinstance(padx, (_ScreenUnits, tuple, NoneType)), padx
+        assert isinstance(pady, (_ScreenUnits, tuple, NoneType)), pady
         if xys is not None:
-            assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
+            assert all(
+                isinstance(p, (_ScreenUnits, NoneType)) for p in xys
+            ), xys
         
         if xys is not None:
             x1, y1, x2, y2 = self._to_px(xys)
@@ -1210,11 +1327,13 @@ class _Text(_BaseArtist):
         
         padding = []
         for pad in [padx, pady]:
-            if isinstance(pad, Dimension):
+            if isinstance(pad, _ScreenUnits):
                 pad = (pad, pad)
             elif isinstance(pad, tuple):
                 assert len(pad) == 2, [padx, pady]
-                assert all( isinstance(p, Dimension) for p in pad ), [padx, pady]
+                assert all(
+                    isinstance(p, _ScreenUnits) for p in pad
+                ), [padx, pady]
             padding.append(pad)
         
         old = self._req_bounds
@@ -1227,36 +1346,36 @@ class _Text(_BaseArtist):
         new.update({ k: old.get(k, None) for k, v in new.items() if v is None })
         if new != old:
             self._req_bounds = new
-            self._req_coords.clear()
+            self._req_coords = ()
             self._stale = True
     
     def set_style(
-            self,
-            text: str | None = None,
-            color: str | None = None,
-            angle: IntFloat | None = None,
-            family: str | None = None,
-            size: Int | None = None,
-            weight: str | None = None,
-            slant: str | None = None,
-            underline: bool | None = None,
-            overstrike: bool | None = None
-    ):
-        assert isinstance(text, (str, type(None))), text
-        assert isinstance(color, (str, type(None))), color
-        assert isinstance(angle, (IntFloat, type(None))), angle
-        assert isinstance(family, (str, type(None))), family
-        assert isinstance(size, (Int, type(None))), size
-        assert isinstance(weight, (str, type(None))), weight
-        assert isinstance(slant, (str, type(None))), slant
-        assert isinstance(underline, (bool, type(None))), underline
-        assert isinstance(overstrike, (bool, type(None))), overstrike
+        self,
+        text: str | None = None,
+        color: str | None = None,
+        angle: IntFloat | None = None,
+        family: str | None = None,
+        size: Int | None = None,
+        weight: Literal['normal', 'bold'] | None = None,
+        slant: Literal['roman', 'italic'] | None = None,
+        underline: bool | None = None,
+        overstrike: bool | None = None
+    ) -> None:
+        assert isinstance(text, (str, NoneType)), text
+        assert isinstance(color, (str, NoneType)), color
+        assert isinstance(angle, (_IntFloat, NoneType)), angle
+        assert isinstance(family, (str, NoneType)), family
+        assert isinstance(size, (_Int, NoneType)), size
+        assert weight in (*_WEIGHTS, None), (weight, _WEIGHTS)
+        assert slant in (*_SLANTS, None), (slant, _SLANTS)
+        assert isinstance(underline, (bool, NoneType)), underline
+        assert isinstance(overstrike, (bool, NoneType)), overstrike
         
         old = self._req_style
         new = {
             "text": text,
             "color": color,
-            "angle": angle if angle is None else angle % 360.0,
+            "angle": angle if angle is None else float(angle) % 360.0,
             "family": family,
             "size": size,
             "weight": weight,
@@ -1282,25 +1401,28 @@ class _Line(_BaseArtist):
     _name = 'line'
     
     def __init__(
-            self,
-            canvas: tk.Canvas,
-            color: str | None = None,
-            width: Dimension | None = None,
-            dash: tuple[Dimension, ...] | None = None,
-            smooth: bool | None = None,
-            datalabel: bool = False,
-            **kwargs
+        self,
+        canvas: '_FigureCanvas | _LegendCanvas',
+        color: str | None = None,
+        width: ScreenUnits | None = None,
+        dash: tuple[ScreenUnits, ...] | None = None,
+        smooth: bool | None = None,
+        datalabel: bool = False,
+        **kwargs
     ):
         super().__init__(canvas=canvas, **kwargs)
         
-        self._req_xy: NDArray[Float] = np.array([[]], dtype=float)
-        
-        self._xlims: NDArray[Float] = np.array([0., 1.], float)
-        self._ylims: NDArray[Float] = np.array([0., 1.], float)
+        self._req_xy: tuple[
+            NDArray[_NpFloat] | None, NDArray[_NpFloat] | None
+        ] = (None, None)  # of shape (N,)
+        self._xlimits: NDArray[_NpFloat] = np.array([0., 1.], dtype=_NpFloat)
+         # of shape (2,)
+        self._ylimits: NDArray[_NpFloat] = np.array([0., 1.], dtype=_NpFloat)
+         # of shape (2,)
         self._datalabel: bool = datalabel
         self._datalabels: list[_DataLabel] = []
         self._datalabel_pos: tuple[int, int] | None = None
-        self._datalabel_bind_ids: tuple[str, str] | None = None
+        self._datalabel_bound_ids: tuple[str, str] | None = None
         
         self._id = self._canvas.create_line(
             0, 0, 0, 0,
@@ -1315,30 +1437,32 @@ class _Line(_BaseArtist):
         if datalabel:
             self.bind_enter(self._datalabel_on_enter)
     
-    def delete(self):
+    def delete(self) -> None:
         super().delete()
         
         for dl in self._datalabels:
             dl.delete()
         self._datalabels.clear()
     
-    def draw(self):
+    def draw(self) -> None:
         state = self._req_state
         
         if self.coords() != self._last_coords:
             self._stale = True
         
         if not self._stale:
-            self._set_state(state)
+            self._apply_state(state)
             return
         
-        self._set_state('hidden')
+        self._apply_state('hidden')
         
         # Update coordinates
         if self._req_coords:
-            xys = self._req_coords
+            xys = self._to_px(self._req_coords)
         else:
-            xy = self._req_transform(*self._req_xy, round_=True)
+            assert all( v is not None for v in self._req_xy ), self._req_xy
+            xy = cast(tuple[NDArray, NDArray], self._req_xy)
+            xy = self._req_transform(*xy, round_=True)
             xy = _drop_consecutive_duplicates(*xy)
             xy = _drop_linearly_redundant_points(xy)
             if self._antialias_enabled:
@@ -1363,14 +1487,14 @@ class _Line(_BaseArtist):
         )
         if self._hover:
             cf.update(activewidth=cf["width"] * 2)
-        self.itemconfigure(**cf)
+        self.configure(**cf)
         
         if self._antialias_enabled:
             self._antialias(xys, **cf)
         
         # Update zorder and state
         self._update_zorder()
-        self._set_state(state)
+        self._apply_state(state)
         
         # Update datalabels
         for dl in self._datalabels:
@@ -1380,15 +1504,15 @@ class _Line(_BaseArtist):
         self._last_coords = self.coords()
     
     def _antialias(
-            self,
-            xys: ArrayLike,
-            fill: str,
-            width: Dimension,
-            dash: tuple[Dimension, ...],
-            smooth: bool,
-            activewidth: Dimension | None = None
-    ):
-        width += 1.
+        self,
+        xys: Sequence[IntFloat] | NDArray[_NpIntFloat],
+        fill: str,
+        width: int,
+        dash: tuple[int, ...],
+        smooth: bool,
+        activewidth: int | None = None
+    ) -> None:
+        width += 1
         
         # Mix the foreground and background colors
         w = 0.3  # the weight for the foreground color
@@ -1419,16 +1543,16 @@ class _Line(_BaseArtist):
         canvas.tag_lower(id_aa, id_og)
     
     def set_style(
-            self,
-            color: str | None = None,
-            width: Dimension | None = None,
-            dash: tuple[Dimension, ...] | None = None,
-            smooth: bool | None = None
-    ):
-        assert isinstance(color, (str, type(None))), color
-        assert isinstance(width, (Dimension, type(None))), width
-        assert isinstance(dash, (tuple, type(None))), dash
-        assert isinstance(smooth, (bool, type(None))), smooth
+        self,
+        color: str | None = None,
+        width: ScreenUnits | None = None,
+        dash: tuple[ScreenUnits, ...] | None = None,
+        smooth: bool | None = None
+    ) -> None:
+        assert isinstance(color, (str, NoneType)), color
+        assert isinstance(width, (_ScreenUnits, NoneType)), width
+        assert isinstance(dash, (tuple, NoneType)), dash
+        assert isinstance(smooth, (bool, NoneType)), smooth
         
         old = self._req_style
         new = {
@@ -1456,81 +1580,93 @@ class _Line(_BaseArtist):
         }
     
     def set_data(
-            self,
-            x: NDArray[IntFloat] | None = None,
-            y: NDArray[IntFloat] | None = None
-    ):
-        assert isinstance(x, (np.ndarray, type(None))), x
-        assert isinstance(y, (np.ndarray, type(None))), y
+        self,
+        x: NDArray[_NpIntFloat] | None = None,
+        y: NDArray[_NpIntFloat] | None = None
+    ) -> None:
+        assert isinstance(x, (np.ndarray, NoneType)), x
+        assert isinstance(y, (np.ndarray, NoneType)), y
         if isinstance(x, np.ndarray):
             xtyp = x.dtype
-            assert any( np.issubdtype(xtyp, d) for d in IntFloat.__args__ ), xtyp
+            assert any( np.issubdtype(xtyp, d) for d in _IntFloat.__args__ ), xtyp
+            assert x.ndim == 1 and x.size >= 2, x.shape
         if isinstance(y, np.ndarray):
             ytyp = y.dtype
-            assert any( np.issubdtype(ytyp, d) for d in IntFloat.__args__ ), ytyp
+            assert any( np.issubdtype(ytyp, d) for d in _IntFloat.__args__ ), ytyp
+            assert y.ndim == 1 and y.size >= 2, y.shape
         if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
             assert x.shape == y.shape, [x.shape, y.shape]
-            assert x.ndim == y.ndim == 1, [x.shape, y.shape]
         
         if x is None and y is None:
             return
         
-        length = y.size if x is None else x.size
-        assert length >= 2, (x, y)
-        xy = np.empty((2, length), dtype=float)
-        if x is None:
-            if self._req_xy is not None:
-                xy[0] = self._req_xy[0]
-        else:
-            xy[0] = x
-        if y is None:
-            if self._req_xy is not None:
-                xy[1] = self._req_xy[1]
-        else:
-            xy[1] = y
+        # => `x` or `y` can be None, but not both
+        # Get the latest requested x and y data
+        last_x, last_y = self._req_xy
+        if x is not None:
+            assert x.ndim
+            x = x.astype(_NpFloat)
+        elif last_x is not None:
+            x = last_x
+        if y is not None:
+            y = y.astype(_NpFloat)
+        elif last_y is not None:
+            y = last_y
         
-        if not np.array_equal(xy, self._req_xy):
-            xmin, ymin = xy.min(axis=1)
-            xmax, ymax = xy.max(axis=1)
-            self._req_xy = xy
-            self._xlims = np.array([xmin, xmax])
-            self._ylims = np.array([ymin, ymax])
-            self._req_coords.clear()
-            self._datalabels.clear()
-            self._stale = True
+        if all( v is not None for v in (x, y, last_x, last_y) ):
+            if np.array_equal(
+                np.asarray([x, y], dtype=_NpFloat),
+                np.asarray(self._req_xy, dtype=_NpFloat)
+            ):
+                return
+        
+        if x is not None and y is not None:
+            assert x.shape == y.shape, (x, y)
+        self._req_xy = (x, y)
+        if x is not None:
+            self._xlimits = np.sort(x)[[0, -1]]
+        if y is not None:
+            self._ylimits = np.sort(y)[[0, -1]]
+        self._req_coords = ()
+        self._datalabels.clear()
+        self._stale = True
     
-    def get_data(self) -> tuple[NDArray[Float], NDArray[Float]]:
-        return tuple(self._req_xy)
+    def get_data(self):
+        return self._req_xy
     
-    def _find_closest_point(self, event: tk.Event) -> NDArray[IntFloat]:
+    def _find_closest_point(self, event: tk.Event) -> tuple[NpFloat, NpFloat]:
+        assert all( v is not None for v in self._req_xy ), self._req_xy
+        
         x, y = (event.x, event.y)
+        xy = cast(tuple[NDArray, NDArray], self._req_xy)
         xs, ys = self._req_transform(  # data => canvas coordinate
-            *self._req_xy, round_=True, clip=False
+            *xy, round_=True, clip=False
         )
         i = np.argmin((xs - x)**2. + (ys - y)**2.)  # find the nearest point
         to_datacoord = self._req_transform.get_inverse()
+        x, y = to_datacoord(xs[i], ys[i], clip=False)  # canvas => data coordinate
         
-        return to_datacoord(xs[i], ys[i], clip=False)  # canvas => data coordinate
+        return (_NpFloat(x), _NpFloat(y))
     
-    def _datalabel_on_enter(self, event: tk.Event):
-        if self._datalabel_bind_ids is not None:
+    def _datalabel_on_enter(self, event: tk.Event) -> None:
+        if self._datalabel_bound_ids is not None:
             return
         
         # Create a temporary datalabel
         data_xy = self._find_closest_point(event)
         
         dl = _DataLabel(self, tag='datalabel')
-        dl._set_point(*data_xy)
+        dl.set_point(*data_xy)
         dl.draw()
         self._datalabels.append(dl)
         
         # Bind motion and leftpress callbacks
-        self._datalabel_bind_ids = (
+        self._datalabel_bound_ids = (
             self._canvas.bind(MMOTION, self._datalabel_on_motion, add=True),
             self._canvas.bind(MLEFTPRESS, self._datalabel_on_leftpress, add=True)
         )
     
-    def _datalabel_on_motion(self, event: tk.Event):
+    def _datalabel_on_motion(self, event: tk.Event) -> None:
         x, y = (event.x, event.y)
         dl = self._datalabels[-1]
         valid_items = {  # valid items which are higher than this line
@@ -1549,47 +1685,51 @@ class _Line(_BaseArtist):
                 self._datalabel_on_leave(event)
             else:  # mouse pointer is moving on this line => update the datalabel
                 data_xy = self._find_closest_point(event)
-                dl._set_point(*data_xy)
+                dl.set_point(*data_xy)
                 dl.draw()
     
-    def _datalabel_on_leave(self, event: tk.Event):
+    def _datalabel_on_leave(self, event: tk.Event | None = None) -> None:
+        assert self._datalabel_bound_ids is not None, self._datalabel_bound_ids
+        
         # Remove the temporary datalabel
         dl = self._datalabels[-1]
         dl.delete()
         
         # Unbind the motion and left press callbacks
-        motion_id, leftpress_id = self._datalabel_bind_ids
+        motion_id, leftpress_id = self._datalabel_bound_ids
         unbind(self._canvas, MMOTION, motion_id)
         unbind(self._canvas, MLEFTPRESS, leftpress_id)
         
-        self._datalabel_bind_ids = None
+        self._datalabel_bound_ids = None
     
-    def _datalabel_on_leftpress(self, event: tk.Event):
+    def _datalabel_on_leftpress(self, event: tk.Event | None = None) -> None:
+        assert self._datalabel_bound_ids is not None, self._datalabel_bound_ids
+        
         # Settle the datalabel: temporary => settled
         dl = self._datalabels[-1]
-        dl._settle()
+        dl.settle()
         dl.draw()
         
         # Unbind the motion and left press callbacks
-        motion_id, leftpress_id = self._datalabel_bind_ids
+        motion_id, leftpress_id = self._datalabel_bound_ids
         unbind(self._canvas, MMOTION, motion_id)
         unbind(self._canvas, MLEFTPRESS, leftpress_id)
         
-        self._datalabel_bind_ids = None
+        self._datalabel_bound_ids = None
 
 
 class _BasePoly(_BaseArtist):
-    def draw(self):
+    def draw(self) -> None:
         state = self._req_state
         
         if self.coords() != self._last_coords:
             self._stale = True
         
         if not self._stale:
-            self._set_state(state)
+            self._apply_state(state)
             return
         
-        self._set_state('hidden')
+        self._apply_state('hidden')
         
         # Update coordinates
         xys = self._req_coords
@@ -1611,25 +1751,25 @@ class _BasePoly(_BaseArtist):
         )
         if self._hover:
             cf.update(activewidth=cf["width"] * 2)
-        self.itemconfigure(**cf)
+        self.configure(**cf)
         
         # Update zorder and state
-        self._set_state(state)
+        self._apply_state(state)
         self._update_zorder()
         self._stale = False
         self._last_coords = self.coords()
     
     def set_style(
-            self,
-            facecolor: str | None = None,
-            edgecolor: str | None = None,
-            width: Dimension | None = None,
-            dash: tuple[Dimension, ...] | None = None
-    ):
-        assert isinstance(facecolor, (str, type(None))), facecolor
-        assert isinstance(edgecolor, (str, type(None))), edgecolor
-        assert isinstance(width, (Dimension, type(None))), width
-        assert isinstance(dash, (tuple, type(None))), dash
+        self,
+        facecolor: str | None = None,
+        edgecolor: str | None = None,
+        width: ScreenUnits | None = None,
+        dash: tuple[ScreenUnits, ...] | None = None
+    ) -> None:
+        assert isinstance(facecolor, (str, NoneType)), facecolor
+        assert isinstance(edgecolor, (str, NoneType)), edgecolor
+        assert isinstance(width, (_ScreenUnits, NoneType)), width
+        assert isinstance(dash, (tuple, NoneType)), dash
         
         old = self._req_style
         new = {
@@ -1656,13 +1796,13 @@ class _Rectangle(_BasePoly):
     _name = 'rectangle'
     
     def __init__(
-            self,
-            canvas: tk.Canvas,
-            facecolor: str | None = None,
-            edgecolor: str | None = None,
-            width: Dimension | None = None,
-            dash: tuple[Dimension, ...] | None = None,
-            **kwargs
+        self,
+        canvas: '_FigureCanvas | _LegendCanvas',
+        facecolor: str | None = None,
+        edgecolor: str | None = None,
+        width: ScreenUnits | None = None,
+        dash: tuple[ScreenUnits, ...] | None = None,
+        **kwargs
     ):
         super().__init__(canvas=canvas, antialias=False, **kwargs)
         self._id = self._canvas.create_rectangle(
@@ -1678,13 +1818,13 @@ class _Oval(_BasePoly):
     _name = 'oval'
     
     def __init__(
-            self,
-            canvas: tk.Canvas,
-            facecolor: str | None = None,
-            edgecolor: str | None = None,
-            width: Dimension | None = None,
-            dash: tuple[Dimension, ...] | None = None,
-            **kwargs
+        self,
+        canvas: '_FigureCanvas | _LegendCanvas',
+        facecolor: str | None = None,
+        edgecolor: str | None = None,
+        width: ScreenUnits | None = None,
+        dash: tuple[ScreenUnits, ...] | None = None,
+        **kwargs
     ):
         super().__init__(canvas=canvas, antialias=False, **kwargs)
         self._id = self._canvas.create_oval(
@@ -1700,14 +1840,14 @@ class _Polygon(_BasePoly):
     _name = 'polygon'
     
     def __init__(
-            self,
-            canvas: tk.Canvas,
-            facecolor: str | None = None,
-            edgecolor: str | None = None,
-            width: Dimension | None = None,
-            smooth: bool | None = None,
-            dash: tuple[Dimension, ...] | None = None,
-            **kwargs
+        self,
+        canvas: '_FigureCanvas | _LegendCanvas',
+        facecolor: str | None = None,
+        edgecolor: str | None = None,
+        width: ScreenUnits | None = None,
+        smooth: bool | None = None,
+        dash: tuple[ScreenUnits, ...] | None = None,
+        **kwargs
     ):
         super().__init__(canvas=canvas, antialias=False, **kwargs)
         self._id = self._canvas.create_polygon(
@@ -1723,12 +1863,12 @@ class _Polygon(_BasePoly):
         )
     
     def set_style(
-            self,
-            *args,
-            smooth: bool | None = None,
-            **kwargs
-    ):
-        assert isinstance(smooth, (bool, type(None))), smooth
+        self,
+        *args,
+        smooth: bool | None = None,
+        **kwargs
+    ) -> None:
+        assert isinstance(smooth, (bool, NoneType)), smooth
         
         super().set_style(*args, **kwargs)
         if smooth is not None and self._req_style["smooth"] != smooth:
@@ -1743,50 +1883,100 @@ class _Polygon(_BasePoly):
 
 
 # =============================================================================
-# ---- Plot Components
+# MARK: Canvas Components
 # =============================================================================
-class _BaseComponent(_BaseElement):
-    def __init__(self, plot: _Plot, canvas: tk.Canvas | None = None, **kwargs):
+class _BaseCanvas[C: '_BaseCanvas'](mixin_base(tk.Canvas), metaclass=DropObject):
+    _root: Callable[[], tb.Window]
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._zorder_tags: dict[_BaseArtist[C], str] = {}
+    
+    @property
+    def zorder_tags(self):
+        return self._zorder_tags
+    
+    @property
+    def figure(self) -> 'Figure':
+        raise NotImplementedError
+
+
+class _LegendCanvas(_BaseCanvas['_LegendCanvas'], ScrolledCanvas):
+    _root: Callable[[], tb.Window]
+    
+    def __init__(
+        self,
+        plot_canvas: '_FigureCanvas',
+        *args,
+        propagate_geometry: bool = False,
+        scroll_orient: Literal['horizontal', 'vertical', 'both']='both',
+        bind_mousewheel_with_add: bool = False,
+        **kwargs
+    ):
+        super().__init__(
+            plot_canvas,
+            *args,
+            propagate_geometry=propagate_geometry,
+            scroll_orient=scroll_orient,
+            bind_mousewheel_with_add=bind_mousewheel_with_add,
+            **kwargs
+        )
+        self._plot: '_FigureCanvas' = plot_canvas
+    
+    @property
+    def figure(self):
+        return self._plot.figure
+
+
+class _CanvasComponent[C: _FigureCanvas | _LegendCanvas](_CanvasFundamentals[C]):
+    def __init__(self, plot: '_Plot', **kwargs):
         assert isinstance(plot, _Plot), plot
-        assert isinstance(plot._figure, Figure), plot._figure
-        canvas = plot._tkwidget if canvas is None else canvas
-        super().__init__(canvas, **kwargs)
+        super().__init__(**kwargs)
         self._plot: _Plot = plot
-        self._plot_tk: tk.Canvas = plot._tkwidget
-        self._figure: Figure = plot._figure
+    
+    @property
+    def plot(self):
+        return self._plot
+    
+    @property
+    def figure(self):
+        return self._plot.figure
     
     @property
     def _default_style(self) -> dict[str, Any]:
-        return self._figure._default_style
+        return self.figure._default_style
     
-    def update_theme(self):
+    def update_theme(self) -> None:
         raise NotImplementedError
     
-    def bbox(self):
+    def bbox(self) -> tuple[int, int, int, int] | None:
         raise NotImplementedError
 
 
-class _Axis(_BaseComponent):
+class _Axis(_CanvasComponent['_FigureCanvas']):
     def __init__(
-            self,
-            plot: _Plot,
-            side: Literal['r', 'b', 'l', 't'],
-            *args, 
-            **kwargs
+        self,
+        plot: '_Plot',
+        side: Literal['r', 'b', 'l', 't'],
+        *args, 
+        **kwargs
     ):
-        super().__init__(plot, *args, **kwargs)
+        assert side in _AXISSIDES, (side, _AXISSIDES)
+        
+        super().__init__(plot, *args, canvas=plot.widget, **kwargs)
+        
         self._side: Literal['r', 'b', 'l', 't'] = side
         self._label: _Text = _Text(
             self._canvas, text='', tag=f'{self._tag}.label.text'
         )
     
-    def update_theme(self):
-        self._label._stale = True
+    def update_theme(self) -> None:
+        self._label.stale = True
     
-    def draw(self):
+    def draw(self) -> None:
         self._label.draw()
     
-    def bbox(self) -> tuple[int, int, int, int] | None:
+    def bbox(self):
         return self._label.bbox()
     
     def set_bounds(self, *args, sticky: str | None = None, **kwargs):
@@ -1794,47 +1984,55 @@ class _Axis(_BaseComponent):
         
         if sticky is not None and (invalid in sticky or sticky == 'center'):
             raise ValueError(
-                f"`sticky` for taxis label must not include {invalid} and not "
-                f"equal to 'center' but got {sticky}."
+                f"`sticky` for taxis label must not include {invalid!r} and not "
+                f"equal to 'center' but got {sticky!r}."
             )
         
-        self._label.set_bounds(*args, sticky=sticky, **kwargs)
+        return self._label.set_bounds(*args, sticky=sticky, **kwargs)
     
     def set_label(self, *args, **kwargs):
-        self._label.set_style(*args, **kwargs)
+        return self._label.set_style(*args, **kwargs)
     
-    def get_label(self) -> _Text:
+    def get_label(self):
         return self._label
 
 
-class _Ticks(_BaseComponent):
+class _Ticks(_CanvasComponent['_FigureCanvas']):
     def __init__(
-            self,
-            plot: _Plot,
-            side: Literal['r', 'b', 'l', 't'],
-            *args, 
-            **kwargs
+        self,
+        plot: '_Plot',
+        side: Literal['r', 'b', 'l', 't'],
+        *args, 
+        **kwargs
     ):
-        super().__init__(plot, *args, **kwargs)
+        super().__init__(plot, *args, canvas=plot.widget, **kwargs)
         
         self._req_ticks_enabled: bool = False
         self._req_labels_enabled: bool = False
         self._req_scientific: Int | None = None
-        self._req_xys: tuple[
-            Dimension, Dimension, Dimension, Dimension
+        self._req_xys: tuple[  # only the value on the growing side is `None`
+            ScreenUnits | None,
+            ScreenUnits | None,
+            ScreenUnits | None,
+            ScreenUnits | None
         ] | None = None
         self._req_transform: _BaseTransform1D = _FirstOrderPolynomial()
-        self._req_limits: list[IntFloat | None] = [None, None]
-        self._req_margins: list[Dimension | None] = [None, None]
+        self._req_limits: tuple[IntFloat | None, IntFloat | None] = (None, None)
+        self._req_margins: tuple[
+            ScreenUnits | None, ScreenUnits | None
+        ] = (None, None)
         self._req_scale: Literal['linear', 'log'] = 'linear'
         
-        self._dummy_xys: tuple[
-            Dimension, Dimension, Dimension, Dimension
+        self._dummy_xys: tuple[  # only the value on the growing side is `None`
+            ScreenUnits | None,
+            ScreenUnits | None,
+            ScreenUnits | None,
+            ScreenUnits | None
         ] | None = None
         self._dummy_transform: _BaseTransform1D = _FirstOrderPolynomial()
-        self._dummy_limits: list[IntFloat] = [_PMIN, _MAX]
+        self._dummy_limits: tuple[IntFloat, IntFloat] = (_TINY, _MAX)
         self._dummy_vertical: bool = False
-        self._dummy_n_chars: Int = max( len(str(l)) for l in [_PMIN, _MAX] )
+        self._dummy_n_chars: Int = max( len(str(l)) for l in [_TINY, _MAX] )
         self._dummy_size: IntFloat = 0
         self._dummy_label: _Text = _Text(
             self._canvas, text='', tag=f'{self._tag}.labels.text'
@@ -1846,25 +2044,33 @@ class _Ticks(_BaseComponent):
         self._growing_side: int = {"r": 0, "b": 1, "l": 2, "t": 3}[side]
         self._stale: bool = True
         self._fitted_labels: dict[str, Any] = {}
-        self._limits: list[IntFloat] = [_PMIN, _MAX]
-        self._margins: list[IntFloat] = [0., 0.]
-        self._growing_p: IntFloat = 0.
-        self._ticks_cdata: NDArray[Float] = np.array([], dtype=float)
+        self._limits: tuple[IntFloat, IntFloat] = (_TINY, _MAX)
+        self._margins: tuple[IntFloat, IntFloat] = (0., 0.)
+        self._scale: Literal['linear', 'log'] = 'linear'
+        self._growing_p: IntFloat = 0.  # mid axis for all ticks on this side
+        self._ticks_cdata: NDArray[_NpFloat] = np.array([], dtype=_NpFloat)
         self._labels: list[_Text] = []
         self._ticks: list[_Line] = []
     
-    def update_theme(self):
+    @property
+    def stale(self):
+        return self._stale
+    
+    @stale.setter
+    def stale(self, value: bool) -> None:
+        assert isinstance(value, bool), value
+        self._stale = value
+    
+    def update_theme(self) -> None:
         self._stale = True
         
         for label in self._labels:
-            label._stale = True
+            label.stale = True
         for tick in self._ticks:
-            tick._stale = True
+            tick.stale = True
     
-    def draw(
-            self
-    ) -> tuple[dict[str, Any], _BaseTransform1D] | None:
-        self._dummy_label._set_state('hidden')
+    def draw(self) -> None:
+        self._dummy_label._apply_state('hidden')
         texts, positions = self._generate_label_values()
         
         if not self._stale:
@@ -1881,12 +2087,12 @@ class _Ticks(_BaseComponent):
             
             number_increase = len(texts) - len(self._labels)
             if number_increase < 0:  # delete labels
-                for i in range(-number_increase):
+                for _ in range(-number_increase):
                     self._labels.pop().delete()
             elif number_increase > 0:  # create labels
                 self._labels.extend(
                     _Text(canvas, text='', font=font, tag=tag)
-                    for i in range(number_increase)
+                    for _ in range(number_increase)
                 )
             
             for label, text, xys in zip(self._labels, texts, positions):
@@ -1903,17 +2109,26 @@ class _Ticks(_BaseComponent):
             style = self._dummy_tick._req_style
             p = self._growing_p
             if self._side in ('t', 'b'):
-                positions = [ (x1, p-2, x2, p+2) for x1, y1, x2, y2 in positions ]
+                positions = [ (x1, p-2, x2, p+2) for x1, _, x2, _ in positions ]
             else:
-                positions = [ (p-2, y1, p+2, y2) for x1, y1, x2, y2 in positions ]
+                positions = [ (p-2, y1, p+2, y2) for _, y1, _, y2 in positions ]
+            assert all(
+                _p is not None for xys in positions for _p in xys
+            ), positions
+            positions = cast(
+                Sequence[
+                    tuple[ScreenUnits, ScreenUnits, ScreenUnits, ScreenUnits]
+                ],
+                positions
+            )
             
             number_increase = len(positions) - len(self._ticks)
             if number_increase < 0:  # delete lines
-                for i in range(-number_increase):
+                for _ in range(-number_increase):
                     self._ticks.pop().delete()
             elif number_increase > 0:  # create lines
                 self._ticks.extend(
-                    _Line(canvas, tag=tag) for i in range(number_increase)
+                    _Line(canvas, tag=tag) for _ in range(number_increase)
                 )
             
             for tick, xys in zip(self._ticks, positions):
@@ -1927,12 +2142,12 @@ class _Ticks(_BaseComponent):
         
         self._stale = False
     
-    def _draw_dummy(self):
+    def _draw_dummy(self) -> None:
         texts, positions = self._generate_label_values(dummy=True)
         
         # Find possibly largest label
         n_chars = [ max( len(t) for t in tx.split('\n', 1) ) for tx in texts ]
-        i = np.argmax(n_chars)
+        i = int(np.argmax(n_chars))
         text, xys = texts[i], positions[i]
         
         # Update the text item and draw
@@ -1943,18 +2158,19 @@ class _Ticks(_BaseComponent):
         label.draw()
         
         # Update current size of the text item
-        tx1, ty1, tx2, ty2 = label.bbox()
+        assert (bbox := label.bbox()) is not None, bbox
+        tx1, ty1, tx2, ty2 = bbox
         w, h = (tx2 - tx1), (ty2 - ty1)
         angle = float(label.cget('angle'))
-        vertical = (angle - 90) % 180 == 0  # text direction
+        vertical = (angle - 90.) % 180. == 0  # writing direction
         self._dummy_n_chars = n_chars[i]
-        self._dummy_size = max(w if self._side in 'tb' else h, 1)
+        self._dummy_size = max(w if self._side in _XAXISSIDES else h, 1)
         self._dummy_vertical = vertical
     
     def bbox(
-            self,
-            *,
-            dummy: bool = False
+        self,
+        *,
+        dummy: bool = False
     ) -> tuple[int, int, int, int] | None:
         assert isinstance(dummy, bool), dummy
         
@@ -1965,24 +2181,25 @@ class _Ticks(_BaseComponent):
         elif not self._labels:
             return None
         
-        x1y1x2y2 = np.asarray([
-            label.bbox() for label in self._labels
-        ])
+        x1y1x2y2 = np.asarray(
+            [ label.bbox() for label in self._labels ],
+            dtype=_NpInt
+        )
         xs = np.concat((x1y1x2y2[:, 0], x1y1x2y2[:, 2]))
         ys = np.concat((x1y1x2y2[:, 1], x1y1x2y2[:, 3]))
         xs.sort()
         ys.sort()
         x1, y1, x2, y2 = xs[0], ys[0], xs[-1], ys[-1]
         
-        return x1, y1, x2, y2
+        return (x1, y1, x2, y2)
     
     def set_ticks(
-            self,
-            enable: bool = True,
-            color: str | None = None,
-            width: Dimension | None = None,
-            smooth: bool | None = None
-    ):
+        self,
+        enable: bool = True,
+        color: str | None = None,
+        width: ScreenUnits | None = None,
+        smooth: bool | None = None
+    ) -> None:
         assert isinstance(enable, bool), enable
         
         self._dummy_tick.set_style(color=color, width=width, smooth=smooth)
@@ -1990,22 +2207,22 @@ class _Ticks(_BaseComponent):
         self._stale = True
     
     def set_labels(
-            self,
-            enable: bool = True,
-            color: str | None = None,
-            angle: IntFloat | None = None,
-            family: str | None = None,
-            size: Int | None = None,
-            weight: str | None = None,
-            slant: str | None = None,
-            underline: bool | None = None,
-            overstrike: bool | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None,
-            scientific: Int | None = None
-    ):
+        self,
+        enable: bool = True,
+        color: str | None = None,
+        angle: IntFloat | None = None,
+        family: str | None = None,
+        size: Int | None = None,
+        weight: Literal['normal', 'bold'] | None = None,
+        slant: Literal['roman', 'italic'] | None = None,
+        underline: bool | None = None,
+        overstrike: bool | None = None,
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        scientific: Int | None = None
+    ) -> None:
         assert isinstance(enable, bool), enable
-        assert isinstance(scientific, (Int, type(None))), scientific
+        assert isinstance(scientific, (_Int, NoneType)), scientific
         assert scientific is None or scientific > 0, scientific
         
         self._dummy_label.set_style(
@@ -2026,87 +2243,127 @@ class _Ticks(_BaseComponent):
         
         self._stale = True
     
-    def get_labels(self) -> list[_Text]:
+    def get_labels(self):
         return self._labels
     
     def _set_limits(
-            self,
-            min_: IntFloat | None = None,
-            max_: IntFloat | None = None,
-            margins: ArrayLike | Dimension | None = [None, None]
-    ):
-        assert isinstance(min_, (IntFloat, type(None))), min_
-        assert isinstance(max_, (IntFloat, type(None))), max_
-        assert len(margins) == 2, margins
-        assert isinstance(margins[0], (Dimension, type(None))), margins
-        assert isinstance(margins[1], (Dimension, type(None))), margins
+        self,
+        min_: IntFloat | None = None,
+        max_: IntFloat | None = None,
+        margins:
+            tuple[ScreenUnits | None, ScreenUnits | None]
+            | NDArray[_NpIntFloat]
+            | ScreenUnits
+            | None
+            = (None, None)
+    ) -> None:
+        assert isinstance(min_, (_IntFloat, NoneType)), min_
+        assert isinstance(max_, (_IntFloat, NoneType)), max_
         
-        self._req_limits[:] = (min_, max_)
-        self._req_margins[:] = margins
+        if isinstance(margins, _ScreenUnits) or margins is None:
+            margins = (margins, margins)
+        elif isinstance(margins, np.ndarray):
+            assert margins.shape == (2,), margins
+            margins = tuple(margins)
+        elif not isinstance(margins, tuple):
+            raise TypeError(
+                '`margins` must be of type ScreenUnits, None, '
+                'tuple[ScreenUnits | None, ScreenUnits | None], or '
+                f'{NDArray[_NpIntFloat]}.'
+            )
+        
+        assert len(margins) == 2, margins
+        assert isinstance(margins[0], (_ScreenUnits, NoneType)), margins
+        assert isinstance(margins[1], (_ScreenUnits, NoneType)), margins
+        
+        if min_ is not None and max_ is not None and min_ > max_:
+            raise ValueError(
+                'The value of `min_` must be smaller than or equal to ' \
+                f'the value of `max_` but got `min_` = {min_} and `max_` = '
+                f'{max_}.'
+            )
+        
+        self._req_limits = (min_, max_)
+        self._req_margins = margins
     
     def set_limits(
-            self,
-            min_: IntFloat | None = None,
-            max_: IntFloat | None = None,
-            margins: ArrayLike | Dimension | None = [None, None]
-    ):
-        assert isinstance(min_, (IntFloat, type(None))), min_
-        assert isinstance(max_, (IntFloat, type(None))), max_
-        if isinstance(margins, Dimension):
-            margins = [margins, margins]
-        margins = list(margins)
-        assert len(margins) == 2, margins
-        assert isinstance(margins[0], (Dimension, type(None))), margins
-        assert isinstance(margins[1], (Dimension, type(None))), margins
-        
-        old_limits = self._req_limits.copy()
-        if min_ is not None:
-            self._req_limits[0] = min_
-        if max_ is not None:
-            self._req_limits[1] = max_
-        if all( l is not None for l in self._req_limits ) \
-                and self._req_limits[0] > self._req_limits[1]:
-            msg = 'the value of `min_` must be smaller than or equal to ' \
-                f'the value of `max_` but got {self._req_limits[0]} and ' \
-                f'{self._req_limits[1]}.'
-            self._req_limits[:] = old_limits
-            raise ValueError(msg)
-        
-        for i, margin in enumerate(margins):
-            if margin is not None:
-                self._req_margins[i] = margin
+        self,
+        min_: IntFloat | None = None,
+        max_: IntFloat | None = None,
+        margins:
+            tuple[ScreenUnits | None, ScreenUnits | None]
+            | NDArray[_NpIntFloat]
+            | ScreenUnits
+            | None
+            = (None, None)
+    ) -> None:
+        old_limits = (old_lim1, old_lim2) = copy.copy(self._req_limits)
+        old_margins = (old_marg1, old_marg2) = copy.copy(self._req_margins)
+        try:
+            self._set_limits(min_=min_, max_=max_, margins=margins)
+            new_lim1, new_lim2 = self._req_limits
+            new_marg1, new_marg2 = self._req_margins
+            self._req_limits = (res_lim1, res_lim2) = (
+                old_lim1 if new_lim1 is None else new_lim1,
+                old_lim2 if new_lim2 is None else new_lim2
+            )
+            self._req_margins = (
+                old_marg1 if new_marg1 is None else new_marg1,
+                old_marg2 if new_marg2 is None else new_marg2
+            )
+            if (
+                res_lim1 is not None
+                and res_lim2 is not None
+                and res_lim1 > res_lim2
+            ):
+                raise ValueError(
+                    'The first limit must be equal to or less than the second '
+                    f'limit but got {self._req_limits}.'
+                )
+        except:
+            self._req_limits = old_limits
+            self._req_margins = old_margins
+            raise
     
-    def get_limits(self) -> tuple[list[IntFloat], list[Dimension]]:
+    def get_limits(self):
         return self._limits, self._margins
     
-    def set_scale(self, scale: Literal['linear', 'log'] | None = None):
+    def set_scale(self, scale: Literal['linear', 'log'] | None = None) -> None:
         assert scale in ('linear', 'log', None), scale
         
         if scale is not None and scale != self._req_scale:
             self._req_scale = scale
             self._stale = True
     
-    def get_scale(self) -> Literal['linear', 'log']:
+    def get_scale(self):
         return self._scale
     
     def _set_bounds_and_transform(
-            self,
-            xys: tuple[
-                Dimension | None,
-                Dimension | None,
-                Dimension | None,
-                Dimension | None
+        self,
+        xys:
+            tuple[
+                ScreenUnits | None,
+                ScreenUnits | None,
+                ScreenUnits | None,
+                ScreenUnits | None
             ],
-            dlimits: ArrayLike,
-            climits: ArrayLike,
-            growing_p: Dimension | None = None,
-            dummy: bool = False
-    ):
+        dlimits: tuple[IntFloat, IntFloat],
+        climits: tuple[IntFloat, IntFloat],
+        growing_p: IntFloat = 0.,
+        dummy: bool = False
+    ) -> None:
         assert isinstance(xys, tuple) and len(xys) == 4, xys
-        assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
-        assert sum( p is None for p in xys ) == 1, xys
-        assert isinstance(growing_p, (Dimension, type(None))), growing_p
+        assert all( isinstance(p, (_ScreenUnits, NoneType)) for p in xys ), xys
         assert isinstance(dummy, bool), dummy
+        assert isinstance(growing_p, _IntFloat), growing_p
+        assert not dummy or growing_p == 0., (
+            '`growing_p` does nothing when `dummy` is True.'
+        )
+        for i, p in enumerate(xys):
+            if i == self._growing_side:
+                assert p is None, (self._side, self._growing_side, xys)
+            else:
+                assert p is not None, (self._side, self._growing_side, xys)
         
         (dmin, dmax), (cmin, cmax) = sorted(dlimits), climits
         assert cmin <= cmax, climits
@@ -2114,10 +2371,10 @@ class _Ticks(_BaseComponent):
         # Add margins
         default_marg1, default_marg2 = self._default_style[f"{self._tag}.margins"]
         req_marg1, req_marg2 = self._req_margins
-        mrg1 = self._to_px(default_marg1 if req_marg1 is None else req_marg1)
-        mrg2 = self._to_px(default_marg2 if req_marg2 is None else req_marg2)
-        assert mrg1 >= 0. and mrg2 >= 0., (mrg1, mrg2)
-        cmin, cmax = (cmin + mrg1), (cmax - mrg2)
+        marg1 = self._to_px(default_marg1 if req_marg1 is None else req_marg1)
+        marg2 = self._to_px(default_marg2 if req_marg2 is None else req_marg2)
+        assert marg1 >= 0. and marg2 >= 0., (marg1, marg2)
+        cmin, cmax = (cmin + marg1), (cmax - marg2)
         if cmin > cmax:
             cmin = cmax = round((cmin + cmax) / 2.)
         new_climits = [cmin, cmax]
@@ -2135,19 +2392,21 @@ class _Ticks(_BaseComponent):
             dmin, dmax = max(dmin, _MIN), min(dmax, _MAX)
         else:  # log scale
             tf_cls = _Logarithm
-            dmin, dmax = max(dmin, _PMIN), min(dmax, _MAX)
+            dmin, dmax = max(dmin, _TINY), min(dmax, _MAX)
         dmax = max(dmax, dmin)
         raw_dmin, raw_dmax = (dmin, dmax)
         
-        sci = 1 if not linear_scale \
-            else self._req_scientific if self._req_scientific is not None \
+        sci = (
+            1 if not linear_scale
+            else self._req_scientific if self._req_scientific is not None
             else self._default_style[f"{self._tag}.labels.scientific"]
+        )
         
         if dummy:
             max_n_labels = 2
         else:
             # Calculate the max number of labels fitting in the space
-            if self._side in 'tb':  # top or bottom
+            if self._side in _XAXISSIDES:  # top or bottom
                 fixed_size = self._dummy_vertical
             else:  # left or right
                 fixed_size = not self._dummy_vertical
@@ -2236,7 +2495,7 @@ class _Ticks(_BaseComponent):
                         n = 2
                 dmin, dmax = float(s1 * 10**e1), float(s2 * 10**e2)
                 
-                if dmin < _PMIN or dmax > _MAX:
+                if dmin < _TINY or dmax > _MAX:
                     dmin, dmax = max(dmin, _MIN), min(dmax, _MAX)
                     self._fitted_labels = {
                         "case": 0,
@@ -2270,23 +2529,35 @@ class _Ticks(_BaseComponent):
         if tf != self._req_transform:
             self._req_transform = tf
             self._stale = True
-        self._limits = [dmin, dmax]
-        self._margins = [mrg1, mrg2]
+        self._limits = (dmin, dmax)
+        self._margins = (marg1, marg2)
         self._growing_p = growing_p
     
-    def _get_transform(self) -> _BaseTransform1D:
+    def _get_transform(self):
         return self._req_transform
     
     def _generate_label_values(
-            self,
-            dummy: bool = False
-    ) -> tuple[list[str], NDArray[Float]]:
+        self,
+        dummy: bool = False
+    ) -> tuple[
+        list[str],
+        Sequence[
+            tuple[
+                ScreenUnits | None,
+                ScreenUnits | None,
+                ScreenUnits | None,
+                ScreenUnits | None
+            ]
+        ]
+    ]:
         assert isinstance(dummy, bool), dummy
         
         if dummy:
+            assert self._dummy_xys is not None, self._dummy_xys
             x1, y1, x2, y2 = self._dummy_xys
             transform = self._dummy_transform
         else:
+            assert self._req_xys is not None, self._req_xys
             x1, y1, x2, y2 = self._req_xys
             transform = self._req_transform
         linear_scale = self._req_scale == 'linear'
@@ -2296,30 +2567,40 @@ class _Ticks(_BaseComponent):
         
         # Make the labels' values
         if dummy:
-            data = np.asarray(self._dummy_limits, dtype=float)
+            data = np.asarray(self._dummy_limits, dtype=_NpFloat)
         elif linear_scale:
-            data = np.linspace(**self._fitted_labels, endpoint=True, dtype=float)
+            data = np.linspace(
+                **self._fitted_labels, endpoint=True, dtype=_NpFloat
+            )
         else:  # log scale
             fitted = self._fitted_labels
             case = fitted["case"]
             if case == 0:
                 data = np.linspace(
-                    fitted["start"], fitted["stop"], fitted["num"], dtype=float
+                    fitted["start"],
+                    fitted["stop"],
+                    fitted["num"],
+                    dtype=_NpFloat
                 )
             elif case == 1:
                 data = (
-                    (
-                        10**np.arange(fitted["e1"], fitted["e2"]+1, dtype=float)
-                    )[:, None] * 
-                    np.arange(1., 9+1, dtype=float)[None, :]
+                    10**np.arange(
+                        fitted["e1"], fitted["e2"]+1, dtype=_NpFloat
+                    )[:, None] * np.arange(
+                        1., 9+1, dtype=_NpFloat
+                    )[None, :]
                 ).ravel()
                 start = int(fitted["s1"] - 1)
                 stop = int(data.size - (9 - fitted["s2"]))
                 data = data[start:stop]
             elif case == 2:
-                data = 10**np.arange(fitted["e1"], fitted["e2"]+1, dtype=float)
+                data = 10**np.arange(
+                    fitted["e1"], fitted["e2"]+1, dtype=_NpFloat
+                )
             else:
-                data = 10**np.asarray([fitted["e1"], fitted["e2"]], dtype=float)
+                data = 10**np.asarray(
+                    [fitted["e1"], fitted["e2"]], dtype=_NpFloat
+                )
         assert np.isfinite(data).all(), data
         
         ## Filter out the out-of-range values
@@ -2348,11 +2629,12 @@ class _Ticks(_BaseComponent):
         
         # Transform the data coordinates into the canvas coordinates
         if dummy:
-            cdata = np.zeros_like(data)
+            cdata = np.zeros_like(data, dtype=_NpFloat)
         else:
             cdata = transform(data, round_=True)
             self._ticks_cdata = cdata
         
+        cdata = cast(Sequence[ScreenUnits], cdata)
         if self._side in ('t', 'b'):
             positions = [ (x, y1, x, y2) for x in cdata ]
         else:  # left or right
@@ -2361,13 +2643,13 @@ class _Ticks(_BaseComponent):
         return texts, positions
 
 
-class _Frame(_BaseComponent):
-    def __init__(self, plot: _Plot, *args, **kwargs):
-        super().__init__(plot, *args, **kwargs)
+class _Frame(_CanvasComponent['_FigureCanvas']):
+    def __init__(self, plot: '_Plot', *args, **kwargs):
+        super().__init__(plot, *args, canvas=plot.widget, **kwargs)
         
         self._req_facecolor: str | None = None
-        self._req_grid_enabled: dict[str, bool | None] = dict.fromkeys('rblt')
-        self._req_grid_cdata: dict[str, NDArray[Float]] = {}
+        self._req_grid_enabled: dict[str, bool | None] = dict.fromkeys(_AXISSIDES)
+        self._req_grid_cdata: dict[str, NDArray[_NpFloat]] = {}
         
         self._stale_grid: bool = True
         
@@ -2385,16 +2667,16 @@ class _Frame(_BaseComponent):
         )
         self._grid: dict[str, list[_Line]] = {"r": [], "b": [], "l": [], "t": []}
     
-    def update_theme(self):
+    def update_theme(self) -> None:
         self._stale_grid = True
         
-        self._cover._stale = True
-        self._edge._stale = True
+        self._cover.stale = True
+        self._edge.stale = True
         for lines in self._grid.values():
             for line in lines:
-                line._stale = True
+                line.stale = True
     
-    def draw(self):
+    def draw(self) -> None:
         canvas = self._canvas
         
         # Update frame's facecolor
@@ -2438,11 +2720,11 @@ class _Frame(_BaseComponent):
             
             number_increase = len(positions) - len(lines)
             if number_increase < 0:  # delete lines
-                for i in range(-number_increase):
+                for _ in range(-number_increase):
                     lines.pop().delete()
             elif number_increase > 0:  # create lines
                 lines.extend(
-                    _Line(canvas, tag=tag) for i in range(number_increase)
+                    _Line(canvas, tag=tag) for _ in range(number_increase)
                 )
             
             for line, xys in zip(lines, positions):
@@ -2452,23 +2734,24 @@ class _Frame(_BaseComponent):
         
         self._stale_grid = False
     
-    def bbox(self) -> tuple[int, int, int, int] | None:
+    def bbox(self):
         return self._edge.bbox()
     
-    def set_coords(self, *args, **kwargs):
+    def set_coords(self, *args, **kwargs) -> None:
         self._edge.set_coords(*args, **kwargs)
-        self._stale_grid |= self._edge._stale
+        if self._edge.stale:
+            self._stale_grid = True
     
-    def set_facecolor(self, color: str | None = None):
-        assert isinstance(color, (str, type(None))), color
+    def set_facecolor(self, color: str | None = None) -> None:
+        assert isinstance(color, (str, NoneType)), color
         
         self._req_facecolor = color
     
     def get_facecolor(self) -> str:
         return self._canvas.cget('background')
     
-    def set_edgecolor(self, color: str | None = None):
-        assert isinstance(color, (str, type(None))), color
+    def set_edgecolor(self, color: str | None = None) -> None:
+        assert isinstance(color, (str, NoneType)), color
         
         self._edge.set_style(edgecolor=color)
     
@@ -2476,14 +2759,14 @@ class _Frame(_BaseComponent):
         return self._edge.get_style()["edgecolor"]
     
     def set_grid(
-            self,
-            side: Literal['r', 'b', 'l', 't'],
-            enable: bool = True,
-            color: str | None = None,
-            width: Dimension | None = None,
-            smooth: bool | None = None
-    ):
-        assert side in ('r', 'b', 'l', 't'), side
+        self,
+        side: Literal['r', 'b', 'l', 't'],
+        enable: bool = True,
+        color: str | None = None,
+        width: ScreenUnits | None = None,
+        smooth: bool | None = None
+    ) -> None:
+        assert side in _AXISSIDES, side
         assert isinstance(enable, bool), enable
         
         if enable != self._req_grid_enabled[side]:
@@ -2492,64 +2775,59 @@ class _Frame(_BaseComponent):
         self._dummy_grid[side].set_style(color=color, width=width, smooth=smooth)
         self._stale_grid = True
     
-    def get_grid(self) -> dict[str, list[_Line]]:
+    def get_grid(self):
         return self._grid
     
     def _set_grid_cdata(
-            self,
-            r: NDArray[Float],
-            b: NDArray[Float],
-            l: NDArray[Float],
-            t: NDArray[Float]
-    ):
+        self,
+        r: NDArray[_NpFloat],
+        b: NDArray[_NpFloat],
+        l: NDArray[_NpFloat],
+        t: NDArray[_NpFloat]
+    ) -> None:
+        assert isinstance(r, np.ndarray) and np.issubdtype(r.dtype, _NpFloat), r
+        assert isinstance(b, np.ndarray) and np.issubdtype(b.dtype, _NpFloat), b
+        assert isinstance(l, np.ndarray) and np.issubdtype(l.dtype, _NpFloat), l
+        assert isinstance(t, np.ndarray) and np.issubdtype(t.dtype, _NpFloat), t
+        
         cdata = {"r": r, "b": b, "l": l, "t": t}
-        if not self._req_grid_cdata or not all(
-                np.array_equal(cdata[side], self._req_grid_cdata[side])
-                for side in 'rblt'
+        if not self._req_grid_cdata or any(
+            not np.array_equal(cdata[side], self._req_grid_cdata[side])
+            for side in _AXISSIDES
         ):
             self._req_grid_cdata = cdata
             self._stale_grid = True
 
 
-class _Legend(_BaseComponent):
-    def __init__(self, plot: _Plot, *args, **kwargs):
+class _Legend(_CanvasComponent['_LegendCanvas']):
+    def __init__(self, plot: '_Plot', *args, **kwargs):
         tag = kwargs.pop('tag')
-        canvas = ScrolledCanvas(
-            plot._tkwidget,
-            *args,
-            container_type='tk',
-            propagate_geometry=False,
-            scroll_orient='both',
-            bind_mousewheel_add=False,
-            **kwargs
-        )
-        canvas._zorder_tags: dict[_BaseArtist, str] = {}
-        canvas._figure = plot._figure
+        canvas = _LegendCanvas(plot.widget)
         super().__init__(plot, canvas=canvas, tag=tag)
         
         self._req_enabled: bool = False
         self._req_facecolor: str | None = None
         self._req_edge: dict[str, Any] = dict.fromkeys(['edgecolor', 'edgewidth'])
         self._req_bounds: dict[str, Any] = dict.fromkeys(['xys', 'width', 'padx'])
-        self._req_ipadding: dict[str, tuple[Dimension, Dimension] | None] \
+        self._req_ipadding: dict[str, tuple[ScreenUnits, ScreenUnits] | None] \
             = dict.fromkeys(['ipadx', 'ipady'])
         self._req_symbols: list[dict[str, Any]] = []
         self._req_labels: list[str] = []
         
-        self._padx: tuple[Dimension, Dimension] = (0., 0.)
+        self._padx: tuple[int, int] = (0, 0)
         self._dummy_label: _Text = _Text(canvas, text='', tag=f'{self._tag}.text')
         self._symbols: list[_Line] = []
         self._labels: list[_Text] = []
         
-        self._id: int = self._plot_tk.create_window(
+        self._id: int = self.plot.widget.create_window(
             0, 0, anchor='nw', window=canvas.container, state='hidden'
         )
     
-    def update_theme(self):
-        for artist in self._canvas._zorder_tags:
-            artist._stale = True
+    def update_theme(self) -> None:
+        for artist in self._canvas.zorder_tags:
+            artist.stale = True
     
-    def draw(self):
+    def draw(self) -> None:
         defaults = self._default_style
         cf = self._req_bounds.copy()
         x1, y1, x2, y2 = self._req_bounds["xys"]
@@ -2557,16 +2835,16 @@ class _Legend(_BaseComponent):
             k: defaults[f"{self._tag}.{k}"]
             for k, v in cf.items() if v is None
         })
-        px1, px2 = padx = self._to_px(cf["padx"])
+        _px1, px2 = padx = self._to_px(cf["padx"])
         width = self._to_px(cf["width"]) if self._req_enabled else 0
         x1 = x2 - px2 - width
         if x1 > x2:
             x1 = x2 = round((x1 + x2) / 2.)
         
-        self._plot_tk.coords(self._id, x1, y1)
-        self._plot_tk.itemconfigure(self._id, width=width, height=y2-y1+1)
-        
-        self._plot_tk.itemconfigure(self._id, state='hidden')
+        plot_canvas = self.plot.widget
+        plot_canvas.coords(self._id, x1, y1)
+        plot_canvas.itemconfigure(self._id, width=width, height=y2-y1+1)
+        plot_canvas.itemconfigure(self._id, state='hidden')
         
         canvas = self._canvas
         if (bg := self._req_facecolor) is None:
@@ -2578,6 +2856,7 @@ class _Legend(_BaseComponent):
             k: defaults[f"{self._tag}.{k}"]
             for k, v in cf.items() if v is None
         })
+        
         canvas.container.configure(
             background=cf["edgecolor"], padx=cf["edgewidth"], pady=cf["edgewidth"]
         )
@@ -2596,9 +2875,10 @@ class _Legend(_BaseComponent):
                 k: defaults[f"{self._tag}.{k}"]
                 for k, v in cf.items() if v is None
             })
-            ipx1, ipy1 = self._to_px((cf["ipadx"][0], cf["ipady"][0]))
             
-            sym_width = self._to_px(defaults[f"{self._tag}.symbols.width"])
+            ipx1 = cast(tuple[ScreenUnits, ScreenUnits], cf["ipadx"])[0]
+            ipy1 = cast(tuple[ScreenUnits, ScreenUnits], cf["ipady"])[0]
+            ipx1, ipy1 = self._to_px((ipx1, ipy1))
             sym_width = self._to_px(defaults[f"{self._tag}.symbols.width"])
             
             sym_x1 = ipx1
@@ -2624,7 +2904,8 @@ class _Legend(_BaseComponent):
                 label.draw()
                 labels.append(label)
                 
-                x1, y1, x2, y2 = label.bbox(padding=False)
+                assert (bbox := label.bbox(padding=False)) is not None, bbox
+                x1, y1, x2, y2 = bbox
                 y = round((y1 + y2) / 2.)
                 xys2 = (sym_x1, y, sym_x2, y)
                 symbol = _Line(canvas, **sym_kw)
@@ -2633,14 +2914,14 @@ class _Legend(_BaseComponent):
                 symbols.append(symbol)
         
         state = 'normal' if self._req_enabled else 'hidden'
-        self._plot_tk.itemconfigure(self._id, state=state)
+        plot_canvas.itemconfigure(self._id, state=state)
         self._padx = padx
     
     def bbox(self) -> tuple[int, int, int, int] | None:
         if not self._req_enabled:
             return None
         
-        bbox = self._plot_tk.bbox(self._id)
+        bbox = self.plot.widget.bbox(self._id)
         if bbox is None:
             return None
         
@@ -2648,20 +2929,20 @@ class _Legend(_BaseComponent):
         p1, p2 = self._padx
         return (x1-p1, y1, x2+p2, y2)
     
-    def set_facecolor(self, color: str | None = None):
-        assert isinstance(color, (str, type(None))), color
+    def set_facecolor(self, color: str | None = None) -> None:
+        assert isinstance(color, (str, NoneType)), color
         
         if color is not None:
             self._req_facecolor = color
     
     def get_facecolor(self) -> str:
-        return self._canvas.get('background')
+        return self._canvas.cget('background')
     
     def set_edge(
-            self, color: str | None = None, width: Dimension | None = None
-    ):
-        assert isinstance(color, (str, type(None))), color
-        assert isinstance(width, (Dimension, type(None))), width
+        self, color: str | None = None, width: ScreenUnits | None = None
+    ) -> None:
+        assert isinstance(color, (str, NoneType)), color
+        assert isinstance(width, (_ScreenUnits, NoneType)), width
         
         if color is not None:
             self._req_edge["edgecolor"] = color
@@ -2674,28 +2955,33 @@ class _Legend(_BaseComponent):
             "width": self._canvas.container.cget('padx')
         }
     
-    def set_enabled(self, enable: bool = True):
+    def set_enabled(self, enable: bool = True) -> None:
         self._req_enabled = enable
     
     def _set_bounds(
-            self,
-            xys: tuple[Dimension, Dimension, Dimension, Dimension]
-    ):
-        assert isinstance(xys, (tuple, type(None))), xys
-        assert all( isinstance(p, (Dimension, type(None))) for p in xys ), xys
+        self,
+        xys: tuple[
+            ScreenUnits | None,
+            ScreenUnits | None,
+            ScreenUnits | None,
+            ScreenUnits | None
+        ]
+    ) -> None:
+        assert isinstance(xys, (tuple, NoneType)), xys
+        assert all( isinstance(p, (_ScreenUnits, NoneType)) for p in xys ), xys
         
         self._req_bounds["xys"] = xys
     
     def set_size(
-            self,
-            width: Dimension | None = None,
-            padx: tuple[Dimension, Dimension] | None = None
-    ):
-        assert isinstance(width, (Dimension, type(None))), width
-        assert isinstance(padx, (tuple, type(None))), padx
+        self,
+        width: ScreenUnits | None = None,
+        padx: tuple[ScreenUnits, ScreenUnits] | None = None
+    ) -> None:
+        assert isinstance(width, (_ScreenUnits, NoneType)), width
+        assert isinstance(padx, (tuple, NoneType)), padx
         if padx is not None:
             assert len(padx) == 2, padx
-            assert all( isinstance(p, Dimension) for p in padx ), padx
+            assert all( isinstance(p, _ScreenUnits) for p in padx ), padx
         
         if width is not None:
             self._req_bounds["width"] = width
@@ -2706,20 +2992,20 @@ class _Legend(_BaseComponent):
         return {"width": self._canvas.container.winfo_width(), "padx": self._padx}
     
     def set_ipadding(
-            self,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None
-    ):
-        assert isinstance(padx, (Dimension, tuple, type(None))), padx
-        assert isinstance(pady, (Dimension, tuple, type(None))), pady
+        self,
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None
+    ) -> None:
+        assert isinstance(padx, (_ScreenUnits, tuple, NoneType)), padx
+        assert isinstance(pady, (_ScreenUnits, tuple, NoneType)), pady
         
         padding = []
         for pad in [padx, pady]:
-            if isinstance(pad, Dimension):
+            if isinstance(pad, _ScreenUnits):
                 pad = (pad, pad)
             elif isinstance(pad, tuple):
                 assert len(pad) == 2, [padx, pady]
-                assert all( isinstance(p, Dimension) for p in pad ), [padx, pady]
+                assert all( isinstance(p, _ScreenUnits) for p in pad ), [padx, pady]
             padding.append(pad)
         padx, pady = padding
         
@@ -2730,18 +3016,18 @@ class _Legend(_BaseComponent):
         self._req_ipadding = new
     
     def set_labels(
-            self,
-            color: str | None = None,
-            angle: IntFloat | None = None,
-            family: str | None = None,
-            size: Int | None = None,
-            weight: str | None = None,
-            slant: str | None = None,
-            underline: bool | None = None,
-            overstrike: bool | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None
-    ):
+        self,
+        color: str | None = None,
+        angle: IntFloat | None = None,
+        family: str | None = None,
+        size: Int | None = None,
+        weight: Literal['normal', 'bold'] | None = None,
+        slant: Literal['roman', 'italic'] | None = None,
+        underline: bool | None = None,
+        overstrike: bool | None = None,
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None
+    ) -> None:
         self._dummy_label.set_style(
             color=color,
             angle=angle,
@@ -2754,12 +3040,12 @@ class _Legend(_BaseComponent):
         )
         self._dummy_label.set_bounds(padx=padx, pady=pady)
     
-    def get_labels(self) -> list[_Text]:
+    def get_labels(self):
         return self._labels
     
     def _set_contents(
-            self, lines: list[_Line], labels: list[str]
-    ):
+        self, lines: list[_Line], labels: list[str]
+    ) -> None:
         assert isinstance(lines, list), lines
         assert isinstance(labels, list), labels
         assert len(lines) == len(labels), (len(lines), len(labels))
@@ -2771,17 +3057,16 @@ class _Legend(_BaseComponent):
         self._req_labels = labels
 
 
-class _DataLabel(_BaseComponent):
+class _DataLabel(_CanvasComponent['_FigureCanvas']):
     def __init__(self, line: _Line, **kwargs):
         assert isinstance(line, _Line), line
+        assert isinstance(canvas := line.canvas, _FigureCanvas), canvas
+        assert isinstance(plot := canvas.wrapper, _Plot), plot
+        super().__init__(plot, canvas=canvas, **kwargs)
         
-        plot: _Plot = line._canvas._wrapper
-        super().__init__(plot, **kwargs)
-        assert self._canvas is line._canvas, (self._canvas, line._canvas)
-        
-        self._req_offset: tuple[Dimension, Dimension] | None = None  # text offset
+        self._req_offset: tuple[ScreenUnits, ScreenUnits] | None = None  # text offset
         self._req_scientific: Int | None = None
-        self._req_xy: NDArray[Float] | None = None  # data point
+        self._req_xy: tuple[NpFloat, NpFloat] | None = None  # data point
         
         self._settled: bool = False  # temporary or settled
         self._line: _Line = line  # mother line
@@ -2789,8 +3074,7 @@ class _DataLabel(_BaseComponent):
         self._box_edgewidth: str | None = None
         self._point_edgewidth: str | None = None
         self._arrow_edgewidth: str | None = None
-        self._motion_start: tuple[Int, Int, Int, Int, Int, Int] \
-            = (0, 0, 0, 0, 0, 0)
+        self._motion_start: tuple[Int, Int, Int, Int] = (0, 0, 0, 0)
         self._drag_text_xy: tuple[Int, Int] | None = None  # latest dragged position
         
         self._arrow: _Polygon = _Polygon(
@@ -2813,26 +3097,31 @@ class _DataLabel(_BaseComponent):
             artist.bind_leftmotion(self._on_leftmotion)
             artist.bind_rightpress(self._on_rightpress)
     
-    def update_theme(self):
+    def update_theme(self) -> None:
         for artist in (self._arrow, self._point, self._box, self._text):
-            artist._stale = True
-        self._line._stale = True  # force update `self`
+            artist.stale = True
+        self._line.stale = True  # => force update `self`
     
-    def draw(self):
+    def draw(self) -> None:
+        assert self._req_xy is not None, self._req_xy
+        
         data_xy = self._req_xy
-        sci = self._req_scientific if self._req_scientific is not None \
+        sci = (
+            self._req_scientific if self._req_scientific is not None
             else self._default_style[f"{self._tag}.scientific"]
+        )
         offset = self._to_px(
-            self._req_offset if self._req_offset is not None \
+            self._req_offset if self._req_offset is not None
             else self._default_style[f"{self._tag}.offset"]
         )
         
         # Draw text
         bg = self._line.cget('fill')
         fg = contrast_color(bg)
-        label = self._line.get_label()
+        label = self._line.get_label() or ''
         point = '({0:.{2}g}, {1:.{2}g})'.format(*data_xy, sci)
         x0, y0 = self._line._req_transform(*data_xy, round_=True, clip=False)
+        x0, y0 = _NpFloat(x0), _NpFloat(y0)
         if self._drag_text_xy is None:
             x1, y1 = (x0 + offset[0]), (y0 + offset[1])
         else:
@@ -2840,19 +3129,20 @@ class _DataLabel(_BaseComponent):
         self._text.set_style(text='\n'.join([label, point]), color=fg)
         self._text.set_bounds((x1, y1, x1, y1))
         self._text.draw()
-        if not self._settled:  # temporarily magnify the font size
+        if not self._settled:  # => temporarily magnify the font size
             req_style = self._text._req_style
             original_text_size = req_style["size"]
             try:
                 req_style["size"] = self._text._font.actual('size') + 1
-                self._text._stale = True
+                self._text.stale = True
                 self._text.draw()
-            finally:
+            finally:  # restore the font size for future update
                 req_style["size"] = original_text_size
-                self._text._stale = True
+                self._text.stale = True
         
         # Draw box
-        box_x1, box_y1, box_x2, box_y2 = self._text.bbox()
+        assert (bbox := self._text.bbox()) is not None, bbox
+        box_x1, box_y1, box_x2, box_y2 = bbox
         self._box.set_style(facecolor=bg)
         self._box.set_coords(box_x1, box_y1, box_x2, box_y2)
         self._box.draw()
@@ -2880,39 +3170,39 @@ class _DataLabel(_BaseComponent):
         self._point.set_coords(point_x1, point_y1, point_x2, point_y2)
         self._point.draw()
     
-    def bbox(self) -> tuple[int, int, int, int] | None:
+    def bbox(self) -> tuple[int, int, int, int] | None:  #TODO
         pass
     
-    def delete(self):
+    def delete(self) -> None:
         self._on_leave()
         for artist in (self._arrow, self._point, self._box, self._text):
             artist.delete()
         self._line._datalabels.remove(self)
     
     def set_text(
-            self,
-            color: str | None = None,
-            angle: IntFloat | None = None,
-            family: str | None = None,
-            size: Int | None = None,
-            weight: str | None = None,
-            slant: str | None = None,
-            underline: bool | None = None,
-            overstrike: bool | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None,
-            scientific: Int | None = None,
-            offset: Dimension | tuple[Dimension, Dimension] | None = None
-    ):
-        assert isinstance(offset, (Dimension, tuple, type(None))), offset
-        assert isinstance(scientific, (Int, type(None))), scientific
+        self,
+        color: str | None = None,
+        angle: IntFloat | None = None,
+        family: str | None = None,
+        size: Int | None = None,
+        weight: Literal['normal', 'bold'] | None = None,
+        slant: Literal['roman', 'italic'] | None = None,
+        underline: bool | None = None,
+        overstrike: bool | None = None,
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        scientific: Int | None = None,
+        offset: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None
+    ) -> None:
+        assert isinstance(offset, (_ScreenUnits, tuple, NoneType)), offset
+        assert isinstance(scientific, (_Int, NoneType)), scientific
         assert scientific is None or scientific > 0, scientific
         
-        if isinstance(offset, Dimension):
+        if isinstance(offset, _ScreenUnits):
             offset = (offset, offset)
         elif isinstance(offset, tuple):
             assert len(offset) == 2, offset
-            assert all( isinstance(d, Dimension) for d in offset ), offset
+            assert all( isinstance(d, _ScreenUnits) for d in offset ), offset
         
         self._text.set_style(
             color=color,
@@ -2932,50 +3222,50 @@ class _DataLabel(_BaseComponent):
             self._req_offset = offset
             self._drag_text_xy = None
     
-    def get_text(self) -> _Text:
+    def get_text(self):
         return self._text
     
-    def _set_point(self, x: IntFloat, y: IntFloat):
-        assert isinstance(x, IntFloat), x
-        assert isinstance(y, IntFloat), y
+    def set_point(self, x: IntFloat, y: IntFloat) -> None:
+        assert isinstance(x, _IntFloat), x
+        assert isinstance(y, _IntFloat), y
         
-        self._req_xy = np.asarray([x, y])  # data point
+        self._req_xy = (_NpFloat(x), _NpFloat(y))  # data point
         self._drag_text_xy = None
     
-    def _settle(self):
+    def settle(self) -> None:
         self._settled = True
         for artist in (self._arrow, self._point, self._box):
             artist._hover = True
     
-    def _on_enter(self, event: tk.Event | None = None):
-        def _set_active_width(artist: _BaseArtist):
+    def _on_enter(self, event: tk.Event | None = None) -> None:  #TODO: self._point has 0 activewidth when hovered
+        def _apply_active_width(artist: _BaseArtist) -> str:
             normal_w = artist.cget('width')
             active_w = artist.cget('activewidth') if artist._hover else normal_w
-            artist.itemconfigure(width=active_w)
+            artist.configure(width=active_w)
             return normal_w
-        #> end of _set_active_width()
+        #> end of _apply_active_width()
         
         # Restore the normal widths if they haven't been restored
         if self._line_width is not None:
             self._on_leave(event)
         
-        self._box_edgewidth = _set_active_width(self._box)
-        self._point_edgewidth = _set_active_width(self._point)
-        self._arrow_edgewidth = _set_active_width(self._arrow)
-        self._line_width = _set_active_width(self._line)
+        self._box_edgewidth = _apply_active_width(self._box)
+        self._point_edgewidth = _apply_active_width(self._point)
+        self._arrow_edgewidth = _apply_active_width(self._arrow)
+        self._line_width = _apply_active_width(self._line)
     
-    def _on_leave(self, event: tk.Event | None = None):
+    def _on_leave(self, event: tk.Event | None = None) -> None:
         # Restore the normal widths
-        self._box.itemconfigure(width=self._box_edgewidth)
-        self._point.itemconfigure(width=self._point_edgewidth)
-        self._arrow.itemconfigure(width=self._arrow_edgewidth)
-        self._line.itemconfigure(width=self._line_width)
+        self._box.configure(width=self._box_edgewidth)
+        self._point.configure(width=self._point_edgewidth)
+        self._arrow.configure(width=self._arrow_edgewidth)
+        self._line.configure(width=self._line_width)
         self._box_edgewidth = self._point_edgewidth = self._arrow_edgewidth \
             = self._line_width = None
     
-    def _on_leftpress(self, event: tk.Event):
+    def _on_leftpress(self, event: tk.Event) -> None:
         # Save the start position
-        x1, y1, x2, y2 = self._text._req_bounds["xys"]
+        x1, y1, _x2, _y2 = self._text._req_bounds["xys"]
         self._motion_start = (event.x, event.y, x1, y1)
         
         # Lift artists to the top
@@ -2984,151 +3274,221 @@ class _DataLabel(_BaseComponent):
         self._box.lift(self._tag)
         self._text.lift(self._tag)
     
-    def _on_leftmotion(self, event: tk.Event):
+    def _on_leftmotion(self, event: tk.Event) -> None:
         mouse_x0, mouse_y0, text_x0, text_y0 = self._motion_start
         dx, dy = (event.x - mouse_x0, event.y - mouse_y0)
         self._drag_text_xy = (text_x0 + dx), (text_y0 + dy)  # update position
         self.draw()
         self._on_enter()  # update box edgewidth if left
     
-    def _on_rightpress(self, event: tk.Event):
+    def _on_rightpress(self, event: tk.Event | None = None) -> None:
         self.delete()
 
 
 # =============================================================================
-# ---- Figure Subwidget wrappers
+# MARK: Figure (Wrapped) Subwidgets
 # =============================================================================
-def _with_draw_events(draw_func: Callable):
+class _FigureSubwidget[R: _SubwidgetWrapper](
+    mixin_base(tk.Widget), metaclass=DropObject
+):
+    _root: Callable[[], tb.Window]
+    
+    def __init__(
+        self, figure: 'Figure', wrapper: R, *args, **kwargs
+    ):
+        assert isinstance(self, tk.Widget), self
+        assert isinstance(figure, Figure), figure
+        assert isinstance(wrapper, _SubwidgetWrapper), wrapper
+        
+        super().__init__(figure, *args, **kwargs)
+        
+        self._figure: Figure = figure
+        self._wrapper: R = wrapper
+    
+    @property
+    def figure(self):
+        return self._figure
+    
+    @property
+    def wrapper(self):
+        return self._wrapper
+
+
+class _FigureCanvas[R: '_SubwidgetWrapper'](
+    _FigureSubwidget[R], _BaseCanvas['_FigureCanvas'], tk.Canvas
+):
+    pass
+
+
+class _ToolbarFrame[R: '_SubwidgetWrapper'](_FigureSubwidget[R], tk.Frame):
+    pass
+
+
+# =============================================================================
+# MARK: Figure Subwidget wrappers
+# =============================================================================
+def _trigger_draw_events[**P, R](draw_func: Callable[P, R]) -> Callable[P, R]:
     @wraps(draw_func)
-    def _wrapper(self, *args, **kwargs):
-        tkwidget = self._tkwidget
-        tkwidget.event_generate(DRAWSTARTED)
+    def _wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        assert isinstance(self := args[0], _SubwidgetWrapper), args
+        assert isinstance(widget := self.widget, tk.Widget), widget
+        widget.event_generate(DRAWSTARTED)
         try:
-            draw_func(self, *args, **kwargs)
+            result = draw_func(*args, **kwargs)
+        except:
+            widget.event_generate(DRAWFAILED)
+            raise
+        else:
+            widget.event_generate(DRAWSUCCEEDED)
+            return result
         finally:
-            tkwidget.event_generate(DRAWENDED)
+            widget.event_generate(DRAWENDED)
+    #> end of _wrapper()
     
     return _wrapper
 
 
-class _BaseWidgetWrapper:
-    def __init__(self, tkwidget: tk.Misc):
-        assert isinstance(tkwidget, tk.Misc), tkwidget
-        assert isinstance(tkwidget.master, Figure), tkwidget.master
-        tkwidget._figure = figure = tkwidget.master
-        tkwidget._wrapper = self
+class _SubwidgetWrapper[W: _FigureSubwidget](
+    mixin_base(tk.Widget), metaclass=DropObject
+):
+    def __init__(self, widget: W):
+        assert isinstance(widget, tk.Widget), widget
+        assert isinstance(widget, _FigureSubwidget), widget
+        assert isinstance(widget.figure, Figure), widget.figure
         
         self._resize = defer(100)(self._resize)
-        self._tkwidget: tk.Misc = tkwidget
-        self._figure: Figure = figure
-        self._resizing: bool = False
+        self._widget: W = widget
         self._draw_idle_id: str = 'after#'
+        self._resizing: bool = False
         self._size: tuple[int, int] = (
-            tkwidget.winfo_reqwidth(), tkwidget.winfo_reqheight()
+            widget.winfo_reqwidth(), widget.winfo_reqheight()
         )
-        self._req_facecolor: str | None = None
         
-        if isinstance(tkwidget, tk.Canvas):
-            tkwidget._zorder_tags: dict[_BaseArtist, str] = {}
-            tkwidget.bind('<Configure>', self._on_configure, add=True)
-        tkwidget.bind('<Destroy>', self._on_destroy, add=True)
+        widget.bind('<Destroy>', self._on_destroy, add=True)
     
     @property
-    def _default_style(self) -> dict[str, Any]:
-        return self._figure._default_style
+    def widget(self):
+        return self._widget
     
-    def _to_px(self, dimension: Dimension) -> float | tuple[float, ...]:
-        return _to_px(self._tkwidget._root(), dimension)
+    @property
+    def figure(self):
+        return self._widget.figure
     
-    def _on_destroy(self, event: tk.Event):
-        if event.widget is not self._tkwidget:
-            return
-        _cleanup_tk_attributes(self)
+    @property
+    def _default_style(self):
+        return self.figure._default_style
     
-    def _on_configure(self, event: tk.Event):
-        def _resize():
-            self._resize(event)
-            self._resizing = False
-        #> end of _resize()
-        
-        if not self._resizing:
-            self._resizing = True
-            self._tkwidget.itemconfigure('resizable=True', state='hidden')
-            self._tkwidget.itemconfigure('movable=True', state='hidden')
-        self._tkwidget.after_cancel(self._draw_idle_id)
-        self._draw_idle_id = self._tkwidget.after_idle(_resize)
+    @overload
+    def _to_px(self, dimension: ScreenUnits) -> int: ...
+    @overload
+    def _to_px(self, dimension: None) -> None: ...
+    @overload
+    def _to_px(self, dimension: tuple[ScreenUnits, ...]) -> tuple[int, ...]: ...
+    @overload
+    def _to_px(
+        self, dimension: tuple[ScreenUnits | None, ...]
+    ) -> tuple[int | None, ...]: ...
+    def _to_px(self, dimension):
+        return to_pixels(self._widget._root(), dimension)
     
-    def _resize(self, event: tk.Event):
-        self._size = (event.width, event.height)
+    def _on_destroy(self, event: tk.Event) -> None:
+        if event.widget is self._widget:
+            _cleanup_tk_attributes(self)
     
-    def update_theme(self):
-        if isinstance(self._tkwidget, tk.Canvas):
-            for artist in self._tkwidget._zorder_tags:
-                artist._stale = True
-    
-    def draw(self):
+    def _on_configure(self, event: tk.Event) -> None:
         raise NotImplementedError
     
-    def draw_idle(self):
-        self._tkwidget.after_cancel(self._draw_idle_id)
-        self._draw_idle_id = self._tkwidget.after_idle(self.draw)
+    def _resize(self, event: tk.Event) -> None:
+        raise NotImplementedError
     
-    def set_facecolor(self, color: str | None = None):
-        assert isinstance(color, (str, type(None))), color
+    def update_theme(self) -> None:
+        raise NotImplementedError
+    
+    def draw(self) -> None:
+        raise NotImplementedError
+    
+    def draw_idle(self) -> None:
+        assert isinstance(self._widget, tk.Widget), self
+        
+        self._widget.after_cancel(self._draw_idle_id)
+        self._draw_idle_id = self._widget.after_idle(self.draw)
+    
+    def set_facecolor(self, color: str | None = None) -> None:
+        assert isinstance(color, (str, NoneType)), color
         
         if color is not None:
             self._req_facecolor = color
 
 
-class _Suptitle(_BaseWidgetWrapper):
-    _tag: str = 'suptitle'
+class _Suptitle(_SubwidgetWrapper[_FigureCanvas['_Suptitle']]):
+    _tag: Final = 'suptitle'
     
-    def __init__(self, master: Figure, *args, **kwargs):
-        assert isinstance(master, Figure), master
-        figure = master
-        canvas = tk.Canvas(figure, *args, **kwargs)
+    def __init__(self, figure: 'Figure', *args, **kwargs):
+        canvas = _FigureCanvas[_Suptitle](figure, *args, wrapper=self, **kwargs)
         super().__init__(canvas)
+        
+        self._req_facecolor: str | None = None
         self._text: _Text = _Text(canvas, text='', tag=f'{self._tag}.text')
+        
+        canvas.bind('<Configure>', self._on_configure, add=True)
     
-    def _resize(self, event: tk.Event):
-        super()._resize(event)
+    def _on_configure(self, event: tk.Event) -> None:
+        def _resize():
+            self._resize(event)
+            self._resizing = False
+        #> end of _resize()
+        
+        canvas = self._widget
+        if not self._resizing:
+            self._resizing = True
+            canvas.itemconfigure('resizable=True', state='hidden')
+            canvas.itemconfigure('movable=True', state='hidden')
+        canvas.after_cancel(self._draw_idle_id)
+        self._draw_idle_id = canvas.after_idle(_resize)
+    
+    def _resize(self, event: tk.Event) -> None:
+        self._size = (event.width, event.height)
         self.set_bounds()
         self._text.draw()
     
-    @_with_draw_events
-    def draw(self):
+    def update_theme(self) -> None:
+        for artist in self._widget.zorder_tags:
+            artist.stale = True
+    
+    @_trigger_draw_events
+    def draw(self) -> None:
         # Update facecolor
         default_color = self._default_style["frame.cover.polygon"]["facecolor"]
         bg = default_color if self._req_facecolor is None else self._req_facecolor
-        self._tkwidget.configure(background=bg)
+        self._widget.configure(background=bg)
         
         # Draw text
         self._text.draw()
         xys = self._text.bbox()
         if xys is not None:
             x1, y1, x2, y2 = xys
-            self._tkwidget.configure(width=x2-x1+1, height=y2-y1+1)
-            self._tkwidget.update_idletasks()  # triggers `self._on_configure`
+            self._widget.configure(width=x2-x1+1, height=y2-y1+1)
+            self._widget.update_idletasks()  # triggers `self._on_configure`
     
     def get_facecolor(self) -> str:
-        return self._tkwidget.cget('background')
+        return self._widget.cget('background')
     
-    def get_title(self) -> _Text:
+    def get_title(self):
         return self._text
     
     def set_bounds(
-            self,
-            sticky: str | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None
-    ):
+        self,
+        sticky: str | None = None,
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None
+    ) -> None:
         if sticky is not None and ('s' in sticky or sticky == 'center'):
             raise ValueError(
                 "`sticky` for suptitle must not include 's' and not equal to "
                 f"'center' but got {sticky}."
             )
         
-        w, h = self._size
+        w, _h = self._size
         self._text.set_bounds(
             (0, 0, w-1, None), sticky=sticky, padx=padx, pady=pady
         )
@@ -3136,29 +3496,26 @@ class _Suptitle(_BaseWidgetWrapper):
     def set_style(self, *args, **kwargs):
         return self._text.set_style(*args, **kwargs)
     
-    def get_style(self) -> dict[str, Any]:
+    def get_style(self):
         return self._text.get_style()
 
 
-class _Plot(_BaseWidgetWrapper):
-    _tag: str = 'plot'
+class _Plot(_SubwidgetWrapper[_FigureCanvas['_Plot']]):
+    _tag: Final = 'plot'
     
-    def __init__(self, master: Figure, *args, **kwargs):
-        assert isinstance(master, Figure), master
-        figure = master
-        canvas = tk.Canvas(figure, *args, **kwargs)
+    def __init__(self, figure: 'Figure', *args, **kwargs):
+        canvas = _FigureCanvas[_Plot](figure, *args, wrapper=self, **kwargs)
         super().__init__(canvas)
-        del self._req_facecolor
         
-        artists = {"lines": []}
+        arts: dict[Literal['lines'], list[_BaseArtist]] = {"lines": []}
         self._colors: dict[str, Cycle] = {"lines": self._create_color_cycle()}
-        self._tartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
-        self._bartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
-        self._lartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
-        self._rartists: dict[str, list[_BaseArtist]] = deepcopy(artists)
-        self._transforms: dict[str, _BaseTransform1D] = {}
-        self._dbounds: dict[str, NDArray[Float]] = {}
-        self._cbounds: dict[str, NDArray[Int]] = {}
+        self._tartists: dict[Literal['lines'], list[_BaseArtist]] = deepcopy(arts)
+        self._bartists: dict[Literal['lines'], list[_BaseArtist]] = deepcopy(arts)
+        self._lartists: dict[Literal['lines'], list[_BaseArtist]] = deepcopy(arts)
+        self._rartists: dict[Literal['lines'], list[_BaseArtist]] = deepcopy(arts)
+        self._transforms: dict[Literal['r', 'b', 'l', 't'], _BaseTransform1D] = {}
+        self._dbounds: dict[Literal['r', 'b', 'l', 't'], NDArray[_NpFloat]] = {}
+        self._cbounds: dict[Literal['r', 'b', 'l', 't'], NDArray[_NpInt]] = {}
         
         self._title: _Text = _Text(canvas, text='', tag='title.text')
         self._taxis: _Axis = _Axis(self, side='t', tag='taxis')
@@ -3179,6 +3536,7 @@ class _Plot(_BaseWidgetWrapper):
             canvas, state='hidden', tag='toolbar.rubberband.rectangle'
         )
         
+        canvas.bind('<Configure>', self._on_configure, add=True)
         canvas.bind('<Enter>', self._on_enter, add=True)
         canvas.bind('<Leave>', self._on_leave, add=True)
         canvas.bind('<Motion>', self._on_motion, add=True)
@@ -3189,33 +3547,50 @@ class _Plot(_BaseWidgetWrapper):
         self.set_lticksticks(True)
     
     @property
-    def artists(self) -> set:
+    def artists(self) -> list[_BaseArtist]:
         artists = []
-        for side in 'bt':
+        for side in _XAXISSIDES:
             for arts in getattr(self, f'_{side}artists').values():
                 artists.extend(arts)
+        
         return artists
     
-    def _resize(self, event: tk.Event):
-        super()._resize(event)
+    def _on_configure(self, event: tk.Event) -> None:
+        def _resize():
+            self._resize(event)
+            self._resizing = False
+        #> end of _resize()
+        
+        canvas = self._widget
+        if not self._resizing:
+            self._resizing = True
+            canvas.itemconfigure('resizable=True', state='hidden')
+            canvas.itemconfigure('movable=True', state='hidden')
+        canvas.after_cancel(self._draw_idle_id)
+        self._draw_idle_id = canvas.after_idle(_resize)
+    
+    def _resize(self, event: tk.Event) -> None:
+        self._size = (event.width, event.height)
         self.draw()
     
-    def update_theme(self):
-        super().update_theme()
+    def update_theme(self) -> None:
+        for artist in self._widget.zorder_tags:
+            artist.stale = True
+        
         self._frame.update_theme()
         self._legend.update_theme()
-        for side in 'rblt':
+        for side in _AXISSIDES:
             self._get_axis(side).update_theme()
             self._get_ticks(side).update_theme()
     
-    def _on_enter(self, event: tk.Event):
-        self._figure._set_hovered_plot(self)
+    def _on_enter(self, event: tk.Event | None = None) -> None:
+        self.figure._set_hovered_plot(self)
     
-    def _on_leave(self, event: tk.Event):
-        self._figure._unset_hovered_plot(self)
-        self._figure._var_coord.set('\n')
+    def _on_leave(self, event: tk.Event | None = None) -> None:
+        self.figure._unset_hovered_plot(self)
+        self.figure._var_coord.set('\n')
     
-    def _on_motion(self, event: tk.Event):
+    def _on_motion(self, event: tk.Event) -> None:
         if not (tfs := self._transforms):
             return
         
@@ -3225,12 +3600,12 @@ class _Plot(_BaseWidgetWrapper):
         
         # Transform the canvas coordinates into data coordinates
         coords = {}
-        for side in 'tb':
+        for side in _XAXISSIDES:
             itf = tfs[side].get_inverse()
             x = np.clip(cx, *sorted(cbounds[side]))
             x = np.clip(itf(x), *sorted(dbounds[side]))  # data => canvas
             coords[side] = '{0:.{1}g}'.format(x, sci)  # convert to string
-        for side in 'lr':
+        for side in _YAXISSIDES:
             itf = tfs[side].get_inverse()
             y = np.clip(cy, *sorted(cbounds[side]))
             y = np.clip(itf(y), *sorted(dbounds[side]))  # data => canvas
@@ -3244,38 +3619,37 @@ class _Plot(_BaseWidgetWrapper):
         
         # Align texts
         lengths = [ max(map(len, stings)) for stings in coords.items() ]
-        content = \
-            ' | '.join( f'{s:<{l}}' for s, l in zip(coords.keys(), lengths) ) \
-            + '\n' \
+        content = (
+            ' | '.join( f'{s:<{l}}' for s, l in zip(coords.keys(), lengths) )
+            + '\n'
             + ' | '.join( f'{s:<{l}}' for s, l in zip(coords.values(), lengths) )
+        )
         
         # Update variable value
-        self._figure._var_coord.set(content)
+        self.figure._var_coord.set(content)
     
-    @_with_draw_events
-    def draw(self):
-        if not self._figure._initialized:
-            self._figure._initialize()
-        
-        canvas = self._tkwidget
+    @_trigger_draw_events
+    def draw(self) -> None:
+        if not self.figure._initialized:
+            self.figure._initialize()
         
         # Get data limits
         _dlimits = [
             np.asarray([
-                getattr(a, lims) for a in sum(artists.values(), [])
+                getattr(a, limits) for a in sum(artists.values(), [])
                 if a._req_state != 'hidden'
             ])
-            for artists, lims in [
-                (self._rartists, '_ylims'),
-                (self._bartists, '_xlims'),
-                (self._lartists, '_ylims'),
-                (self._tartists, '_xlims')
+            for artists, limits in [
+                (self._rartists, '_ylimits'),
+                (self._bartists, '_xlimits'),
+                (self._lartists, '_ylimits'),
+                (self._tartists, '_xlimits')
             ]
         ]
-        dbounds = np.array([(_DMIN, _DMAX)]*4, dtype=float)
-        for i, lims in enumerate(_dlimits):
-            if lims.size:
-                dbounds[i] = [lims[:, 0].min(), lims[:, 1].max()]
+        dbounds = np.array([(_DMIN, _DMAX)]*4, dtype=_NpFloat)
+        for i, limits in enumerate(_dlimits):
+            if limits.size:
+                dbounds[i] = [limits[:, 0].min(), limits[:, 1].max()]
         dbounds[0] = dbounds[0][::-1]  # flip y
         dbounds[2] = dbounds[2][::-1]  # flip y
         del _dlimits
@@ -3306,7 +3680,7 @@ class _Plot(_BaseWidgetWrapper):
         cxys_outer = [cx1, cy1, cx2, cy2]  # empty space for the ticks and frame
         
         ## Draw dummy ticks (top and bottom)
-        cbounds = [[cy1, cy2], [cx1, cx2]] * 2  # shape: (4, 2)
+        cbounds = ((cy1, cy2), (cx1, cx2), (cy1, cy2), (cx1, cx2))  # shape: (4, 2)
         self._bticks._set_bounds_and_transform(
             (cx1, None, cx2, cy2), dbounds[1], cbounds[1], dummy=True
         )
@@ -3360,13 +3734,17 @@ class _Plot(_BaseWidgetWrapper):
         cbounds = np.asarray([[cy1, cy2], [cx1, cx2]] * 2)  # shape: (4, 2)
         tfs = {}
         tick_cdata = {}
-        for i, (side, dat, cnv) in enumerate(zip('rblt', dbounds, cbounds)):
-            growing_p = cxys_inner[i-2]
-            xys = cxys_inner.copy()
+        for i, (side, dat, cnv) in enumerate(zip(_AXISSIDES, dbounds, cbounds)):
+            growing_p = cxys_inner[i-2]  # frame position on the growing side
+            xys = cast(list[Any], cxys_inner.copy())
             xys[i] = None  # growing bound
-            xys[i-2] = cxys_outer[i-2]  # outer bound
+            xys[i-2] = cxys_outer[i-2]  # extends to outer bound
+            xys = cast(
+                tuple[int | None, int | None, int | None, int | None],
+                tuple(xys)
+            )
             ticks = self._get_ticks(side)
-            ticks._set_bounds_and_transform(tuple(xys), dat, cnv, growing_p)
+            ticks._set_bounds_and_transform(xys, dat, cnv, growing_p)
             ticks.draw()
             tfs[side] = ticks._get_transform().copy()
             tick_cdata[side] = ticks._ticks_cdata
@@ -3377,12 +3755,16 @@ class _Plot(_BaseWidgetWrapper):
         self._frame.draw()
         
         # Draw the axes again after the actual frame dimensions are determined
-        for i, side in enumerate('rblt'):
-            xys = cxys_inner.copy()
+        for i, side in enumerate(_AXISSIDES):
+            xys = cast(list[Any], cxys_inner.copy())
             xys[i] = None
             xys[i-2] = cxys_axes[i-2]  # outer bound
+            xys = cast(
+                tuple[int | None, int | None, int | None, int | None],
+                tuple(xys)
+            )
             axis = self._get_axis(side)
-            axis.set_bounds(tuple(xys))
+            axis.set_bounds(xys)
             axis.draw()
         
         # Draw user defined artists
@@ -3390,27 +3772,30 @@ class _Plot(_BaseWidgetWrapper):
         if cx1 > cx2: cx1 = cx2 = round((cx1 + cx2) / 2.)
         if cy1 > cy2: cy1 = cy2 = round((cy1 + cy2) / 2.)
         cbounds = np.asarray([[cy1, cy2], [cx1, cx2]] * 2)  # shape: (4, 2)
-        cbounds = dict(zip('rblt', cbounds))
-        dbounds = dict(zip('rblt', dbounds))
+        new_cbounds = dict(zip(_AXISSIDES, cbounds))
+        new_dbounds = dict(zip(_AXISSIDES, dbounds))
         transforms = {}
-        for x_side in 'bt':
-            for y_side in 'rl':
-                transforms[x_side + y_side] = _Transform2D(
-                    tfs[x_side], tfs[y_side],
-                    inp_xbounds=dbounds[x_side], inp_ybounds=dbounds[y_side],
-                    out_xbounds=cbounds[x_side], out_ybounds=cbounds[y_side]
+        for xaxisside in _XAXISSIDES:
+            for yaxisside in _YAXISSIDES:
+                transforms[xaxisside + yaxisside] = _Transform2D(
+                    tfs[xaxisside], tfs[yaxisside],
+                    inp_xbounds=new_dbounds[xaxisside],
+                    inp_ybounds=new_dbounds[yaxisside],
+                    out_xbounds=new_cbounds[xaxisside],
+                    out_ybounds=new_cbounds[yaxisside]
                 )
         for artist in self.artists:
-            sides = artist._x_side + artist._y_side
-            artist.set_transform(transforms[sides])
+            assert (xaxisside := artist._xaxisside) is not None, xaxisside
+            assert (yaxisside := artist._yaxisside) is not None, yaxisside
+            artist.set_transform(transforms[xaxisside + yaxisside])
             artist.draw()
         self._transforms.update(tfs)
-        self._dbounds.update(dbounds)
-        self._cbounds.update(cbounds)
+        self._dbounds.update(new_dbounds)
+        self._cbounds.update(new_cbounds)
         
         ## Draw legend again after the user-defined artists are drawn
         lines, labels = [], []
-        for side in 'bt':
+        for side in _XAXISSIDES:
             for line in getattr(self, f'_{side}artists')["lines"]:
                 if (label := line.get_label()) is not None:
                     labels.append(label)
@@ -3424,13 +3809,14 @@ class _Plot(_BaseWidgetWrapper):
         self._rubberband.draw()
         
         # Raise artists in order
+        canvas = self._widget
         for tag in sorted(
-                set(self._tkwidget._zorder_tags.values()),
+                set(canvas.zorder_tags.values()),
                 key=lambda t: float(t.split('zorder=', 1)[1])
         ):
             canvas.tag_raise(tag)
     
-    def delete_all(self, draw: bool = False):
+    def delete_all(self, draw: bool = False) -> None:
         for artist in self.artists:
             artist.delete()
         
@@ -3441,35 +3827,35 @@ class _Plot(_BaseWidgetWrapper):
         return Cycle(self._default_style["colors"])
     
     def set_facecolor(self, color: str | None = None):
-        assert isinstance(color, (str, type(None))), color
+        assert isinstance(color, (str, NoneType)), color
         
-        self._frame._cover.set_style(facecolor=color)
+        return self._frame._cover.set_style(facecolor=color)
     
     def get_facecolor(self) -> str:
         return self._frame._cover.get_style()["facecolor"]
     
     def set_title(
-            self,
-            text: str | None = None,
-            color: str | None = None,
-            angle: IntFloat | None = None,
-            family: str | None = None,
-            size: Int | None = None,
-            weight: str | None = None,
-            slant: str | None = None,
-            underline: bool | None = None,
-            overstrike: bool | None = None,
-            sticky: str | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None,
-    ):
+        self,
+        text: str | None = None,
+        color: str | None = None,
+        angle: IntFloat | None = None,
+        family: str | None = None,
+        size: Int | None = None,
+        weight: Literal['normal', 'bold'] | None = None,
+        slant: Literal['roman', 'italic'] | None = None,
+        underline: bool | None = None,
+        overstrike: bool | None = None,
+        sticky: str | None = None,
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+    ) -> None:
         if sticky is not None and ('s' in sticky or sticky == 'center'):
             raise ValueError(
                 "`sticky` for title must not include 's' and not equal to "
                 f"'center' but got {sticky}."
             )
         
-        w, h = self._size
+        w, _h = self._size
         self._title.set_style(
             text=text,
             color=color,
@@ -3488,41 +3874,41 @@ class _Plot(_BaseWidgetWrapper):
             pady=pady
         )
     
-    def get_title(self) -> _Text:
+    def get_title(self):
         return self._title
     
     def _get_axis(self, side: Literal['r', 'b', 'l', 't']) -> _Axis:
-        assert side in ('r', 'b', 'l', 't'), side
+        assert side in _AXISSIDES, side
         return getattr(self, f'_{side}axis')
     
-    def get_taxis(self) -> _Axis:
-        return self._get_axis('t')
+    def get_taxis(self):
+        return self._taxis
     
-    def get_baxis(self) -> _Axis:
-        return self._get_axis('b')
+    def get_baxis(self):
+        return self._baxis
     
-    def get_laxis(self) -> _Axis:
-        return self._get_axis('l')
+    def get_laxis(self):
+        return self._laxis
     
-    def get_raxis(self) -> _Axis:
-        return self._get_axis('r')
+    def get_raxis(self):
+        return self._raxis
     
     def _set_axislabel(
-            self,
-            side: Literal['r', 'b', 'l', 't'],
-            text: str | None = None,
-            color: str | None = None,
-            angle: IntFloat | None = None,
-            family: str | None = None,
-            size: Int | None = None,
-            weight: str | None = None,
-            slant: str | None = None,
-            underline: bool | None = None,
-            overstrike: bool | None = None,
-            sticky: str | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None
-    ):
+        self,
+        side: Literal['r', 'b', 'l', 't'],
+        text: str | None = None,
+        color: str | None = None,
+        angle: IntFloat | None = None,
+        family: str | None = None,
+        size: Int | None = None,
+        weight: Literal['normal', 'bold'] | None = None,
+        slant: Literal['roman', 'italic'] | None = None,
+        underline: bool | None = None,
+        overstrike: bool | None = None,
+        sticky: str | None = None,
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None
+    ) -> None:
         axis = self._get_axis(side)
         axis.set_label(
             text=text,
@@ -3554,167 +3940,175 @@ class _Plot(_BaseWidgetWrapper):
         return self._set_axislabel('r', *args, **kwargs)
     
     def _get_ticks(self, side: Literal['r', 'b', 'l', 't']) -> _Ticks:
-        assert side in ('r', 'b', 'l', 't'), side
+        assert side in _AXISSIDES, side
         return getattr(self, f'_{side}ticks')
     
-    def get_tticks(self) -> _Ticks:
-        return self._get_ticks('t')
+    def get_tticks(self):
+        return self._tticks
     
-    def get_bticks(self) -> _Ticks:
-        return self._get_ticks('b')
+    def get_bticks(self):
+        return self._bticks
     
-    def get_lticks(self) -> _Ticks:
-        return self._get_ticks('l')
+    def get_lticks(self):
+        return self._lticks
     
-    def get_rticks(self) -> _Ticks:
-        return self._get_ticks('r')
-    
-    def _set_ticksticks(
-            self,
-            side: Literal['r', 'b', 'l', 't'],
-            *args,
-            **kwargs
-    ):
-        ticks = self._get_ticks(side)
-        ticks.set_ticks(*args, **kwargs)
+    def get_rticks(self):
+        return self._rticks
     
     def set_tticksticks(self, *args, **kwargs):
-        return self._set_ticksticks('t', *args, **kwargs)
+        return self._tticks.set_ticks(*args, **kwargs)
     
     def set_bticksticks(self, *args, **kwargs):
-        return self._set_ticksticks('b', *args, **kwargs)
+        return self._bticks.set_ticks(*args, **kwargs)
     
     def set_lticksticks(self, *args, **kwargs):
-        return self._set_ticksticks('l', *args, **kwargs)
+        return self._lticks.set_ticks(*args, **kwargs)
     
     def set_rticksticks(self, *args, **kwargs):
-        return self._set_ticksticks('r', *args, **kwargs)
+        return self._rticks.set_ticks(*args, **kwargs)
     
     def _set_tickslabels(
-            self,
-            side: Literal['r', 'b', 'l', 't'],
-            *args,
-            **kwargs
+        self,
+        side: Literal['r', 'b', 'l', 't'],
+        *args,
+        **kwargs
     ):
         ticks = self._get_ticks(side)
-        ticks.set_labels(*args, **kwargs)
+        return ticks.set_labels(*args, **kwargs)
     
     def set_ttickslabels(self, *args, **kwargs):
-        return self._set_tickslabels('t', *args, **kwargs)
+        return self._tticks.set_labels(*args, **kwargs)
     
     def set_btickslabels(self, *args, **kwargs):
-        return self._set_tickslabels('b', *args, **kwargs)
+        return self._bticks.set_labels(*args, **kwargs)
     
     def set_ltickslabels(self, *args, **kwargs):
-        return self._set_tickslabels('l', *args, **kwargs)
+        return self._lticks.set_labels(*args, **kwargs)
     
     def set_rtickslabels(self, *args, **kwargs):
-        return self._set_tickslabels('r', *args, **kwargs)
+        return self._rticks.set_labels(*args, **kwargs)
     
     def set_tlimits(self, *args, **kwargs):
-        self._tticks.set_limits(*args, **kwargs)
+        return self._tticks.set_limits(*args, **kwargs)
     
     def set_blimits(self, *args, **kwargs):
-        self._bticks.set_limits(*args, **kwargs)
+        return self._bticks.set_limits(*args, **kwargs)
     
     def set_llimits(self, *args, **kwargs):
-        self._lticks.set_limits(*args, **kwargs)
+        return self._lticks.set_limits(*args, **kwargs)
     
     def set_rlimits(self, *args, **kwargs):
-        self._rticks.set_limits(*args, **kwargs)
+        return self._rticks.set_limits(*args, **kwargs)
     
-    def get_tlimits(self) -> tuple[list[IntFloat], list[Dimension]]:
+    def get_tlimits(self):
         return self._tticks.get_limits()
     
-    def get_blimits(self) -> tuple[list[IntFloat], list[Dimension]]:
+    def get_blimits(self):
         return self._bticks.get_limits()
     
-    def get_llimits(self) -> tuple[list[IntFloat], list[Dimension]]:
+    def get_llimits(self):
         return self._lticks.get_limits()
     
-    def get_rlimits(self) -> tuple[list[IntFloat], list[Dimension]]:
+    def get_rlimits(self):
         return self._rticks.get_limits()
     
     def set_tscale(self, *args, **kwargs):
-        self._tticks.set_scale(*args, **kwargs)
+        return self._tticks.set_scale(*args, **kwargs)
     
     def set_bscale(self, *args, **kwargs):
-        self._bticks.set_scale(*args, **kwargs)
+        return self._bticks.set_scale(*args, **kwargs)
     
     def set_lscale(self, *args, **kwargs):
-        self._lticks.set_scale(*args, **kwargs)
+        return self._lticks.set_scale(*args, **kwargs)
     
     def set_rscale(self, *args, **kwargs):
-        self._rticks.set_scale(*args, **kwargs)
+        return self._rticks.set_scale(*args, **kwargs)
     
-    def get_tscale(self) -> Literal['linear', 'log']:
+    def get_tscale(self):
         return self._tticks.get_scale()
     
-    def get_bscale(self) -> Literal['linear', 'log']:
+    def get_bscale(self):
         return self._bticks.get_scale()
     
-    def get_lscale(self) -> Literal['linear', 'log']:
+    def get_lscale(self):
         return self._lticks.get_scale()
     
-    def get_rscale(self) -> Literal['linear', 'log']:
+    def get_rscale(self):
         return self._rticks.get_scale()
     
-    def get_frame(self) -> _Frame:
+    def get_frame(self):
         return self._frame
     
     def set_grid(self, *args, **kwargs):
-        self._frame.set_grid(*args, **kwargs)
+        return self._frame.set_grid(*args, **kwargs)
     
-    def get_grid(self) -> dict[str, list[_Line]]:
+    def get_grid(self):
         return self._frame.get_grid()
     
-    def set_legend(self, enable: bool = True):
+    def set_legend(self, enable: bool = True) -> None:
         self._legend.set_enabled(enable)
     
-    def get_legend(self) -> _Legend:
+    def get_legend(self):
         return self._legend
     
     def set_legend_size(self, *args, **kwargs):
-        self._legend.set_size(*args, **kwargs)
+        return self._legend.set_size(*args, **kwargs)
     
-    def get_legend_size(self) -> dict[str, Any]:
+    def get_legend_size(self):
         return self._legend.get_size()
     
     def set_legend_facecolor(self, *args, **kwargs):
-        self._legend.set_facecolor(*args, **kwargs)
+        return self._legend.set_facecolor(*args, **kwargs)
     
-    def get_legend_facecolor(self) -> str:
+    def get_legend_facecolor(self):
         return self._legend.get_facecolor()
     
     def set_legend_edge(self, *args, **kwargs):
-        self._legend.set_edge(*args, **kwargs)
+        return self._legend.set_edge(*args, **kwargs)
     
-    def get_legend_edge(self) -> dict[str, Any]:
+    def get_legend_edge(self):
         return self._legend.get_edge()
     
     def set_legend_labels(self, *args, **kwargs):
-        self._legend.set_labels(*args, **kwargs)
+        return self._legend.set_labels(*args, **kwargs)
     
-    def get_legend_labels(self) -> list[_Text]:
+    def get_legend_labels(self):
         return self._legend.get_labels()
     
     def line(
-            self,
-            b: ArrayLike | None = None,
-            l: ArrayLike | None = None,
-            t: ArrayLike | None = None,
-            r: ArrayLike | None = None,
-            color: str | None = None,
-            width: Dimension | None = None,
-            dash: tuple[Dimension, ...] | None = None,
-            smooth: bool | None = None,
-            state: Literal['normal', 'hidden', 'disabled'] = 'normal',
-            zorder: IntFloat | None = None,
-            label: str | None = None,
-            datalabel: bool = True,
-            antialias: bool = True
+        self,
+        b:
+            Sequence[IntFloat]
+            | NDArray[_NpIntFloat]
+            | None
+            = None,
+        l:
+            Sequence[IntFloat]
+            | NDArray[_NpIntFloat]
+            | None
+            = None,
+        t:
+            Sequence[IntFloat]
+            | NDArray[_NpIntFloat]
+            | None
+            = None,
+        r:
+            Sequence[IntFloat]
+            | NDArray[_NpIntFloat]
+            | None
+            = None,
+        color: str | None = None,
+        width: ScreenUnits | None = None,
+        dash: tuple[ScreenUnits, ...] | None = None,
+        smooth: bool | None = None,
+        state: Literal['normal', 'hidden', 'disabled'] = 'normal',
+        zorder: IntFloat | None = None,
+        label: str | None = None,
+        datalabel: bool = True,
+        hover: bool = True,
+        antialias: bool = True
     ) -> _Line:
-        assert isinstance(label, (str, type(None))), label
+        assert isinstance(label, (str, NoneType)), label
         
         if not ((b is None) ^ (t is None)):
             raise ValueError('Either `b` or `t` must be a array-like value.')
@@ -3722,20 +4116,20 @@ class _Plot(_BaseWidgetWrapper):
             raise ValueError('Either `l` or `r` must be a array-like value.')
         
         if b is not None:  # b
-            x_side = 'b'
-            x = np.asarray(b, dtype=float)
+            xaxisside = 'b'
+            x = np.asarray(b, dtype=_NpFloat)
             x_artists = self._bartists
         else:  # t
-            x_side = 't'
-            x = np.asarray(t, dtype=float)
+            xaxisside = 't'
+            x = np.asarray(t, dtype=_NpFloat)
             x_artists = self._tartists
         if l is not None:  # l
-            y_side = 'l'
-            y = np.asarray(l, dtype=float)
+            yaxisside = 'l'
+            y = np.asarray(l, dtype=_NpFloat)
             y_artists = self._lartists
         else:  # r
-            y_side = 'r'
-            y = np.asarray(r, dtype=float)
+            yaxisside = 'r'
+            y = np.asarray(r, dtype=_NpFloat)
             y_artists = self._rartists
         assert x.shape == y.shape, [x.shape, y.shape]
         
@@ -3744,21 +4138,21 @@ class _Plot(_BaseWidgetWrapper):
         y_lines = y_artists["lines"]
         
         line = _Line(
-            self._tkwidget,
+            self._widget,
             color=next(color_cycle),
             width=width,
             dash=dash,
             smooth=smooth,
             state=state,
             label=label,
-            datalabel=True,
+            datalabel=datalabel,
             antialias=antialias,
             antialias_bg=lambda: self._frame.get_facecolor(),
-            hover=True,
+            hover=hover,
             movable=True,
             resizable=True,
-            x_side=x_side,
-            y_side=y_side,
+            xaxisside=xaxisside,
+            yaxisside=yaxisside,
             tag='line'
         )
         line.set_data(x.ravel(), y.ravel())
@@ -3769,23 +4163,19 @@ class _Plot(_BaseWidgetWrapper):
         return line
 
 
-class _Toolbar(_BaseWidgetWrapper):
-    _tag: str = 'toolbar'
-    _cursors: dict[str, str] = {"pan": 'fleur', "zoom": 'crosshair'}
+class _Toolbar(_SubwidgetWrapper[_ToolbarFrame['_Toolbar']]):
+    _tag: Final = 'toolbar'
+    _cursors: dict[Literal['pan', 'zoom'], str] = {
+        "pan": 'fleur', "zoom": 'crosshair'
+    }
     
-    def __init__(
-            self,
-            master: Figure,
-            var_coord: tk.Variable,
-            **kwargs
-    ):
-        assert isinstance(master, Figure), master
-        figure = master
-        frame = tk.Frame(figure, **kwargs)
+    def __init__(self, figure: 'Figure', var_coord: tk.Variable, **kwargs):
+        frame = _ToolbarFrame[_Toolbar](figure, wrapper=self, **kwargs)
         super().__init__(frame)
         
         # Initialize the states
-        self._org_cursors: dict[_Plot, str] = {}
+        self._req_facecolor: str | None = None
+        self._original_cursors: dict[_Plot, str] = {}
         self._plot_bindings: dict[_Plot, dict[str, str]] = {}
         self._active_plot: _Plot | None = None
         self._motion_start: tuple[Int, Int] | None = None
@@ -3795,11 +4185,11 @@ class _Toolbar(_BaseWidgetWrapper):
         
         # Create buttons and label
         x = 0
-        self._home_bt = ttk.Button(
+        self._home_bt: tb.Button = tb.Button(
             frame, text='Home', command=self._home_view, takefocus=False
         )
         self._home_bt.pack(side='left')
-        self._home_tt = ToolTip(
+        self._home_tt: ToolTip = ToolTip(
             self._home_bt,
             text='Reset to original view\nPress and hold A to autoscale',
             bootstyle='light-inverse'
@@ -3807,7 +4197,7 @@ class _Toolbar(_BaseWidgetWrapper):
         x += self._home_bt.winfo_reqwidth()
         
         padx = ('6p', '0p')
-        self._prev_bt = ttk.Button(
+        self._prev_bt: tb.Button = tb.Button(
             frame,
             text='Prev',
             command=self._prev_view,
@@ -3815,7 +4205,7 @@ class _Toolbar(_BaseWidgetWrapper):
             state='disabled'
         )
         self._prev_bt.pack(side='left', padx=padx)
-        self._prev_tt = ToolTip(
+        self._prev_tt: ToolTip = ToolTip(
             self._prev_bt,
             text='Back to previous view',
             bootstyle='light-inverse'
@@ -3823,7 +4213,7 @@ class _Toolbar(_BaseWidgetWrapper):
         x += self._prev_bt.winfo_reqwidth() + sum(self._to_px(padx))
         
         padx = ('3p', '0p')
-        self._next_bt = ttk.Button(
+        self._next_bt: tb.Button = tb.Button(
             frame,
             text='Next',
             command=self._next_view,
@@ -3831,7 +4221,7 @@ class _Toolbar(_BaseWidgetWrapper):
             state='disabled'
         )
         self._next_bt.pack(side='left', padx=padx)
-        self._next_tt = ToolTip(
+        self._next_tt: ToolTip = ToolTip(
             self._next_bt,
             text='Forward to next view',
             bootstyle='light-inverse'
@@ -3844,7 +4234,7 @@ class _Toolbar(_BaseWidgetWrapper):
         self._var_mode.trace_add('write', self._on_mode_changed, weak=True)
         
         padx = ('6p', '0p')
-        self._pan_bt = ttk.Checkbutton(
+        self._pan_bt: tb.Checkbutton = tb.Checkbutton(
             frame,
             text='Pan',
             variable=self._var_mode,
@@ -3854,7 +4244,7 @@ class _Toolbar(_BaseWidgetWrapper):
             takefocus=False
         )
         self._pan_bt.pack(side='left', padx=padx)
-        self._pan_tt = ToolTip(
+        self._pan_tt: ToolTip = ToolTip(
             self._pan_bt,
             text='Pan view\nPress and hold X/Y to fix the axis',
             bootstyle='light-inverse'
@@ -3862,7 +4252,7 @@ class _Toolbar(_BaseWidgetWrapper):
         x += self._pan_bt.winfo_reqwidth() + sum(self._to_px(padx))
         
         padx = ('3p', '0p')
-        self._zoom_bt = ttk.Checkbutton(
+        self._zoom_bt: tb.Checkbutton = tb.Checkbutton(
             frame,
             text='Zoom',
             variable=self._var_mode,
@@ -3872,47 +4262,46 @@ class _Toolbar(_BaseWidgetWrapper):
             takefocus=False
         )
         self._zoom_bt.pack(side='left', padx=padx)
-        self._zoom_tt = ToolTip(
+        self._zoom_tt: ToolTip = ToolTip(
             self._zoom_bt,
             text='Zoom to rectangle\nPress and hold X/Y to fix the axis',
             bootstyle='light-inverse'
         )
         x += self._zoom_bt.winfo_reqwidth() + sum(self._to_px(padx))
         
-        placeholder = tk.Label(frame, text=' \n ', font='Courier')
+        placeholder: tk.Label = tk.Label(frame, text=' \n ', font='Courier')
         placeholder.pack(side='left')
         x += placeholder.winfo_reqwidth()
         
-        self._xyz_lb = tk.Label(
+        self._xyz_lb: tk.Label = tk.Label(
             frame, textvariable=var_coord, justify='left', font='Courier'
         )
         self._xyz_lb.place(x=x+1, y=0)  # use `place` to prevent plots from
          # automatically being resized
     
-    def _on_destroy(self, event: tk.Event | None = None):
+    def _on_destroy(self, event: tk.Event) -> None:
         if event.widget is not self:
             return
         self._var_mode.set('none')
         super()._on_destroy(event)
     
-    def update_theme(self):
-        super().update_theme()
+    def update_theme(self) -> None:
         text_color = self._default_style["text"]["color"]
         self._xyz_lb.configure(fg=text_color)
     
-    def draw(self):
+    def draw(self) -> None:
         # Update facecolor
         default_color = self._default_style["frame.cover.polygon"]["facecolor"]
         bg = default_color if self._req_facecolor is None else self._req_facecolor
-        self._tkwidget.configure(background=bg)
+        self._widget.configure(background=bg)
         self._xyz_lb.configure(background=bg)
     
     def get_facecolor(self) -> str:
-        return self._tkwidget.cget('background')
+        return self._widget.cget('background')
     
-    def _on_mode_changed(self, *args):
-        fig = self._figure
-        org_cursors = self._org_cursors
+    def _on_mode_changed(self, *_) -> None:
+        fig = self.figure
+        original_cursors = self._original_cursors
         plot_bindings = self._plot_bindings
         mode = self._var_mode
         prev_mode, new_mode = mode.previous_value, mode.get()
@@ -3925,8 +4314,8 @@ class _Toolbar(_BaseWidgetWrapper):
         if prev_mode != 'none':
             for plot in fig._plots.flat:
                 # Restore the old cursor
-                canvas = plot._tkwidget
-                canvas.configure(cursor=org_cursors[plot])
+                canvas = plot._widget
+                canvas.configure(cursor=original_cursors[plot])
                 
                 # Unbind mouse callbacks
                 bindings = plot_bindings[plot]
@@ -3939,7 +4328,7 @@ class _Toolbar(_BaseWidgetWrapper):
                 plot._veil.set_state('hidden')
                 plot._veil.draw()
             
-            org_cursors.clear()
+            original_cursors.clear()
             
             # Hide rubberband
             if (plot := self._active_plot):
@@ -3949,12 +4338,13 @@ class _Toolbar(_BaseWidgetWrapper):
             
             self._clear_navigating_states()
         
-        assert not org_cursors, org_cursors
+        assert not original_cursors, original_cursors
         
         if new_mode == 'none':
             return
         
         # Start pan or zoom mode
+        assert new_mode in ('pan', 'zoom'), new_mode
         if new_mode == 'pan':
             on_press, on_motion, on_release = (
                 self._pan_on_leftpress,
@@ -3973,8 +4363,8 @@ class _Toolbar(_BaseWidgetWrapper):
             assert plot not in plot_bindings, (plot, plot_bindings)
             
             # Apply new cursor
-            canvas = plot._tkwidget
-            org_cursors[plot] = canvas.cget('cursor')
+            canvas = plot._widget
+            original_cursors[plot] = canvas.cget('cursor')
             canvas.configure(cursor=new_cursor)
             
             # Bind motion callbacks
@@ -3988,9 +4378,9 @@ class _Toolbar(_BaseWidgetWrapper):
             plot._veil.set_state('normal')
             plot._veil.draw()
     
-    def _update_history(self):
+    def _update_history(self) -> None:
         # Append current limits
-        fig = self._figure
+        fig = self.figure
         history = fig._history
         
         # Drop the views after current step
@@ -4000,7 +4390,7 @@ class _Toolbar(_BaseWidgetWrapper):
         viewset = _ViewSet(
             _PlotView(
                 plot,
-                { s: plot._get_ticks(s).get_limits() for s in 'rblt' }
+                { s: plot._get_ticks(s).get_limits() for s in _AXISSIDES }
             )
             for plot in fig._plots.flat
         )
@@ -4009,8 +4399,8 @@ class _Toolbar(_BaseWidgetWrapper):
         if not history or viewset != history[-1]:
             history.add(viewset)
     
-    def _home_view(self):
-        fig = self._figure
+    def _home_view(self) -> None:
+        fig = self.figure
         history = fig._history
         autoscale = fig._keypress["a"]
         
@@ -4022,7 +4412,7 @@ class _Toolbar(_BaseWidgetWrapper):
         if autoscale:
             limits, margins = ((None, None), (None, None))
             for plot in fig._plots.flat:
-                for side in 'rblt':
+                for side in _AXISSIDES:
                     plot._get_ticks(side)._set_limits(*limits, margins)
         else:
             # Restore with their first views
@@ -4044,8 +4434,8 @@ class _Toolbar(_BaseWidgetWrapper):
         # Update history
         self._update_history()
     
-    def _prev_view(self):
-        fig = self._figure
+    def _prev_view(self) -> None:
+        fig = self.figure
         history = fig._history
         
         # Initialize history if not exists
@@ -4061,8 +4451,8 @@ class _Toolbar(_BaseWidgetWrapper):
                 plot._get_ticks(side)._set_limits(*limits, margins)
         fig.draw()
     
-    def _next_view(self):
-        fig = self._figure
+    def _next_view(self) -> None:
+        fig = self.figure
         history = fig._history
         
         # Initialize history if not exists
@@ -4078,14 +4468,15 @@ class _Toolbar(_BaseWidgetWrapper):
                 plot._get_ticks(side)._set_limits(*limits, margins)
         fig.draw()
     
-    def _pan_on_leftpress(self, event: tk.Event):
-        plot = self._figure._hovered_plot
-        canvas = plot._tkwidget
+    def _pan_on_leftpress(self, event: tk.Event) -> None:
+        assert (plot := self.figure._hovered_plot) is not None, plot
+        
+        canvas = plot._widget
         if not (movable_oids := canvas.find_withtag('movable=True')):
             return
         
         # Get the anchor point (the lowest item in the stacking list)
-        x1, y1, _, _ = canvas.bbox(movable_oids[0])
+        x1, y1, _x2, _y2 = canvas.bbox(movable_oids[0])
         
         # Initialize the states
         self._update_history()
@@ -4093,37 +4484,40 @@ class _Toolbar(_BaseWidgetWrapper):
         self._motion_start = (event.x, event.y)
         self._anchor_start = (x1, y1)
     
-    def _pan_on_leftmotion(self, event: tk.Event):
-        if not (plot := self._active_plot):
-            return
+    def _pan_on_leftmotion(self, event: tk.Event) -> None:
+        assert (plot := self._active_plot) is not None, plot
+        assert (motion_start := self._motion_start) is not None, motion_start
+        assert (anchor_start := self._anchor_start) is not None, anchor_start
         
         # Determine current pan mode
-        keypress = self._figure._keypress
+        keypress = self.figure._keypress
         along_x = keypress["x"]
         along_y = keypress["y"]
         if not along_x and not along_y:
             along_x = along_y = True
         
         # Calculate the amounts of offsets
-        start_x, start_y = self._motion_start
-        anchor_x, anchor_y = self._anchor_start
+        start_x, start_y = motion_start
+        anchor_x, anchor_y = anchor_start
         dx = event.x - start_x if along_x else 0
         dy = event.y - start_y if along_y else 0
         x1, y1 = (anchor_x + dx, anchor_y + dy)
         
         # Update movable artists
-        plot._tkwidget.moveto('movable=True', x1, y1)
+        plot._widget.moveto('movable=True', x1, y1)
         
         # Update the states
         self._pan_offsets = (dx, dy)
     
-    def _pan_on_leftrelease(self, event: tk.Event):
-        if not (plot := self._active_plot) or not (offsets := self._pan_offsets):
+    def _pan_on_leftrelease(self, event: tk.Event | None = None) -> None:
+        assert (plot := self._active_plot) is not None, plot
+        
+        if not self._pan_offsets:
             self._clear_navigating_states()
             return
         
         # Calculate the amounts of mouse offsets
-        dx, dy = offsets
+        dx, dy = self._pan_offsets
         cbounds = plot._cbounds
         cx12 = np.sort(cbounds["b"])
         cy12 = np.sort(cbounds["l"])
@@ -4134,9 +4528,10 @@ class _Toolbar(_BaseWidgetWrapper):
         self._navigate_on_leftrelease((cx1, cy1, cx2, cy2))
         self._clear_navigating_states()
     
-    def _zoom_on_leftpress(self, event: tk.Event):
+    def _zoom_on_leftpress(self, event: tk.Event) -> None:
+        assert (plot := self.figure._hovered_plot) is not None, plot
+        
         self._update_history()
-        plot = self._figure._hovered_plot
         
         # Calculate rubberband coordinates
         cbounds = plot._cbounds
@@ -4154,12 +4549,14 @@ class _Toolbar(_BaseWidgetWrapper):
         self._active_plot = plot
         self._motion_start = (x, y)
     
-    def _zoom_on_leftmotion(self, event: tk.Event):
-        plot = self._active_plot
-        x1, y1 = self._motion_start
+    def _zoom_on_leftmotion(self, event: tk.Event) -> None:
+        assert (plot := self._active_plot) is not None, plot
+        assert (motion_start := self._motion_start) is not None, motion_start
+        
+        x1, y1 = motion_start
         
         # Determine current pan mode
-        keypress = self._figure._keypress
+        keypress = self.figure._keypress
         along_x = keypress["x"]
         along_y = keypress["y"]
         if not along_x and not along_y:
@@ -4171,12 +4568,12 @@ class _Toolbar(_BaseWidgetWrapper):
         ylimits = np.sort(cbounds["l"])
         if along_x:
             x = np.clip(event.x, *xlimits)
-            x1, x2 = np.sort([x1, x])
+            x1, x2 = sorted([x1, x])
         else:
             x1, x2 = xlimits
         if along_y:
             y = np.clip(event.y, *ylimits)
-            y1, y2 = np.sort([y1, y])
+            y1, y2 = sorted([y1, y])
         else:
             y1, y2 = ylimits
         
@@ -4188,13 +4585,10 @@ class _Toolbar(_BaseWidgetWrapper):
         # Update the states
         self._zoom_box = (x1, y1, x2, y2)
     
-    def _zoom_on_leftrelease(self, event: tk.Event):
-        if not (plot := self._active_plot):
-            self._clear_navigating_states()
-            return
+    def _zoom_on_leftrelease(self, event: tk.Event | None = None) -> None:
+        assert (plot := self._active_plot) is not None, plot
         
         # Hide rubberband
-        plot = self._active_plot
         rubberband = plot._rubberband
         rubberband.set_state('hidden')
         rubberband.draw()
@@ -4206,16 +4600,21 @@ class _Toolbar(_BaseWidgetWrapper):
         self._navigate_on_leftrelease(box)
         self._clear_navigating_states()
     
-    def _navigate_on_leftrelease(self, cbounds: tuple[Int, Int, Int, Int]):
-        plot = self._active_plot
+    def _navigate_on_leftrelease(
+        self, cbounds: tuple[Int, Int, Int, Int]
+    ) -> None:
+        assert (plot := self._active_plot) is not None, plot
+        
         cx1, cy1, cx2, cy2 = cbounds
         
         for side, tf in plot._transforms.items():
             # Calculate canvas limits from cbounds and margins
             ticks = plot._get_ticks(side)
-            _, [mrg1, mrg2] = ticks.get_limits()
-            c1, c2 = [cx1, cx2] if side in 'bt' else [cy1, cy2]
-            c12 = np.array([c1+mrg1, c2-mrg2])
+            _limits, (marg1, marg2) = ticks.get_limits()
+            assert isinstance(marg1, _IntFloat), marg1
+            assert isinstance(marg2, _IntFloat), marg2
+            c1, c2 = [cx1, cx2] if side in _XAXISSIDES else [cy1, cy2]
+            c12 = np.array([c1+marg1, c2-marg2])
             if c12[0] > c12[1]:
                 c12 = np.array([c1, c2])
             
@@ -4236,7 +4635,7 @@ class _Toolbar(_BaseWidgetWrapper):
         # Update history
         self._update_history()
     
-    def _clear_navigating_states(self):
+    def _clear_navigating_states(self) -> None:
         self._active_plot = None
         self._motion_start = None
         self._anchor_start = None
@@ -4245,19 +4644,21 @@ class _Toolbar(_BaseWidgetWrapper):
 
 
 # =============================================================================
-# ---- Figure Widgets
+# MARK: Figure Widget
 # =============================================================================
 class Figure(UndockedFrame):
+    _root: Callable[[], tb.Window]
+    
     def __init__(
-            self,
-            master: tk.Misc,
-            suptitle: str = '',
-            toolbar: bool = True,
-            width: Dimension | None = None,
-            height: Dimension | None = None,
-            padx: Dimension = '6p',
-            pady: Dimension = '6p',
-            **kwargs
+        self,
+        master: tk.Misc,
+        suptitle: str = '',
+        toolbar: bool = True,
+        width: ScreenUnits | None = None,
+        height: ScreenUnits | None = None,
+        padx: ScreenUnits = '6p',
+        pady: ScreenUnits = '6p',
+        **kwargs
     ):
         window_title = suptitle or 'Figure'
         super().__init__(
@@ -4265,9 +4666,10 @@ class Figure(UndockedFrame):
         )
         
         self._initialized: bool = False
-        self._req_size: tuple[Int | None, Int | None] = (None, None)
+        self._req_size: tuple[ScreenUnits | None, ScreenUnits | None] \
+            = (None, None)
         self._req_facecolor: str | None = None
-        self._plots: NDArray[_Plot] = np.array([], dtype=object)
+        self._plots: NDArray[Any] = np.array([], dtype=object)
         self._hovered_plot: _Plot | None = None
         self._draw_idle_id: str = 'after#'
         self._history: _ViewSetHistory = _ViewSetHistory(self)
@@ -4295,34 +4697,43 @@ class Figure(UndockedFrame):
         self.focus_set()
         self.after_idle(self._initialize)
     
-    def _to_px(self, dimension: Dimension) -> float | tuple[float, ...]:
-        return _to_px(self._root(), dimension)
+    @overload
+    def _to_px(self, dimension: ScreenUnits) -> int: ...
+    @overload
+    def _to_px(self, dimension: None) -> None: ...
+    @overload
+    def _to_px(self, dimension: tuple[ScreenUnits, ...]) -> tuple[int, ...]: ...
+    @overload
+    def _to_px(
+        self, dimension: tuple[ScreenUnits | None, ...]
+    ) -> tuple[int | None, ...]: ...
+    def _to_px(self, dimension):
+        return to_pixels(self._root(), dimension)
     
-    def _initialize(self):
+    def _initialize(self) -> None:
         if hasattr(self, '_suptitle'):
             self._suptitle.draw()
         self._initialized = True
     
-    def _set_hovered_plot(self, plot: _Plot | None = None):
-        assert isinstance(plot, (_Plot, type(None))), plot
+    def _set_hovered_plot(self, plot: _Plot | None = None) -> None:
+        assert isinstance(plot, (_Plot, NoneType)), plot
         self._hovered_plot = plot
     
-    def _unset_hovered_plot(self, plot: _Plot):
+    def _unset_hovered_plot(self, plot: _Plot) -> None:
         assert isinstance(plot, _Plot), plot
         if self._hovered_plot == plot:
             self._hovered_plot = None
     
-    def _on_destroy(self, event: tk.Event):
-        if event.widget is not self:
-            return
-        _cleanup_tk_attributes(self)
+    def _on_destroy(self, event: tk.Event) -> None:
+        if event.widget is self:
+            _cleanup_tk_attributes(self)
     
-    def _on_theme_changed(self, event: tk.Event):
+    def _on_theme_changed(self, event: tk.Event | None = None) -> None:
         self.update_theme()
         if self._initialized:
             self.draw_idle()
     
-    def _on_key(self, event: tk.Event):
+    def _on_key(self, event: tk.Event) -> None:
         event_type = getattr(event.type, 'name', event.type)
         assert event_type in ('KeyPress', 'KeyRelease'), event
         
@@ -4330,31 +4741,35 @@ class Figure(UndockedFrame):
         if (key := event.keysym.lower()) in self._keypress:
             self._keypress[key] = event_type == 'KeyPress'
     
-    def update_theme(self):
-        self._default_style = deepcopy(STYLES[self._root().style.theme.type])
+    def update_theme(self) -> None:
+        assert isinstance(theme := self._root().style.theme, ThemeDefinition)
+        self._default_style = deepcopy(STYLES[theme.type])
         
         # Update undock button
-        id_ = str(id(self))
-        if not (udbt_style := self.undock_button["style"]).startswith(id_):
-            udbt_style = f'{id(self)}.{udbt_style}'
-        default = self._default_style["frame.cover.polygon"]["facecolor"]
-        udbt_bg = default if self._req_facecolor is None else self._req_facecolor
-        self.undock_button.configure(style=udbt_style)
-        style = self._root().style
-        style._build_configure(
-            udbt_style,
-            **dict.fromkeys(
-                ['background', 'bordercolor', 'darkcolor', 'lightcolor'],
-                udbt_bg
+        if self.undock_button:
+            id_ = str(id(self))
+            if not (udbt_style := self.undock_button["style"]).startswith(id_):
+                udbt_style = f'{id(self)}.{udbt_style}'
+            default = self._default_style["frame.cover.polygon"]["facecolor"]
+            udbt_bg = (
+                default if self._req_facecolor is None else self._req_facecolor
             )
-        )
-        style.map(
-            udbt_style,
-            **dict.fromkeys(
-                ['background', 'bordercolor', 'darkcolor', 'lightcolor'],
-                []
+            self.undock_button.configure(style=udbt_style)
+            style = self._root().style
+            style._build_configure(
+                udbt_style,
+                background=udbt_bg,
+                bordercolor=udbt_bg,
+                darkcolor=udbt_bg,
+                lightcolor=udbt_bg
             )
-        )
+            style.map(
+                udbt_style,
+                background=[],
+                bordercolor=[],
+                darkcolor=[],
+                lightcolor=[]
+            )
         
         # Update suptitle
         if hasattr(self, '_suptitle'):
@@ -4368,7 +4783,7 @@ class Figure(UndockedFrame):
         if hasattr(self, '_toolbar'):
             self._toolbar.update_theme()
     
-    def draw(self):
+    def draw(self) -> None:
         # Initialization
         if not self._initialized:
             self._initialize()
@@ -4390,19 +4805,19 @@ class Figure(UndockedFrame):
         if hasattr(self, '_toolbar'):
             self._toolbar.draw()
     
-    def draw_idle(self):
+    def draw_idle(self) -> None:
         self.after_cancel(self._draw_idle_id)
         self._draw_idle_id = self.after_idle(self.draw)
     
     def set_size(
-            self,
-            width: Dimension | None = None,
-            height: Dimension | None = None
-    ):
+        self,
+        width: ScreenUnits | None = None,
+        height: ScreenUnits | None = None
+    ) -> None:
         if width is not None:
-            self._req_size[0] = width
+            self._req_size = (width, self._req_size[1])
         if height is not None:
-            self._req_size[1] = height
+            self._req_size = (self._req_size[0], height)
         
         default_size = self._default_style["size"]
         new_size = tuple(
@@ -4414,11 +4829,11 @@ class Figure(UndockedFrame):
         if new_size != old_size:
             self.configure(width=new_size[0], height=new_size[1])
     
-    def get_size(self) -> tuple[Int, Int]:
+    def get_size(self) -> tuple[int, int]:
         return (self.winfo_reqwidth(), self.winfo_reqheight())
     
-    def set_facecolor(self, color: str | None = None):
-        assert isinstance(color, (str, type(None))), color
+    def set_facecolor(self, color: str | None = None) -> None:
+        assert isinstance(color, (str, NoneType)), color
         
         if color is not None:
             self._req_facecolor = color
@@ -4435,29 +4850,63 @@ class Figure(UndockedFrame):
     def get_facecolor(self) -> str:
         return self.cget('background')
     
+    @overload
     def set_suptitle(
-            self,
-            text: str | None = None,
-            color: str | None = None,
-            angle: IntFloat | None = None,
-            family: str | None = None,
-            size: Int | None = None,
-            weight: str | None = None,
-            slant: str | None = None,
-            underline: bool | None = None,
-            overstrike: bool | None = None,
-            sticky: str | None = None,
-            padx: Dimension | tuple[Dimension, Dimension] | None = None,
-            pady: Dimension | tuple[Dimension, Dimension] | None = None,
-            facecolor: str | None = None
-    ) -> _Suptitle | None:
+        self,
+        text: str,  # enabled
+        color: str | None = None,
+        angle: IntFloat | None = None,
+        family: str | None = None,
+        size: Int | None = None,
+        weight: Literal['normal', 'bold'] | None = None,
+        slant: Literal['roman', 'italic'] | None = None,
+        underline: bool | None = None,
+        overstrike: bool | None = None,
+        sticky: str | None = None,
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        facecolor: str | None = None
+    ) -> _Suptitle: ...
+    @overload
+    def set_suptitle(
+        self,
+        text: None = None,  # disabled
+        color: str | None = None,
+        angle: IntFloat | None = None,
+        family: str | None = None,
+        size: Int | None = None,
+        weight: Literal['normal', 'bold'] | None = None,
+        slant: Literal['roman', 'italic'] | None = None,
+        underline: bool | None = None,
+        overstrike: bool | None = None,
+        sticky: str | None = None,
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] | None = None,
+        facecolor: str | None = None
+    ) -> None: ...
+    def set_suptitle(
+        self,
+        text = None,
+        color = None,
+        angle = None,
+        family = None,
+        size = None,
+        weight = None,
+        slant = None,
+        underline = None,
+        overstrike = None,
+        sticky = None,
+        padx = None,
+        pady = None,
+        facecolor = None
+    ):
         if text is not None:  # enable suptitle
             if not hasattr(self, '_suptitle'):
                 self._suptitle = _Suptitle(self)
-                self._suptitle._tkwidget.grid(row=0, column=0, sticky='we')
+                self._suptitle.widget.grid(row=0, column=0, sticky='we')
                 if self._plots.size:
-                    n_rows, n_cols = self._plots.shape
-                    self._suptitle._tkwidget.grid(columnspan=n_cols)
+                    _n_rows, n_cols = self._plots.shape
+                    self._suptitle.widget.grid(columnspan=n_cols)
             self._suptitle.set_facecolor(color=facecolor)
             self._suptitle.set_style(
                 text=text,
@@ -4483,60 +4932,67 @@ class Figure(UndockedFrame):
         
         # Disable suptitle
         if hasattr(self, '_suptitle'):
-            self._suptitle._tkwidget.destroy()
+            self._suptitle.widget.destroy()
             delattr(self, '_suptitle')
     
-    def get_suptitle(self) -> _Suptitle:
+    def get_suptitle(self):
         return self._suptitle
     
     def set_plots(
-            self,
-            n_rows: Int = 1,
-            n_cols: Int = 1,
-            width_ratios: list[Int] = [],
-            height_ratios: list[Int] = [],
-            padx: Dimension | tuple[Dimension, Dimension] = ('0p', '0p'),
-            pady: Dimension | tuple[Dimension, Dimension] = ('0p', '0p')
-    ) -> NDArray[_Plot] | _Plot:
-        assert isinstance(n_rows, Int) and n_rows >= 1, n_rows
-        assert isinstance(n_cols, Int) and n_cols >= 1, n_cols
-        assert isinstance(width_ratios, list), width_ratios
-        assert all( isinstance(r, Int) for r in width_ratios ), width_ratios
+        self,
+        n_rows: Int = 1,
+        n_cols: Int = 1,
+        width_ratios: tuple[Int, ...] = (),
+        height_ratios: tuple[Int, ...] = (),
+        padx: ScreenUnits | tuple[ScreenUnits, ScreenUnits] = ('0p', '0p'),
+        pady: ScreenUnits | tuple[ScreenUnits, ScreenUnits] = ('0p', '0p')
+    ) -> NDArray[Any] | _Plot:
+        assert isinstance(n_rows, _Int) and n_rows >= 1, n_rows
+        assert isinstance(n_cols, _Int) and n_cols >= 1, n_cols
+        assert isinstance(width_ratios, tuple), width_ratios
+        assert all( isinstance(r, _Int) for r in width_ratios ), width_ratios
         assert all( r >= 0 for r in width_ratios ), width_ratios
         assert len(width_ratios) in (0, n_cols), (n_cols, width_ratios)
-        assert isinstance(height_ratios, list), height_ratios
-        assert all( isinstance(r, Int) for r in height_ratios ), height_ratios
+        assert isinstance(height_ratios, tuple), height_ratios
+        assert all( isinstance(r, _Int) for r in height_ratios ), height_ratios
         assert all( r >= 0 for r in height_ratios ), height_ratios
         assert len(height_ratios) in (0, n_rows), (n_rows, height_ratios)
         
-        width_ratios = width_ratios or [1] * n_cols
-        height_ratios = height_ratios or [1] * n_rows
+        n_rows, n_cols = int(n_rows), int(n_cols)
+        width_ratios = cast(
+            tuple[int, ...],
+            tuple(map(int, width_ratios)) or (1,) * n_cols
+        )
+        height_ratios = cast(
+            tuple[int, ...],
+            tuple(map(int, height_ratios)) or (1,) * n_rows
+        )
         
         # Clean up old plots
         for r, row in enumerate(self._plots):
             for c, plot in enumerate(row):
-                plot._tkwidget.destroy()
+                plot.widget.destroy()
                 self.grid_columnconfigure(c, weight=0)
             self.grid_rowconfigure(r, weight=0)
         self._history.clear()
         
         # Update suptitle's position
         if hasattr(self, '_suptitle'):
-            self._suptitle._tkwidget.grid(columnspan=n_cols)
+            self._suptitle.widget.grid(columnspan=n_cols)
         
         # Update toolbar's position
         if hasattr(self, '_toolbar'):
-            self._toolbar._tkwidget.grid(row=n_rows+1, columnspan=n_cols)
+            self._toolbar.widget.grid(row=n_rows+1, columnspan=n_cols)
         
         # Create plots
-        self._plots: NDArray[_Plot] = np.array([
-            [ _Plot(self) for c in range(n_cols) ] for r in range(n_rows)
+        self._plots = np.array([
+            [ _Plot(self) for _c in range(n_cols) ] for _r in range(n_rows)
         ])
         grid_kw = {"sticky": 'nesw', "padx": padx, "pady": pady}
         for r, row in enumerate(self._plots, 1):  # plots start from 2nd row
             for c, plot in enumerate(row):
-                plot._tkwidget.grid(row=r, column=c, **grid_kw)
-                plot._tkwidget.configure(width=0, height=0)  # this makes all space
+                plot.widget.grid(row=r, column=c, **grid_kw)
+                plot.widget.configure(width=0, height=0)  # this makes all space
                  # become extra space which will be distributed to each row and
                  # column with each weight specified in `grid_rowconfigure` and
                  # `grid_columnconfigure` respectively.
@@ -4553,7 +5009,7 @@ class Figure(UndockedFrame):
             return self._plots
         return self._plots.ravel()  # 1-D array of plots
     
-    def get_plots(self) -> NDArray[_Plot] | _Plot:
+    def get_plots(self) -> NDArray[Any] | _Plot:
         n_rows, n_cols = self._plots.shape
         
         if n_rows == 1 and n_cols == 1:  # single plot
@@ -4562,24 +5018,28 @@ class Figure(UndockedFrame):
             return self._plots
         return self._plots.ravel()  # 1-D array of plots
     
-    def set_toolbar(self, enable: bool = True) -> _Toolbar | None:
+    @overload
+    def set_toolbar(self, enable: Literal[True] = True) -> _Toolbar: ...
+    @overload
+    def set_toolbar(self, enable: Literal[False]) -> None: ...
+    def set_toolbar(self, enable=True):
         if enable and not hasattr(self, '_toolbar'):
             self._toolbar = _Toolbar(self, var_coord=self._var_coord)
             kw = {"column": 0, "sticky": 'we', "padx": 9}
             if self._plots.size:
                 n_rows, n_cols = self._plots.shape
-                self._toolbar._tkwidget.grid(row=n_rows+1, columnspan=n_cols, **kw)
+                self._toolbar.widget.grid(row=n_rows+1, columnspan=n_cols, **kw)
             else:
-                self._toolbar._tkwidget.grid(row=1, **kw)
+                self._toolbar.widget.grid(row=1, **kw)
                  # the toolbar will be `grid` again when `set_plots` is called
                 self.grid_columnconfigure(0, weight=1)
         elif not enable and hasattr(self, '_toolbar'):
-            self._toolbar._tkwidget.destroy()
+            self._toolbar.widget.destroy()
             delattr(self, '_toolbar')
         
         if enable:
             return self._toolbar
     
-    def get_toolbar(self) -> _Toolbar:
+    def get_toolbar(self):
         return self._toolbar
 

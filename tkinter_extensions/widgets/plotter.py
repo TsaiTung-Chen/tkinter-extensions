@@ -1,18 +1,37 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Created on Mon May 22 22:35:24 2023
-
 @author: tungchentsai
+
+DEPRECATED!
+
+Replace the tk widgets in NavigationToolbar2Tk with ttk widgets.
+
+This only works in matplotlib version greater than or equal to 3.8.4 and lower
+than 3.9.0. This module will be removed since the upstream matplotlib widgets
+(`NavitationToolbar2Tk` and `ToolTip`) vary across different matplotlib versions
+and we are not planning to support every version of the widgets with different
+code.
 """
 
+import warnings
+
+warnings.warn(
+    f'Module `{__name__}` will be removed since the upstream matplotlib '
+    'widgets (`NavitationToolbar2Tk` and `ToolTip`) vary across different '
+    'matplotlib versions and we are not planning to support every version of '
+    'the widgets with different code.',
+    DeprecationWarning,
+    stacklevel=2
+)
+
 import tkinter as tk
+from collections.abc import Callable
 from copy import deepcopy
 from functools import wraps
 from contextlib import contextmanager
 
 from PIL import Image
-import ttkbootstrap as ttk
+import ttkbootstrap as tb
 from matplotlib import cbook
 import matplotlib.pyplot as plt
 from matplotlib.backend_bases import _Mode, NavigationToolbar2
@@ -20,12 +39,12 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.backends._backend_tk import NavigationToolbar2Tk, ToolTip
 
 from tkinter_extensions import variables as vrb
-from tkinter_extensions.constants import DRAWSTARTED, DRAWENDED
+from tkinter_extensions._constants import DRAWSTARTED, DRAWENDED
 from tkinter_extensions.utils import create_image_pair, quit_if_all_closed, defer
 from tkinter_extensions.widgets._others import UndockedFrame
 from tkinter_extensions.widgets._matplotlib_config import RC
 # =============================================================================
-# ---- Functions
+# MARK: Functions
 # =============================================================================
 @contextmanager
 def rc_context(rc: dict | None = None, fname=None):
@@ -38,12 +57,14 @@ def rc_context(rc: dict | None = None, fname=None):
 
 
 def use_rc_style(rc: dict | None = None, fname=None):
-    def _decorator(func):
+    def _decorator[**P, R](func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
-        def _wrapper(*args, **kwargs):
+        def _wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             with rc_context(rc, fname):
                 return func(*args, **kwargs)
+        #> end of _wrapper()
         return _wrapper
+    #> end of _decorator()
     
     return _decorator
 
@@ -137,7 +158,7 @@ def autoscale(ax: plt.Axes,
 
 
 # =============================================================================
-# ---- Classes
+# MARK: Classes
 # =============================================================================
 class PlotterFigureCanvasTkAgg(FigureCanvasTkAgg):
     def __init__(self, *args, **kwargs):
@@ -168,7 +189,7 @@ class ToolTipTtk(ToolTip):
         x, y, _, _ = self.widget.bbox('insert')
         x = x + self.widget.winfo_rootx() + self.widget.winfo_width()
         y = y + self.widget.winfo_rooty()
-        self.tipwindow = tw = ttk.Toplevel(self.widget)
+        self.tipwindow = tw = tb.Toplevel(self.widget)
         try:
             # For Mac OS
             tw.tk.call('::tk::unsupported::MacWindowStyle',
@@ -176,9 +197,9 @@ class ToolTipTtk(ToolTip):
                        'help', 'noActivates')
         except tk.TclError:
             pass
-        label = ttk.Label(tw, text=self.text, justify='left')
+        label = tb.Label(tw, text=self.text, justify='left')
         label.pack(padx=1, pady=1)
-        foreground = ttk.Style().lookup(label["style"], 'foreground')
+        foreground = tb.Style().lookup(label["style"], 'foreground')
         tw.configure(background=foreground)  # border color
         
         # Override redirect at the last part and iconify-deiconify to prevent
@@ -220,16 +241,16 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
                 if tooltip_text is not None:
                     ToolTipTtk.createToolTip(button, tooltip_text)
         
-        style = ttk.Style()
+        style = tb.Style()
         style.configure('NavigationToolbar.TLabel', font=self._label_font)
         
-        label = ttk.Label(master=self,
+        label = tb.Label(master=self,
                           text='\N{NO-BREAK SPACE}\n\N{NO-BREAK SPACE}',
                           style='NavigationToolbar.TLabel')
         label.pack(side='right')
         
         self.message = vrb.StringVar(master=self)
-        self._message_label = ttk.Label(master=self,
+        self._message_label = tb.Label(master=self,
                                         textvariable=self.message,
                                         style='NavigationToolbar.TLabel')
         self._message_label.pack(side='right')
@@ -250,7 +271,7 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
     
     def _Button(self, text, image_file, toggle, command):
         if not toggle:
-            b = ttk.Button(
+            b = tb.Button(
                 master=self,
                 text=text,
                 command=command,
@@ -259,7 +280,7 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
             )
         else:
             var = vrb.IntVar(master=self)
-            b = ttk.Checkbutton(
+            b = tb.Checkbutton(
                 master=self,
                 text=text,
                 command=command,
@@ -271,7 +292,7 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
         b._image_file = image_file
         b.pack(side='left', padx=[0, 3])
         
-        style = ttk.Style()
+        style = tb.Style()
         style_name = f'{text}.NavigationToolbar.{b["style"]}'
         style.configure(style_name, font=self._label_font)
         b.configure(style=style_name)
@@ -300,7 +321,7 @@ class NavigationToolbar2Ttk(NavigationToolbar2Tk):
         
         # Set dynamic image icon for the button
         image_mapping = [img_default]
-        style = ttk.Style()
+        style = tb.Style()
         parent_style = button["style"].rsplit('NavigationToolbar.', 1)[-1]
         for fg_settings in style.map(parent_style, 'foreground'):
             statespec = fg_settings[:-1]

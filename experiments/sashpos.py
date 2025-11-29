@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import tkinter_extensions.widgets as wid
 
 
-def sashpos(pw: ttk.Panedwindow, pane: tk.BaseWidget, width: int) -> int:
+def sashpos(pw: ttk.PanedWindow, pane: tk.BaseWidget, width: int) -> int:
     """
     Set the sash position
     Note that `pw.sashpos` does not work before the panedwindow and its
@@ -48,7 +48,7 @@ nb.pack(fill='both', expand=True)
 
 for i in range(2):
     # Notebook tab
-    pw = ttk.Panedwindow(nb, orient='horizontal')
+    pw = ttk.PanedWindow(nb, orient='horizontal')
     nb.add(pw, text=f'Tab {i}')
     nb.select(i)
     
@@ -59,7 +59,7 @@ for i in range(2):
     ttk.Button(left_pane, text='button left').pack(fill='x', expand=True)
     
     # Right pane
-    subpw = ttk.Panedwindow(pw, orient='horizontal')
+    subpw = ttk.PanedWindow(pw, orient='horizontal')
     pw.add(subpw)
     
     # Left subpane in the right pane

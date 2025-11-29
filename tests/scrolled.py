@@ -6,6 +6,7 @@ Created on Thu Jul 24 23:40:38 2025
 @author: tungchentsai
 """
 
+import tkinter as tk
 import ttkbootstrap as ttk
 
 from tkinter_extensions.utils import quit_if_all_closed
@@ -22,7 +23,7 @@ win1 = ttk.Toplevel(title='ScrolledText')
 win1.lift()
 
 st = ScrolledText(win1, autohide=True, wrap='none', readonly=True)
-st.insert('end', ttk.tk.__doc__)
+st.insert('end', str(tk.__doc__))
 st.pack(fill='both', expand=True)
 
 

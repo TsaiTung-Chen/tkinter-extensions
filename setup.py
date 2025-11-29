@@ -36,8 +36,8 @@ setup(
         'tkinter_extensions',
         'tkinter_extensions.*'
     ]),
-    install_requires=['ttkbootstrap<1.11', 'numpy>=2.0'],
-    python_requires='>=3.10',
+    install_requires=['packaging', 'ttkbootstrap<1.11', 'numpy>=2.0'],
+    python_requires='>=3.12',
     package_data={'': ['*.json']}
 )
 

@@ -1,20 +1,18 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Created on Sun Dec 11 19:18:31 2022
-
 @author: tungchentsai
 """
-
 import tkinter as tk
-import tkinter.font
-from typing import Callable
+from tkinter import font as tk_font
+from types import NoneType
+from collections.abc import Callable
 
 import ttkbootstrap as ttk
 from ttkbootstrap.icons import Icon
 from ttkbootstrap.dialogs import dialogs, colorchooser
 from ttkbootstrap.validation import validator, add_validation
 from ttkbootstrap.localization import MessageCatalog as MessageCatalog
+from ttkbootstrap.dialogs.colorchooser import ColorChoice
 
 from tkinter_extensions import utils
 from tkinter_extensions import variables as vrb
@@ -131,9 +129,10 @@ class ColorChooserDialog(_Positioned, colorchooser.ColorChooserDialog):
         
         # Remove the variable and set a new one with weak ref to the callback
         # to avoid circular refs
-        self.dropper.result = vrb.Variable()
+        self.dropper.result = vrb.StringVar()
         self.dropper.result.trace_add(
-            'write', self.trace_dropper_color, weak=True)
+            'write', self.trace_dropper_color, weak=True
+        )
 
 
 class FontDialog(_Positioned, dialogs.FontDialog):
@@ -144,7 +143,7 @@ class FontDialog(_Positioned, dialogs.FontDialog):
             initialvalue: tk.font.Font | None = None,
             scale:float=1.
     ):  # actual font size = int(option size * scale)
-        assert isinstance(initialvalue, (tk.font.Font, type(None))), initialvalue
+        assert isinstance(initialvalue, (tk.font.Font, NoneType)), initialvalue
         assert scale > 0, scale
         assert scale == 1 or hasattr(initialvalue, '_unscaled_size'), scale
         
@@ -160,15 +159,16 @@ class FontDialog(_Positioned, dialogs.FontDialog):
         self._style = ttk.Style()
         self._initialvalue: tk.font.Font = initialvalue.copy()  #EDITED
         self._actual = initialvalue.actual()
-        self._size = vrb.Variable(value=self._actual['size'])
-        self._family = vrb.Variable(value=self._actual['family'])
-        self._slant = vrb.Variable(value=self._actual['slant'])
-        self._weight = vrb.Variable(value=self._actual['weight'])
-        self._overstrike = vrb.Variable(value=self._actual['overstrike'])
-        self._underline = vrb.Variable(value=self._actual['underline'])
+        self._size = vrb.IntVar(value=self._actual['size'])
+        self._family = vrb.StringVar(value=self._actual['family'])
+        self._slant = vrb.StringVar(value=self._actual['slant'])
+        self._weight = vrb.StringVar(value=self._actual['weight'])
+        self._overstrike = vrb.StringVar(value=self._actual['overstrike'])
+        self._underline = vrb.StringVar(value=self._actual['underline'])
         self._preview_font = initialvalue.copy()  #EDITED
         self._preview_font._unscaled_size = getattr(  #EDITED
-            initialvalue, '_unscaled_size', initialvalue.actual('size'))
+            initialvalue, '_unscaled_size', initialvalue.actual('size')
+        )
         
         #EDITED: use weakref to avoid circular refs
         self._size.trace_add('write', self._update_font_preview, weak=True)
@@ -605,33 +605,42 @@ class Querybox:
     """
     @staticmethod
     def get_font(
-            parent=None, title='Font Selector', initialvalue=None, **kwargs
-    ):
+        parent=None, title='Font Selector', initialvalue=None, **kwargs
+    ) -> tk_font.Font | None:
         position = kwargs.pop('position', None)
         wait = kwargs.pop('wait', True)
         callback = kwargs.pop('callback', None)
         dialog = FontDialog(
-            parent=parent, title=title, initialvalue=initialvalue, **kwargs)
+            parent=parent, title=title, initialvalue=initialvalue, **kwargs
+        )
         dialog.show(position, wait=wait, callback=callback)
         
-        return dialog.result
+        result = dialog.result
+        assert isinstance(result, (tk_font.Font, NoneType)), result
+        
+        return result
     
     @staticmethod
     def get_color(
-            parent=None, title='Color Chooser', initialvalue=None, **kwargs):
+        parent=None, title='Color Chooser', initialvalue=None, **kwargs
+    ) -> ColorChoice | None:
         position = kwargs.pop('position', None)
         wait = kwargs.pop('wait', True)
         callback = kwargs.pop('callback', None)
         dialog = ColorChooserDialog(
-            parent=parent, title=title, initialvalue=initialvalue, **kwargs)
+            parent=parent, title=title, initialvalue=initialvalue, **kwargs
+        )
         dialog.show(position, wait=wait, callback=callback)
         
-        return dialog.result
+        result = dialog.result
+        assert isinstance(result, (ColorChoice, NoneType)), result
+        
+        return result
     
     @staticmethod
     def get_string(
         parent=None, title=' ', prompt='', initialvalue=None, **kwargs
-    ):
+    ) -> str | None:
         initialvalue = '' if initialvalue is None else initialvalue
         position = kwargs.pop('position', None)
         wait = kwargs.pop('wait', True)
@@ -640,7 +649,10 @@ class Querybox:
             prompt, title, initialvalue, parent=parent, **kwargs
         )
         dialog.show(position, wait=wait, callback=callback)
-        return dialog.result
+        result = dialog.result
+        assert isinstance(result, (str, NoneType)), result
+        
+        return result
     
     @staticmethod
     def get_integer(
@@ -651,7 +663,7 @@ class Querybox:
         minvalue=None,
         maxvalue=None,
         **kwargs,
-    ):
+    ) -> int | None:
         initialvalue = '' if initialvalue is None else initialvalue
         position = kwargs.pop('position', None)
         wait = kwargs.pop('wait', True)
@@ -667,8 +679,11 @@ class Querybox:
             **kwargs,
         )
         dialog.show(position, wait=wait, callback=callback)
-        return dialog.result
-
+        result = dialog.result
+        assert isinstance(result, (int, NoneType)), result
+        
+        return result
+    
     @staticmethod
     def get_float(
         parent=None,
@@ -678,7 +693,7 @@ class Querybox:
         minvalue=None,
         maxvalue=None,
         **kwargs,
-    ):
+    ) -> float | None:
         initialvalue = '' if initialvalue is None else initialvalue
         position = kwargs.pop('position', None)
         wait = kwargs.pop('wait', True)
@@ -694,5 +709,9 @@ class Querybox:
             **kwargs,
         )
         dialog.show(position, wait=wait, callback=callback)
-        return dialog.result
+        
+        result = dialog.result
+        assert isinstance(result, (float, NoneType)), result
+        
+        return result
 
